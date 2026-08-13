@@ -86,6 +86,11 @@ class ConsultSession:
     notes: list[str] = field(default_factory=list)
     #: stage group computed at the last update, if any
     stage_group: Optional[str] = None
+    #: a stage label the case arrived with (e.g. a referral letter saying
+    #: "IIIB" without a TNM triple). Kept separate from ``stage_group``, which
+    #: is what the engine computed — the two must not be confused, and the
+    #: label is never allowed to overwrite a computed value.
+    stage_group_label: Optional[str] = None
 
     # -- state ---------------------------------------------------------------
 
@@ -151,6 +156,7 @@ class ConsultSession:
                 extras[key] = value
         case = Case(
             case_id=self.case_id or f"consult-{self.session_id}",
+            stage_group=self.stage_group_label,
             presentation=self._render_presentation(),
             question=self.question or "",
             images=list(self.images),
@@ -158,6 +164,10 @@ class ConsultSession:
             **core,
         )
         return case
+
+    def can_be_answered(self) -> bool:
+        """Is there enough to route a case — a TNM triple or a stage label?"""
+        return self.staging_ready() or bool(self.stage_group_label)
 
     def _render_presentation(self) -> str:
         """Opening text plus a transcript of the interview, in order."""
@@ -187,6 +197,8 @@ class ConsultSession:
             if key in SLOTS_BY_KEY:
                 seeded[key] = value
         self.record(seeded, source="case", round_index=-1)
+        if case.stage_group and not self.stage_group_label:
+            self.stage_group_label = case.stage_group
         if case.presentation and not self.presentation:
             self.presentation = case.presentation
         if case.question and not self.question:
@@ -214,6 +226,7 @@ class ConsultSession:
             "known": dict(self.known),
             "provenance": dict(self.provenance),
             "stage_group": self.stage_group,
+            "stage_group_label": self.stage_group_label,
             "turns": [t.to_dict() for t in self.turns],
             "notes": list(self.notes),
             "outstanding": self.gaps(),
@@ -235,6 +248,7 @@ class ConsultSession:
             provenance=dict(data.get("provenance") or {}),
             notes=list(data.get("notes") or []),
             stage_group=data.get("stage_group"),
+            stage_group_label=data.get("stage_group_label"),
         )
         session.turns = [ConsultTurn.from_dict(t)
                          for t in (data.get("turns") or [])]

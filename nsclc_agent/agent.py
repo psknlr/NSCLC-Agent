@@ -671,7 +671,9 @@ class NSCLCAgent:
     def _refresh(self, session: ConsultSession) -> ConsultSession:
         """Re-stage on what is known and recompute the stopping condition."""
         session.stage_group = None
-        if session.staging_ready():
+        # A TNM triple stages deterministically; failing that, a stage label the
+        # case arrived with still tells the planner which band to weight by.
+        if session.staging_ready() or session.stage_group_label:
             stage_result, _ = self.resolve_stage(session.to_case())
             if stage_result is not None:
                 session.stage_group = stage_result.stage_group

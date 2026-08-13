@@ -283,3 +283,29 @@ def test_a_consult_starter_reaches_a_stage_through_the_interview(capsys):
     assert code == 0
     assert "Stage: IIIB" in out
     assert "Module: stage3b" in out
+
+
+def test_consult_accepts_a_case_with_only_a_stage_label(capsys, tmp_path):
+    case = tmp_path / "label_only.json"
+    case.write_text(json.dumps({
+        "id": "LABEL-ONLY", "stage_group": "IIIB",
+        "presentation": "Stage IIIB on the referral letter; TNM not recorded.",
+        "question": "pathway?",
+    }))
+    code, out, _ = run(capsys, "consult", "--no-interactive", "--lang", "en",
+                       "--dry-run", "--case", str(case))
+    assert code == 0
+    assert "Stage: IIIB" in out
+    assert "Module: stage3b" in out
+
+
+def test_a_resumed_session_keeps_its_language(capsys, tmp_path):
+    path = tmp_path / "s.json"
+    run(capsys, "consult", "--no-interactive", "--ask-only", "--lang", "en",
+        "--session", str(path), "--presentation", "68F LUL mass")
+    # Resume without --lang: the flag defaults to zh, the session must not.
+    code, out, _ = run(capsys, "consult", "--no-interactive", "--ask-only",
+                       "--session", str(path))
+    assert code == 0
+    assert "↳ why:" in out
+    assert "为什么问" not in out

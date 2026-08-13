@@ -241,10 +241,12 @@ def cmd_consult(args) -> int:
             break
         print(f"\n── round {session.round_index + 1}/{session.max_rounds} "
               f"─ stage so far: {session.stage_group or '(not yet stageable)'}")
+        # Label follows the *session's* language, not the flag: a resumed
+        # session keeps the language it was started in.
+        why_label = "为什么问" if session.lang == "zh" else "why"
         for i, q in enumerate(questions, 1):
             print(f"  {i}. {q['question']}")
-            print(f"     ↳ {'为什么问' if args.lang == 'zh' else 'why'}: "
-                  f"{q['why']}")
+            print(f"     ↳ {why_label}: {q['why']}")
         if scripted:
             reply = scripted.pop(0)
             print(f"  > {reply}")
@@ -279,10 +281,10 @@ def cmd_consult(args) -> int:
             print(json.dumps(session.to_dict(), ensure_ascii=False, indent=2))
         return 0
 
-    if not session.staging_ready() and not session.known.get("stage_group"):
+    if not session.can_be_answered():
         missing = ", ".join(session.missing_staging_descriptors())
-        print(f"\nCannot produce a recommendation: {missing} still unknown.",
-              file=sys.stderr)
+        print(f"\nCannot produce a recommendation: {missing} still unknown, "
+              f"and no stage label was supplied.", file=sys.stderr)
         return 1
 
     result = agent.finish_consult(session, provider=args.provider,

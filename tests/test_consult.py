@@ -377,3 +377,52 @@ def test_whole_body_workup_establishes_m0():
 def test_brain_imaging_alone_does_not_establish_m0():
     """A negative brain MRI excludes brain metastases, not bone or liver."""
     assert "m_category" not in extract_deterministic("brain MRI negative")[0]
+
+
+# --- stage labels without a TNM triple -------------------------------------
+
+def test_a_stage_label_survives_the_consultation(agent):
+    """A referral saying "IIIB" with no TNM must still be answerable.
+
+    Regression: the label was dropped when seeding a session from a case, so a
+    case that `run` handled fine became unanswerable through `consult`.
+    """
+    case = Case(case_id="ref", stage_group="IIIB",
+                presentation="Stage IIIB on the referral letter; TNM not recorded.")
+    session = agent.start_consult(case=case)
+    assert session.stage_group_label == "IIIB"
+    assert session.stage_group == "IIIB"      # resolved from the label
+    assert session.can_be_answered()
+    result = agent.finish_consult(session, dry_run=True)
+    assert result.module_key == "stage3b"
+    assert any("STAGE_FROM_LABEL" in f for f in result.flags)
+
+
+def test_a_label_does_not_masquerade_as_a_computed_stage(agent):
+    case = Case(stage_group="IIIB")
+    session = agent.start_consult(case=case)
+    # The planner still wants the descriptors the label cannot supply.
+    assert "t_category" in [q["key"] for q in session.ask()]
+    assert not session.staging_ready()
+
+
+def test_a_computed_stage_wins_over_a_stale_label(agent):
+    case = Case(stage_group="IIIA", t="T2b", n="N2b", m="M0")
+    session = agent.start_consult(case=case)
+    assert session.stage_group == "IIIB"
+    result = agent.finish_consult(session, dry_run=True)
+    assert result.staging["stage_group"] == "IIIB"
+    assert any("STAGE_MISMATCH" in f for f in result.flags)
+
+
+def test_stage_label_survives_serialisation(agent):
+    session = agent.start_consult(case=Case(stage_group="IVB"))
+    restored = ConsultSession.from_dict(
+        json.loads(json.dumps(session.to_dict(), ensure_ascii=False)))
+    assert restored.stage_group_label == "IVB"
+    assert restored.can_be_answered()
+
+
+def test_nothing_at_all_is_still_unanswerable(agent):
+    session = agent.start_consult(presentation="68F with a cough")
+    assert not session.can_be_answered()
