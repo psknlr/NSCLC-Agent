@@ -28,6 +28,20 @@ class Case:
     images: list[str] = field(default_factory=list)
     fields: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """Blank descriptors are *absent*, not malformed.
+
+        Without this, ``m=""`` and ``m="  "`` take different paths: the first
+        is falsy and becomes an assumed M0, the second reaches the staging
+        engine as an unparseable value and raises. Normalising here makes
+        "not supplied" mean one thing everywhere downstream.
+        """
+        for name in ("t", "n", "m", "stage_group", "case_id"):
+            value = getattr(self, name)
+            if isinstance(value, str):
+                stripped = value.strip()
+                setattr(self, name, stripped or None)
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Case":
         known = {

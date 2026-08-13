@@ -163,3 +163,27 @@ def test_routing_dict_is_serializable(agent):
     json.dumps(result.routing)
     result.routing["module_key"] = "tampered"
     assert result.module_key == "stage3b"
+
+
+# --- blank vs absent descriptors -------------------------------------------
+
+@pytest.mark.parametrize("blank", [None, "", "  ", "\t"])
+def test_blank_m_is_absent_not_malformed(agent, blank):
+    """"" and "  " must take the same path: absent, so M0 is assumed and said."""
+    result = agent.run(Case(t="T2b", n="N2b", m=blank), dry_run=True)
+    assert result.error is None
+    assert result.staging["stage_group"] == "IIIB"
+    assert any(f.startswith("M_ASSUMED_M0") for f in result.flags)
+
+
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_blank_t_is_unresolved_not_a_staging_error(agent, blank):
+    result = agent.run(Case(t=blank, n="N2b", m="M0"), dry_run=True)
+    assert any("STAGE_UNRESOLVED" in f for f in result.flags)
+
+
+def test_surrounding_whitespace_is_tolerated(agent):
+    result = agent.run(Case(t=" T2b ", n="N2b", m=" M0 ",
+                            stage_group="  IIIB  "), dry_run=True)
+    assert result.staging["stage_group"] == "IIIB"
+    assert not any("MISMATCH" in f for f in result.flags)
