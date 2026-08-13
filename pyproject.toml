@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nsclc-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "Evidence-based, stage-aware NSCLC decision-support agent for teaching and testing (educational use only)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,7 +24,8 @@ nsclc-agent = "nsclc_agent.cli:main"
 
 [tool.setuptools]
 packages = ["nsclc_agent", "nsclc_agent.providers", "nsclc_agent.staging",
-            "nsclc_agent.prompts"]
+            "nsclc_agent.prompts", "nsclc_agent.consult",
+            "nsclc_agent.evidence"]
 
 [tool.setuptools.package-data]
 "nsclc_agent.prompts" = ["*.md"]

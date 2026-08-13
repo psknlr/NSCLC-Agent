@@ -66,3 +66,32 @@ providers:
     base_url: https://api.minimaxi.com/v1
     api_key_env: MINIMAX_API_KEY
     group_id_env: MINIMAX_GROUP_ID   # optional; only if your tenant requires it
+
+# --------------------------------------------------------------------------
+# Evidence retrieval.
+#
+# Without this block NOTHING is retrieved: the protocol modules still emit
+# `tool_call` steps, but nobody executes them, so every PMID/NCT/hazard ratio
+# in the output is model recall. That state is not hidden — the run is flagged
+# EVIDENCE_NOT_RETRIEVED and the prompt instructs the model to label its
+# citations MODEL_RECALL_UNVERIFIED.
+#
+# With `type: pubmed`, queries derived from the *computed* stage and the
+# *known* facts run against NCBI E-utilities before the reasoning call, and the
+# real records are injected as citable, verified identifiers.
+# --------------------------------------------------------------------------
+evidence:
+  type: none               # none | pubmed
+  # type: pubmed
+  # email: you@example.org # NCBI asks callers to identify themselves
+  # api_key_env: NCBI_API_KEY   # optional; raises the anonymous rate limit
+  # years: 5               # restrict to the last N years (null = no limit)
+  # timeout: 20
+
+# --------------------------------------------------------------------------
+# Autonomous consultation (自主问诊) defaults, overridable per invocation.
+# --------------------------------------------------------------------------
+consult:
+  lang: zh                 # zh | en — question language and output language
+  max_rounds: 6            # stop asking after this many rounds
+  questions_per_round: 3   # how many questions to put in one turn

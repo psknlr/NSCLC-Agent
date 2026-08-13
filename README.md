@@ -2,13 +2,16 @@
 
 An **evidence-based, stage-aware decision-support agent for non-small cell lung
 cancer (NSCLC)**, built for **teaching, training-data generation, and model
-testing**. It pairs a **deterministic AJCC/UICC 9th-edition staging engine**
-with the stage-specific clinical protocol modules (v3.3, 2026-06) and a
-**pluggable LLM backend** that runs on **LiteLLM, Azure OpenAI, Poe, or
-MiniMax** (plus an offline mock). An optional **perception layer reads radiology
-films (读片)** through a vision model (e.g. **Gemini via the Poe API**) — it
-*proposes* radiographic TNM descriptors that flow into the deterministic engine,
-and never assigns the stage itself.
+testing**. It runs an **autonomous consultation (自主问诊)** that asks for what
+is missing — ordered by what each answer can still change — then hands the
+assembled case to a **deterministic AJCC/UICC 9th-edition staging engine**, the
+stage-specific clinical protocol modules, and a **pluggable LLM backend**
+(**LiteLLM, Azure OpenAI, Poe, MiniMax**, plus an offline mock). An optional
+**perception layer reads radiology films (读片)** through a vision model (e.g.
+**Gemini via the Poe API**) — it *proposes* radiographic TNM descriptors that
+flow into the deterministic engine, and never assigns the stage itself. An
+**evidence layer** retrieves the literature it cites, or records explicitly
+that it did not.
 
 > ⚠️ **Educational / research use only.** This is not a medical device. Output
 > must never be used for real patient care without review by a qualified
@@ -24,7 +27,13 @@ So the design **removes the model from that decision**:
 
 ```
           ┌──────────────────────────────────────────────────────────┐
- films ─▶ │ 0. Perception (optional) ── vision model (Gemini/Poe)     │
+  ask  ─▶ │ 0a. Consultation (自主问诊) ── deterministic VOI planner  │
+ (问诊)   │     asks the highest-value unknown, reads the reply,      │
+          │     stops when nothing left can change the answer         │
+          └───────────────────────────┬──────────────────────────────┘
+                                       ▼
+          ┌──────────────────────────────────────────────────────────┐
+ films ─▶ │ 0b. Perception (optional) ── vision model (Gemini/Poe)    │
  (读片)   │    reads films ──▶ PROPOSES cT/cN/cM  (never the stage)   │
           │    cross-checks or seeds the descriptors, flags mismatch  │
           └───────────────────────────┬──────────────────────────────┘
@@ -40,13 +49,20 @@ So the design **removes the model from that decision**:
           └───────────────────────────┬──────────────────────────────┘
                                        ▼
           ┌──────────────────────────────────────────────────────────┐
-          │ 3. Prompt assembly: module system prompt                  │
-          │    + injected, authoritative stage (model does not        │
-          │      re-derive it)  +  case + proposed findings (labeled) │
+          │ 3. Evidence retrieval ── queries built from the COMPUTED   │
+          │    stage (never from model output) ──▶ verified PMIDs, or  │
+          │    an explicit "nothing was retrieved" record              │
           └───────────────────────────┬──────────────────────────────┘
                                        ▼
           ┌──────────────────────────────────────────────────────────┐
-          │ 4. Provider layer ── LiteLLM / Azure / Poe / MiniMax /    │
+          │ 4. Prompt assembly: module system prompt                  │
+          │    + injected, authoritative stage (model does not        │
+          │      re-derive it)  + retrieved evidence + consultation    │
+          │      provenance + case + proposed findings (all labeled)   │
+          └───────────────────────────┬──────────────────────────────┘
+                                       ▼
+          ┌──────────────────────────────────────────────────────────┐
+          │ 5. Provider layer ── LiteLLM / Azure / Poe / MiniMax /    │
           │    mock ──▶ structured, auditable AgentResult             │
           └──────────────────────────────────────────────────────────┘
 ```
@@ -69,15 +85,17 @@ the *swappable inference backend* for teaching and evaluation.
 
 | Component | Location | Notes |
 |---|---|---|
+| Consultation loop | `nsclc_agent/consult/` | slot schema · VOI planner · reply extraction · session state |
 | TNM-9 staging engine | `nsclc_agent/staging/tnm.py` | 9th edition incl. N2a/N2b, M1c1/M1c2, all migrations |
-| Stage router | `nsclc_agent/staging/router.py` | maps stage group → protocol module |
-| Protocol modules | `nsclc_agent/prompts/*.md` | Stage I, II, IIIA, IIIB, IIIC, IVA, IVB (v3.3) |
+| Stage router | `nsclc_agent/staging/router.py` | stage group → protocol module, with label normalization |
+| Protocol modules | `nsclc_agent/prompts/*.md` | Stage I, II, IIIA, IIIB, IIIC, IVA, IVB (v3.3, 2026-06) |
 | Perception layer | `nsclc_agent/imaging.py` | reads films → proposed cTNM (vision, e.g. Gemini/Poe) |
+| Evidence layer | `nsclc_agent/evidence/` | PubMed retrieval, or an explicit "not retrieved" record |
 | Provider layer | `nsclc_agent/providers/` | LiteLLM · Azure · Poe · MiniMax · mock (text + vision) |
-| Agent orchestrator | `nsclc_agent/agent.py` | (read films →) case → stage → route → prompt → LLM |
-| CLI | `nsclc_agent/cli.py` | `stage`, `route`, `read`, `run`, `batch`, `selftest`, … |
+| Agent orchestrator | `nsclc_agent/agent.py` | (ask →) (read films →) stage → route → retrieve → prompt → LLM |
+| CLI | `nsclc_agent/cli.py` | `consult`, `slots`, `stage`, `route`, `read`, `run`, `batch`, `selftest`, … |
 | Example cases | `examples/cases/*.json` | one per stage band + an imaging cross-check case |
-| Tests | `tests/` | 106 tests, offline |
+| Tests | `tests/` | 269 tests, offline |
 
 **Stage coverage.** The engine stages *all* groups (0/I through IVB), and a
 dedicated protocol module ships for **every treatment-bearing stage**: Stage I
@@ -189,6 +207,101 @@ minimax:
 
 ---
 
+## Autonomous consultation (自主问诊)
+
+Real cases do not arrive complete. `consult` asks for what is missing, and the
+ordering is the point: every question carries **the decision it can still
+change**, and the loop stops when nothing left unasked would move the
+recommendation — not when every field is full.
+
+```bash
+python -m nsclc_agent consult --lang zh \
+    --presentation "68岁女性，左上肺占位。" --question "推荐的治疗路径？"
+```
+
+```
+── round 1/6 ─ stage so far: (not yet stageable)
+  1. 原发灶的 T 分期是多少（Tis、T1a/T1b/T1c、T2a/T2b、T3、T4）？…
+     ↳ 为什么问: 与 N、M 共同决定分期；没有它无法分期、无法选择治疗模块。
+  2. 淋巴结 N 分期是多少（N0、N1、N2a、N2b、N3）？N2a 指单站纵隔淋巴结，N2b 指多站…
+     ↳ 为什么问: 在第 9 版里决定 IIIA 还是 IIIB，也决定还能不能考虑手术。
+  ...
+  > 腺癌，T2b，纵隔 4L 和 7 组多站淋巴结 N2b，PET-CT 和头颅 MRI 无远处转移。
+  ✓ recorded: {'t_category': 'T2b', 'n_category': 'N2b', 'm_category': 'M0',
+               'histology': 'adenocarcinoma', 'n2_stations': ['4L', '7']}
+
+── round 2/6 ─ stage so far: IIIB
+  1. EGFR 状态——突变（19 外显子缺失、L858R、20 外显子插入……）、野生型，还是没做？
+     ↳ 为什么问: 决定术后是否用奥希替尼辅助、放化疗后是否用奥希替尼巩固…
+```
+
+**How the ordering works.** Each slot in `consult/slots.py` carries a base
+weight, per-stage overrides, and an optional gate:
+
+| Rule | Example |
+|---|---|
+| Staging descriptors block everything until resolved | T/N/M outrank every biomarker question in round 1 |
+| The same fact is re-weighted by stage | PD-L1 scores 10 in stage I (explicitly not decision-relevant there) and 95 in stage IV |
+| Gates suppress irrelevant questions | driver testing is not asked once histology is squamous; CCRT feasibility appears only once the tumour is unresectable |
+| Stop when nothing can change the answer | the loop ends at `status=ready`, not when the form is full |
+
+**Reading replies.** A deterministic pass reads the things that have a
+canonical written form — `cT2bN2bM0`, `ECOG 1`, `PD-L1 TPS 40%`, `4L`/`7`
+stations, `EGFR 阴性`, `不可切除` — in Chinese or English, so the consultation
+works offline with no model. A model pass then fills what the patterns missed;
+**the deterministic pass wins on conflict**. Ambiguous descriptors are *never*
+canonicalised: a reply of "N2" is recorded as a note asking for single- vs
+multi-station, exactly as the staging engine refuses bare `N2`.
+
+**What it never learned is reported, not assumed.** A consultation that stops
+early is flagged `CONSULT_INCOMPLETE`, the residual gaps are listed in
+`result.consult.outstanding`, and the reasoning prompt is told to emit them as
+`information_gap` steps rather than filling them in.
+
+```bash
+# Inspect the schema and how it re-weights by stage
+python -m nsclc_agent slots --stage-group IIIB --lang zh
+
+# Scripted (non-interactive) — useful in CI and for teaching
+python -m nsclc_agent consult --no-interactive --lang en \
+    --presentation "68F LUL mass" \
+    --answers "Adenocarcinoma cT2bN2bM0" "ECOG 1, EGFR negative, PD-L1 40%" \
+              "MDT says unresectable"
+
+# Pause and resume — the session is plain JSON
+python -m nsclc_agent consult --session out/case1.json --ask-only
+```
+
+---
+
+## Evidence: retrieved, or explicitly not
+
+The protocol modules ask the model to emit `tool_call` steps
+(`pubmed_search`, `guideline_search`, …). Those calls are **not** self-executing,
+so unless a retriever is configured every PMID and NCT number in the output is
+recalled from the model's weights while sitting in a field that looks like a
+citation. The agent never leaves that ambiguous:
+
+| Configuration | What the model is told | Flag |
+|---|---|---|
+| no `evidence:` block (default) | "no retrieval ran; label every source `MODEL_RECALL_UNVERIFIED`" | `EVIDENCE_NOT_RETRIEVED` |
+| `type: pubmed`, results found | the real records, citable as `RETRIEVED_VERIFIED_IDENTIFIER` | `EVIDENCE_RETRIEVED[n]` |
+| `type: pubmed`, nothing found | "retrieval ran and returned nothing — treat as a gap" | `EVIDENCE_RETRIEVAL_EMPTY` |
+
+```yaml
+evidence:
+  type: pubmed
+  email: you@example.org      # NCBI asks callers to identify themselves
+  api_key_env: NCBI_API_KEY   # optional; raises the anonymous rate limit
+  years: 5
+```
+
+Queries are built from the **computed stage** and the **known facts**, never
+from model output — so a hallucinated claim cannot steer retrieval and then
+appear to be supported by it.
+
+---
+
 ## AJCC/UICC 9th-edition staging (the verifiable core)
 
 Effective 1 Jan 2025. T and M1a/M1b are unchanged from the 8th edition, but
@@ -204,10 +317,15 @@ surfaces automatically:
 | T3 N2a | IIIB | **IIIA** (down) |
 | T2 N2b | IIIA | **IIIB** (up) |
 
-The engine **rejects ambiguous input** (`N2`, `M1c`, `T2` without a sub-letter)
-rather than guessing, because those distinctions change the stage. The full
-expectation table lives in `nsclc_agent/staging/selftest.py` and is the source
-of truth for both `selftest` and the pytest suite.
+The engine **rejects ambiguous input** (`T1`, `T2`, `N2`, `M1c` without a
+sub-category) rather than guessing, because those distinctions change the stage
+or the substage. It also refuses an **empty M** rather than reading it as M0 —
+"no metastases" is the difference between a curative and a palliative pathway,
+so it has to be stated. When the agent stages without one anyway (`run --t T2b
+--n N2b`), the run carries an `M_ASSUMED_M0` flag and the stage is marked
+provisional. The full expectation table lives in
+`nsclc_agent/staging/selftest.py` and is the source of truth for both
+`selftest` and the pytest suite.
 
 ---
 
@@ -295,8 +413,10 @@ print([f for f in result.flags if "IMAGING" in f or "NEXT_STEP" in f])
 
 | Command | Purpose |
 |---|---|
+| `consult [--lang zh\|en] [--answers …] [--session f.json] [--ask-only]` | Autonomous consultation, then a routed recommendation |
+| `slots [--stage-group IIIB]` | Show the consultation schema and what each fact decides |
 | `stage T N [M]` | Deterministically stage a TNM triple (`--json` for machine output) |
-| `route STAGE` | Show the module a stage group maps to |
+| `route STAGE` | Show the module a stage group maps to (accepts `3B`, `stage iiib`, …) |
 | `modules` | List protocol modules and coverage |
 | `providers [-c cfg]` | List configured backends (marks `[vision]` ones) |
 | `read --images … [-p provider]` | Read films into proposed TNM descriptors (no staging) |
@@ -316,7 +436,7 @@ skips film reading, since that is a model call). Attach films to `run` with
 
 ```bash
 pip install pytest
-python -m pytest -q        # 106 tests, fully offline
+python -m pytest -q        # 269 tests, fully offline
 ```
 
 See [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture, the mapping to the
@@ -328,8 +448,15 @@ active-perception / verifiable-staging design goals, and extension points.
 - The protocol modules enforce their own safety rules (trial-boundary
   discipline, driver exclusions, no-surgery-for-N3, biomarker-first, etc.).
 - The agent never overrides the deterministic stage and flags every ambiguity
-  (`STAGE_MISMATCH`, `MODULE_UNAVAILABLE`, `STAGING_ERROR`, …) instead of
-  silently proceeding.
+  (`STAGE_MISMATCH`, `MODULE_UNAVAILABLE`, `STAGING_ERROR`, `M_ASSUMED_M0`,
+  `STAGE_LABEL_UNRECOGNIZED`, …) instead of silently proceeding.
+- Citations are either retrieved (`EVIDENCE_RETRIEVED[n]`, identifiers marked
+  `RETRIEVED_VERIFIED_IDENTIFIER`) or explicitly marked as model recall
+  (`EVIDENCE_NOT_RETRIEVED`, `MODEL_RECALL_UNVERIFIED`). There is no third,
+  silent state.
+- A consultation that ends short reports what it never learned
+  (`CONSULT_INCOMPLETE` + `result.consult.outstanding`) instead of filling the
+  gaps by assumption.
 - Film reading is **advisory**: descriptors are labeled
   `MODEL_PROPOSED_UNVERIFIED`, cross-checked against human/pathologic TNM
   (`IMAGING_DISCORDANCE`), and never used to assign the stage directly. Use

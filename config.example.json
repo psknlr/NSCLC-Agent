@@ -1,9 +1,15 @@
 {
   "default_provider": "mock",
   "vision_provider": "gemini_vision",
-  "generation": { "temperature": 0.2, "max_tokens": 4096 },
+  "generation": {
+    "temperature": 0.2,
+    "max_tokens": 4096
+  },
   "providers": {
-    "mock": { "type": "mock", "model": "mock-echo" },
+    "mock": {
+      "type": "mock",
+      "model": "mock-echo"
+    },
     "litellm": {
       "type": "litellm",
       "model": "gpt-4o",
@@ -34,5 +40,14 @@
       "api_key_env": "MINIMAX_API_KEY",
       "group_id_env": "MINIMAX_GROUP_ID"
     }
+  },
+  "evidence": {
+    "_comment": "Absent or type=none means NO retrieval happens and every citation is model recall — the run is flagged EVIDENCE_NOT_RETRIEVED. Set type=pubmed to retrieve real identifiers before the reasoning call.",
+    "type": "none"
+  },
+  "consult": {
+    "lang": "zh",
+    "max_rounds": 6,
+    "questions_per_round": 3
   }
 }

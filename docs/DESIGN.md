@@ -34,16 +34,58 @@ rest:
 | Hidden state `S` (true TNM) | `TNM` descriptors | — |
 | Verifiable definitive staging | `staging/tnm.py` (symbolic engine) | stable |
 | Guideline-consistent policy | protocol modules + router | add modules |
-| Observation model `P(o\|s,a)` | `imaging.py` — vision reader proposes descriptors from films | per-test sensitivity/specificity metadata |
-| Belief `b(s)` over stages | single computed stage today | replace point stage with a distribution |
-| Action selection / VOI | `NEXT_STEP_SUGGESTED` seed keyed to the unresolved descriptor | full "what to check next" planner over `data_quality_flags` |
-| Uncertainty gate / escalation | `flags` + `MODULE_UNAVAILABLE` / `IMAGING_DISCORDANCE` / MDT triggers | calibrated UQ gate before `commit` |
-| Audit trail | `AgentResult.to_dict()` provenance incl. `imaging` | hash-chained event log |
+| Observation model `P(o\|s,a)` — imaging | `imaging.py` — vision reader proposes descriptors from films | per-test sensitivity/specificity metadata |
+| Observation model — interview | `consult/extract.py` — regex pass, then a model pass, with ambiguity preserved | richer clinical NLP |
+| Action selection / VOI | `consult/planner.py` — stage-conditional weights, gates, blocking descriptors | expected-value-of-information over outcome models |
+| Stopping rule | `is_sufficient()` — stop when nothing unasked can change the recommendation | calibrated decision-boundary test |
+| Belief `b(s)` over stages | single computed stage; unresolved descriptors held as gaps rather than guessed | replace point stage with a distribution |
+| Uncertainty gate / escalation | `flags` + `MODULE_UNAVAILABLE` / `IMAGING_DISCORDANCE` / `CONSULT_INCOMPLETE` / MDT triggers | calibrated UQ gate before `commit` |
+| Evidence grounding | `evidence/` — retrieval before reasoning, or a recorded "not retrieved" | guideline + label corpora alongside PubMed |
+| Audit trail | `AgentResult.to_dict()` incl. `imaging`, `evidence`, `consult` provenance | hash-chained event log |
 
 The important property is that the **staging engine is already the
 "deterministic, verifiable definitive-staging module"** the vision calls for —
 the highest-hallucination-risk step is handled symbolically, and everything
 else is layered on top without contaminating it.
+
+## 2b. The consultation layer (自主问诊)
+
+`consult/` is the active-information-gathering half of that framing, and it is
+deliberately **model-free where it decides**. Choosing what is still worth
+asking is a policy question about guideline structure, not a generation task:
+keeping it in Python makes every question auditable (each one carries the
+decision it was asked for), reproducible across backends, and testable offline
+— the same argument the staging engine makes for stage groups.
+
+- `slots.py` — the schema. Each fact carries a base weight, **per-stage
+  overrides** (PD-L1 is worth 10 in stage I, where the module says it is not
+  decision-relevant, and 95 in stage IV) and an optional **gate** (driver
+  testing is suppressed once histology is squamous; CCRT feasibility appears
+  only once the tumour is unresectable).
+- `planner.py` — ordering and stopping. Staging descriptors get a blocking
+  bonus so they are resolved before anything downstream is scored. The loop
+  ends when no relevant unknown scores at or above the sufficiency threshold.
+- `extract.py` — two passes. Deterministic patterns first (they work offline
+  and are reproducible), the model second, deterministic wins on conflict.
+  Ambiguous descriptors are recorded as notes, never canonicalised: `"N2"` in a
+  reply must not become `N2a` any more than it may in the staging engine.
+- `session.py` — serialisable state. A consultation can be paused, stored,
+  resumed in another process and replayed in a test without a model.
+
+What the consultation did **not** learn is carried forward rather than
+discarded: `CONSULT_INCOMPLETE`, `result.consult.outstanding`, and a prompt
+block instructing the model to emit those as `information_gap` steps.
+
+## 2c. The evidence layer
+
+The protocol modules ask for `tool_call` steps, but nothing executed them, so
+identifiers in `sources` were model recall presented in a citation-shaped
+field. `evidence/` makes the two states distinguishable rather than pretending
+to solve retrieval: with a backend configured, deterministic queries built from
+the **computed stage** (never from model output — otherwise a hallucinated
+claim could steer retrieval and then appear supported by it) run *before* the
+reasoning call and the real records are injected as citable; without one, the
+prompt says so and the run is flagged `EVIDENCE_NOT_RETRIEVED`.
 
 ## 2a. The perception layer (reading films)
 
@@ -84,8 +126,16 @@ pass an `https` URL) first.
 nsclc_agent/
   staging/        pure, deterministic, no I/O, no LLM  ← verifiable core
     tnm.py          TNM normalization + 9th-ed. stage table
-    router.py       stage group → module key
+    router.py       stage group → module key (+ label normalization)
     selftest.py     authoritative expectation table (source of truth)
+  consult/        pure, deterministic policy; no I/O  ← the interview
+    slots.py        what to know, what each fact decides, stage weights
+    planner.py      VOI ordering + the stopping rule
+    extract.py      reply → slot values (regex first, model second)
+    session.py      serialisable consultation state
+  evidence/       literature retrieval (or a recorded absence of it)
+    base.py         Retriever ABC, EvidenceRecord, prompt blocks
+    pubmed.py       NCBI E-utilities over the standard library
   prompts/        protocol modules (Markdown) + loader
   providers/      backend abstraction
     base.py         LLMProvider ABC, Message (+ multimodal), LLMResponse, params
@@ -97,7 +147,8 @@ nsclc_agent/
   imaging.py      perception layer: films → proposed descriptors (vision)
   case.py         case input model (+ images) + user-turn rendering
   config.py       YAML/JSON config loading (+ built-in mock default)
-  agent.py        orchestration: (read films →) resolve_stage → route → complete
+  agent.py        orchestration: (ask →) (read films →) resolve_stage →
+                  route → retrieve evidence → complete
   cli.py          argparse front-end
 ```
 
@@ -108,12 +159,20 @@ backends be added without touching clinical logic.
 
 ## 4. Why the staging engine rejects ambiguity
 
-`N2`, `M1c`, and bare `T2` are **refused, not guessed**. In the 9th edition the
-sub-distinction changes the stage group (`T2aN2a` = IIIA but `T2aN2b` = IIIB;
-`M1c1`/`M1c2` are both IVB but carry different prognosis and were split for a
-reason). Silently collapsing them would defeat the point of a *verifiable*
-engine, so the engine raises `StagingError` with an actionable message and the
-agent turns it into a `STAGING_ERROR` flag rather than proceeding.
+`T1`, `T2`, `N2`, `M1c` and an **empty M** are **refused, not guessed**. In the
+9th edition the sub-distinction changes the stage group (`T2aN2a` = IIIA but
+`T2aN2b` = IIIB; `M1c1`/`M1c2` are both IVB but carry different prognosis and
+were split for a reason) or the substage (`T1a`/`T1b`/`T1c` → IA1/IA2/IA3).
+Silently collapsing them would defeat the point of a *verifiable* engine, so
+the engine raises `StagingError` with an actionable message and the agent turns
+it into a `STAGING_ERROR` flag rather than proceeding.
+
+An empty M is the subtlest of these: reading "not stated" as M0 turns an
+incomplete work-up into a curative-intent stage group. The engine refuses it,
+and when the agent stages without one anyway it records `M_ASSUMED_M0` plus a
+descriptor note marking the group provisional. The same discipline runs through
+the consultation extractor, which records `"N2"` in a reply as an ambiguity
+note rather than canonicalising it.
 
 ## 5. Prompt assembly
 
@@ -154,8 +213,9 @@ register a branch in `providers/registry.py`.
 
 Every treatment-bearing stage group (I → IVB) ships with a module today; only
 occult carcinoma (TX N0) is intentionally unrouted. Adding or specializing a
-module (e.g. a dedicated Stage 0 / AIS module, or splitting resectable vs
-unresectable IIIA) is a four-step, localized change:
+module (e.g. a dedicated Stage 0 / AIS module, or splitting the two IIIA arms
+— currently both live inside `stage3a.md` behind its resectability gate — into
+separate files) is a four-step, localized change:
 
 1. Drop `prompts/<key>.md` (the system-prompt protocol) into `prompts/`.
 2. Register it in `prompts/__init__.py::MODULES` with its stage groups.
@@ -179,7 +239,15 @@ only the prompt loader, router, tests and examples.)
   IIIA fallback, and every shipped example case.
 - `test_imaging.py` — the perception layer: image loading, JSON extraction, the
   propose→verify contract (seed missing descriptors, flag discordance, keep the
-  case value authoritative), the next-step hint, and graceful read failure —
-  all via a fake in-process vision provider.
+  case value authoritative), descriptor-vocabulary validation, the next-step
+  hint, and graceful read failure — all via a fake in-process vision provider.
+- `test_consult.py` — the consultation: slot schema invariants, VOI ordering
+  and gating, the stopping rule, deterministic extraction (both languages),
+  ambiguity preservation, session serialisation, and end-to-end interviews.
+- `test_evidence.py` — retrieval config, deterministic query planning, the
+  three prompt states, and the guarantee that queries come from the computed
+  stage rather than from model output.
+- `test_cli.py` — the argparse front-end, in-process, including the
+  consultation and the error exit codes.
 
-All 106 tests run fully offline.
+All 269 tests run fully offline.

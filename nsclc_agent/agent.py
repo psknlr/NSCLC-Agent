@@ -18,6 +18,23 @@ from typing import Any, Optional
 
 from .case import Case
 from .config import Config, load_config
+from .consult import (
+    STATUS_COMPLETE,
+    STATUS_EXHAUSTED,
+    STATUS_GATHERING,
+    STATUS_READY,
+    ConsultSession,
+    ConsultTurn,
+    extract,
+    is_sufficient,
+)
+from .evidence import (
+    RetrievalResult,
+    Retriever,
+    build_retriever,
+    evidence_block,
+    query_plan,
+)
 from .imaging import ImagingFindings, ImagingReader
 from .prompts import PromptModule, load_module
 from .providers.base import GenerationParams, LLMProvider, LLMResponse, Message
@@ -65,6 +82,12 @@ class AgentResult:
     #: model-proposed radiographic descriptors, if films were read (perception
     #: layer). Always recorded as UNVERIFIED provenance, never as ground truth.
     imaging: Optional[dict] = None
+    #: literature actually retrieved for this run (or the recorded fact that
+    #: none was), so a reader can tell a cited identifier from a recalled one.
+    evidence: Optional[dict] = None
+    #: consultation provenance when the case came from an interview: what was
+    #: asked, what was answered, and what is still unknown.
+    consult: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -74,6 +97,8 @@ class AgentResult:
             "module_key": self.module_key,
             "provider": self.provider,
             "imaging": self.imaging,
+            "evidence": self.evidence,
+            "consult": self.consult,
             "response": self.response.to_dict() if self.response else None,
             "flags": self.flags,
             "error": self.error,
@@ -88,10 +113,15 @@ class NSCLCAgent:
         *,
         allow_fallback_module: bool = True,
         vision_provider: Optional[str] = None,
+        retriever: Optional[Retriever] = None,
+        lang: str = "en",
     ):
         self.config = config or load_config()
         self.allow_fallback_module = allow_fallback_module
         self.vision_provider = vision_provider or self.config.vision_provider
+        self.lang = lang
+        self.retriever = retriever if retriever is not None \
+            else build_retriever(self.config.evidence)
         self._provider_cache: dict[str, LLMProvider] = {}
 
     # -- provider handling --------------------------------------------------
@@ -331,6 +361,57 @@ class NSCLCAgent:
             + json.dumps(findings.to_dict(), ensure_ascii=False, indent=2)
         )
 
+    def _language_block(self, lang: str) -> str:
+        """Override the modules' hard-coded 'answer in English' requirement.
+
+        The protocol modules mandate English so that generated training data is
+        uniform. A consultation with a Chinese-speaking patient needs the
+        patient-facing text in Chinese while the clinical vocabulary stays
+        canonical, so the override is explicit and scoped rather than a silent
+        contradiction of the module.
+        """
+        if lang != "zh":
+            return ""
+        return (
+            "=== OUTPUT LANGUAGE OVERRIDE (takes precedence over the module's "
+            "ENGLISH requirement) ===\n"
+            "Write all free-text prose — plan summaries, explanations, "
+            "uncertainty statements, questions to the patient — in SIMPLIFIED "
+            "CHINESE. Keep these in their canonical form and do not translate "
+            "them: TNM descriptors, stage groups, gene and biomarker names, "
+            "drug INNs, trial names, and every JSON key and enum value. The "
+            "JSON structure itself is unchanged."
+        )
+
+    def _consult_block(self, session: "ConsultSession") -> str:
+        """Tell the model what was asked, and what is still unknown."""
+        gaps = [g for g in session.gaps() if g.get("above_threshold")]
+        lines = [
+            "=== CONSULTATION PROVENANCE ===",
+            f"This case was assembled through {session.round_index} round(s) "
+            f"of interview, not supplied complete. Facts carry the round they "
+            f"arrived in and whether a deterministic pattern or a model read "
+            f"them out of the reply.",
+            json.dumps(
+                {"known": session.known, "provenance": session.provenance},
+                ensure_ascii=False, indent=2,
+            ),
+        ]
+        if gaps:
+            lines += [
+                "",
+                "STILL UNKNOWN after the consultation ended — these are real "
+                "information gaps and must appear as 'information_gap' steps "
+                "and uncertainty statements, not be filled in by assumption:",
+            ]
+            lines += [f"  • {g['key']}: {g['why']}" for g in gaps]
+        else:
+            lines.append(
+                "\nNo decision-relevant fact remained unknown when the "
+                "consultation stopped."
+            )
+        return "\n".join(lines)
+
     def build_messages(
         self,
         case: Case,
@@ -338,9 +419,22 @@ class NSCLCAgent:
         stage_result: StageResult,
         *,
         imaging_findings: Optional[ImagingFindings] = None,
+        retrieval: Optional[RetrievalResult] = None,
+        session: Optional["ConsultSession"] = None,
+        lang: Optional[str] = None,
     ) -> list[Message]:
-        system = module.system_prompt + "\n\n" + self._staging_preamble(stage_result)
+        lang = lang or self.lang
+        blocks = [module.system_prompt, self._staging_preamble(stage_result)]
+        if retrieval is not None:
+            blocks.append(evidence_block(retrieval, lang=lang))
+        language_block = self._language_block(lang)
+        if language_block:
+            blocks.append(language_block)
+        system = "\n\n".join(blocks)
+
         user = case.render_user_message()
+        if session is not None:
+            user += "\n\n" + self._consult_block(session)
         if imaging_findings is not None:
             user += "\n\n" + self._imaging_block(imaging_findings)
         return [
@@ -358,6 +452,9 @@ class NSCLCAgent:
         params: Optional[GenerationParams] = None,
         dry_run: bool = False,
         read_films: bool = True,
+        retrieve_evidence: bool = True,
+        session: Optional[ConsultSession] = None,
+        lang: Optional[str] = None,
     ) -> AgentResult:
         case_id = case.case_id
         imaging_flags: list[str] = []
@@ -385,11 +482,13 @@ class NSCLCAgent:
         staging_dict = stage_result.to_dict() if stage_result else None
         routing_dict = route_result.to_dict() if route_result else {}
 
+        consult_dict = session.to_dict() if session is not None else None
+
         if stage_result is None or route_result is None:
             return AgentResult(
                 case_id, staging_dict, routing_dict, None, None, None,
                 flags=flags, error="Could not resolve stage/routing for case",
-                imaging=imaging_dict,
+                imaging=imaging_dict, consult=consult_dict,
             )
 
         module_key = route_result.module_key
@@ -407,12 +506,21 @@ class NSCLCAgent:
                 flags=flags,
                 error=(f"No protocol module available for stage "
                        f"{stage_result.stage_group}"),
-                imaging=imaging_dict,
+                imaging=imaging_dict, consult=consult_dict,
             )
+
+        # -- evidence layer: retrieve BEFORE reasoning ----------------------
+        retrieval = self.retrieve_evidence(
+            stage_result.stage_group,
+            facts=(session.known if session is not None else case.fields),
+            enabled=retrieve_evidence and not dry_run,
+        )
+        flags.extend(_evidence_flags(retrieval))
 
         module = load_module(module_key)
         messages = self.build_messages(
-            case, module, stage_result, imaging_findings=imaging_findings
+            case, module, stage_result, imaging_findings=imaging_findings,
+            retrieval=retrieval, session=session, lang=lang,
         )
 
         if dry_run:
@@ -423,7 +531,8 @@ class NSCLCAgent:
                     provider="(none)", model="(none)",
                 ),
                 flags=flags + ["DRY_RUN"],
-                imaging=imaging_dict,
+                imaging=imaging_dict, evidence=retrieval.to_dict(),
+                consult=consult_dict,
             )
 
         try:
@@ -434,9 +543,204 @@ class NSCLCAgent:
             return AgentResult(
                 case_id, staging_dict, routing_dict, module_key,
                 prov_name, None, flags=flags, error=str(exc),
-                imaging=imaging_dict,
+                imaging=imaging_dict, evidence=retrieval.to_dict(),
+                consult=consult_dict,
             )
         return AgentResult(
             case_id, staging_dict, routing_dict, module_key, prov.name,
             response, flags=flags, imaging=imaging_dict,
+            evidence=retrieval.to_dict(), consult=consult_dict,
         )
+
+    # -- evidence -----------------------------------------------------------
+
+    def retrieve_evidence(
+        self,
+        stage_group: Optional[str],
+        *,
+        facts: Optional[dict] = None,
+        enabled: bool = True,
+        limit: int = 3,
+    ) -> RetrievalResult:
+        """Run the deterministic query plan for a case through the retriever.
+
+        Queries are derived from the *computed* stage and the *known* facts,
+        never from model output, so a hallucinated claim cannot steer what gets
+        retrieved and then appear to be supported by it.
+        """
+        if not enabled or not self.retriever.enabled:
+            return RetrievalResult(backend=self.retriever.name, enabled=False)
+        queries = query_plan(stage_group, facts, limit=limit)
+        return self.retriever.search_many(queries, limit=5)
+
+    # -- autonomous consultation (自主问诊) ---------------------------------
+
+    def start_consult(
+        self,
+        *,
+        presentation: str = "",
+        question: str = "",
+        case: Optional[Case] = None,
+        lang: Optional[str] = None,
+        max_rounds: Optional[int] = None,
+        questions_per_round: Optional[int] = None,
+        provider: Optional[str] = None,
+        params: Optional[GenerationParams] = None,
+    ) -> ConsultSession:
+        """Open a consultation, reading whatever the opening text already says.
+
+        The opening statement is treated exactly like any later reply: it goes
+        through the same extractor, so "68F T2bN2bM0 adenocarcinoma" fills four
+        slots immediately and the first question is about something genuinely
+        unknown rather than something already stated.
+        """
+        cfg = self.config.consult or {}
+        session = ConsultSession(
+            lang=lang or cfg.get("lang") or self.lang,
+            max_rounds=int(max_rounds if max_rounds is not None
+                           else cfg.get("max_rounds", 6)),
+            questions_per_round=int(
+                questions_per_round if questions_per_round is not None
+                else cfg.get("questions_per_round", 3)),
+            presentation=presentation or "",
+            question=question or "",
+        )
+        if case is not None:
+            session.with_case(case)
+        opening = session.presentation
+        if opening.strip():
+            values, notes = self._extract(session, opening, provider=provider,
+                                          params=params)
+            session.record(values, source="opening", round_index=-1)
+            session.notes.extend(notes)
+        self._refresh(session)
+        return session
+
+    def consult_step(
+        self,
+        session: ConsultSession,
+        reply: str,
+        *,
+        provider: Optional[str] = None,
+        params: Optional[GenerationParams] = None,
+    ) -> ConsultSession:
+        """Fold one reply into the session and re-plan.
+
+        Records the turn even when the reply yields nothing usable — a round
+        that produced no facts is information about the consultation, and
+        silently retrying the same question would be worse.
+        """
+        if session.is_finished():
+            return session
+        asked = session.ask()
+        values, notes = self._extract(
+            session, reply, provider=provider, params=params,
+            pending=[a["key"] for a in asked],
+        )
+        accepted = session.record(values, source="reply")
+        turn = ConsultTurn(round_index=session.round_index, asked=asked,
+                           reply=reply, extracted=accepted, notes=notes)
+        session.turns.append(turn)
+        if not accepted:
+            turn.notes.append(
+                "NO_NEW_FACTS: the reply did not resolve any of the questions "
+                "asked in this round."
+            )
+        self._refresh(session)
+        return session
+
+    def _extract(
+        self,
+        session: ConsultSession,
+        text: str,
+        *,
+        provider: Optional[str] = None,
+        params: Optional[GenerationParams] = None,
+        pending: Optional[list[str]] = None,
+    ) -> tuple[dict, list[str]]:
+        """Deterministic extraction, with the model as an optional second pass."""
+        keys = pending if pending is not None else session.pending()
+        prov: Optional[LLMProvider] = None
+        try:
+            prov = self.get_provider(provider)
+        except Exception as exc:  # no usable backend → patterns only
+            session.notes.append(f"EXTRACTION_PROVIDER_UNAVAILABLE: {exc}")
+        return extract(text, keys, provider=prov, params=params,
+                       lang=session.lang)
+
+    def _refresh(self, session: ConsultSession) -> ConsultSession:
+        """Re-stage on what is known and recompute the stopping condition."""
+        session.stage_group = None
+        if session.staging_ready():
+            stage_result, _ = self.resolve_stage(session.to_case())
+            if stage_result is not None:
+                session.stage_group = stage_result.stage_group
+        if is_sufficient(session.known, session.stage_group):
+            session.status = STATUS_READY
+        elif session.rounds_remaining <= 0:
+            session.status = STATUS_EXHAUSTED
+            session.notes.append(
+                f"CONSULT_ROUNDS_EXHAUSTED: stopped after "
+                f"{session.max_rounds} round(s) with decision-relevant facts "
+                f"still unknown; they are carried into the result as "
+                f"information gaps."
+            )
+        else:
+            session.status = STATUS_GATHERING
+        return session
+
+    def finish_consult(
+        self,
+        session: ConsultSession,
+        *,
+        provider: Optional[str] = None,
+        params: Optional[GenerationParams] = None,
+        dry_run: bool = False,
+        retrieve_evidence: bool = True,
+    ) -> AgentResult:
+        """Run the assembled case through the normal pipeline."""
+        self._refresh(session)
+        case = session.to_case()
+        result = self.run(
+            case, provider=provider, params=params, dry_run=dry_run,
+            retrieve_evidence=retrieve_evidence, session=session,
+            lang=session.lang,
+        )
+        # Any status other than READY means the interview stopped early — out
+        # of rounds, out of scripted answers, or the user walked away. All of
+        # them leave real gaps, so all of them are flagged.
+        if session.status != STATUS_READY:
+            missing = [g["key"] for g in session.gaps()
+                       if g.get("above_threshold")]
+            result.flags.append(
+                f"CONSULT_INCOMPLETE: the consultation ended at status "
+                f"{session.status!r} with decision-relevant facts still "
+                f"unknown ({', '.join(missing) or 'none listed'}) — see "
+                f"consult.outstanding."
+            )
+        if not dry_run and result.error is None:
+            session.status = STATUS_COMPLETE
+            result.consult = session.to_dict()
+        return result
+
+
+def _evidence_flags(retrieval: RetrievalResult) -> list[str]:
+    if not retrieval.enabled:
+        return [
+            "EVIDENCE_NOT_RETRIEVED: no literature retrieval backend ran for "
+            "this case; any identifier in the response is model recall and is "
+            "labelled MODEL_RECALL_UNVERIFIED."
+        ]
+    flags = [
+        f"EVIDENCE_RETRIEVED[{len(retrieval.records)}]: via "
+        f"{retrieval.backend} for {len(retrieval.queries)} query/queries."
+    ]
+    if retrieval.errors:
+        flags.append("EVIDENCE_RETRIEVAL_ERRORS: "
+                     + "; ".join(retrieval.errors))
+    if not retrieval.records:
+        flags.append(
+            "EVIDENCE_RETRIEVAL_EMPTY: retrieval ran but returned no records; "
+            "citations fall back to model recall."
+        )
+    return flags

@@ -19,6 +19,11 @@ from .base import GenerationParams, LLMProvider, LLMResponse, Message
 #: recognise a "read the films" request and answer with a findings-shaped stub.
 IMAGING_MARKER = "IMAGING DESCRIPTOR EXTRACTION"
 
+#: marker the consultation extractor carries, so the offline mock answers with
+#: an empty-but-valid extraction instead of a decision-support stub. The
+#: consultation still works offline: pass 1 (regex) does the real work.
+CONSULT_MARKER = "CONSULTATION FACT EXTRACTION"
+
 
 class MockProvider(LLMProvider):
     kind = "mock"
@@ -46,6 +51,9 @@ class MockProvider(LLMProvider):
         if IMAGING_MARKER in system:
             return self._mock_imaging_read(n_images)
 
+        if CONSULT_MARKER in system:
+            return self._mock_extraction()
+
         module_hint = ""
         for line in system.splitlines():
             if "STAGE" in line and "MODULE" in line.upper():
@@ -68,6 +76,30 @@ class MockProvider(LLMProvider):
             provider=self.name,
             model=self.model,
             usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            finish_reason="stop",
+        )
+
+    def _mock_extraction(self) -> LLMResponse:
+        """Empty extraction: the mock must not invent clinical facts.
+
+        Returning nothing is the correct offline behaviour — the consultation's
+        deterministic pattern pass has already read whatever was canonically
+        written, and inventing the rest would be exactly the failure the
+        extractor's hard rules forbid.
+        """
+        stub = {
+            "_mock": True,
+            "values": {},
+            "notes": [
+                "Offline mock provider does not perform model-assisted "
+                "extraction; only deterministic patterns were applied."
+            ],
+        }
+        return LLMResponse(
+            content=json.dumps(stub, ensure_ascii=False),
+            provider=self.name, model=self.model,
+            usage={"prompt_tokens": 0, "completion_tokens": 0,
+                   "total_tokens": 0},
             finish_reason="stop",
         )
 

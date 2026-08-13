@@ -5,7 +5,9 @@ Subcommands:
   route      Show which protocol module a stage/case maps to.
   modules    List available protocol modules.
   providers  List configured providers.
+  slots      List the consultation slots and what each one decides.
   read       Read radiology films into proposed TNM descriptors (vision).
+  consult    Autonomous consultation (自主问诊): ask → read reply → recommend.
   run        (optional read films →) stage → route → prompt → LLM for one case.
   batch      Run every case file in a directory.
   selftest   Run the built-in staging self-test.
@@ -23,6 +25,7 @@ from . import __version__
 from .agent import NSCLCAgent
 from .case import Case
 from .config import ConfigError, load_config
+from .consult import SLOTS, ConsultSession, stage_band
 from .prompts import list_modules, load_module
 from .providers.base import GenerationParams
 from .staging import StagingError, available_modules, route, stage_from_strings
@@ -111,6 +114,22 @@ def _print_result(result, as_json: bool, show_prompt: bool = False) -> None:
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
         return
     print(f"Case: {result.case_id or '(unnamed)'}")
+    if result.consult:
+        c = result.consult
+        outstanding = [g for g in c.get("outstanding", [])
+                       if g.get("above_threshold")]
+        print(f"  Consultation: {c.get('round')} round(s), "
+              f"{len(c.get('known', {}))} fact(s) gathered, "
+              f"status={c.get('status')}"
+              + (f", {len(outstanding)} decision-relevant gap(s) left"
+                 if outstanding else ""))
+    if result.evidence:
+        ev = result.evidence
+        if ev.get("enabled"):
+            print(f"  Evidence: {ev.get('n_records')} record(s) retrieved via "
+                  f"{ev.get('backend')}")
+        else:
+            print("  Evidence: NOT retrieved — citations are model recall")
     if result.imaging:
         img = result.imaging
         print(f"  Imaging (proposed, UNVERIFIED): "
@@ -160,6 +179,117 @@ def cmd_read(args) -> int:
         print(f"  read by:   {findings.provider} / {findings.model} "
               f"({findings.n_images} image(s))")
     return 0
+
+
+def cmd_slots(args) -> int:
+    """Show the consultation slot schema and what each fact decides."""
+    band = stage_band(args.stage_group) if args.stage_group else None
+    lang = args.lang
+    if band:
+        print(f"Slot weights for stage band {band!r} "
+              f"(from stage_group={args.stage_group!r}):\n")
+    for slot in sorted(SLOTS, key=lambda s: -s.weight(band or "pre")):
+        weight = slot.weight(band or "pre")
+        marker = " " if weight >= 70 else "·"
+        print(f"{marker} {slot.key:22s} w={weight:3d}  [{slot.category}]")
+        print(f"    ask : {slot.question(lang)}")
+        print(f"    why : {slot.impact(lang)}")
+    print("\n· = below the sufficiency threshold at this stage: worth "
+          "recording, not worth a consultation round.")
+    return 0
+
+
+def _read_stdin_reply(prompt: str) -> Optional[str]:
+    try:
+        return input(prompt)
+    except EOFError:
+        return None
+
+
+def cmd_consult(args) -> int:
+    """Autonomous consultation: ask what is missing, then recommend."""
+    cfg = _load_config_or_exit(args.config)
+    agent = NSCLCAgent(cfg, lang=args.lang)
+    if args.vision_provider:
+        agent.vision_provider = args.vision_provider
+
+    if args.session and Path(args.session).is_file():
+        session = ConsultSession.from_dict(
+            json.loads(Path(args.session).read_text(encoding="utf-8")))
+        agent._refresh(session)
+    else:
+        base_case = _read_case(args.case) if args.case else None
+        session = agent.start_consult(
+            presentation=args.presentation or "",
+            question=args.question or "",
+            case=base_case,
+            lang=args.lang,
+            max_rounds=args.max_rounds,
+            questions_per_round=args.questions_per_round,
+            provider=args.provider,
+        )
+    if args.images:
+        session.images = list(args.images)
+
+    # Scripted answers (for tests/demos) or interactive stdin.
+    scripted = list(args.answers or [])
+    interactive = not scripted and not args.no_interactive
+
+    while not session.is_finished():
+        questions = session.ask()
+        if not questions:
+            break
+        print(f"\n── round {session.round_index + 1}/{session.max_rounds} "
+              f"─ stage so far: {session.stage_group or '(not yet stageable)'}")
+        for i, q in enumerate(questions, 1):
+            print(f"  {i}. {q['question']}")
+            print(f"     ↳ {'为什么问' if args.lang == 'zh' else 'why'}: "
+                  f"{q['why']}")
+        if scripted:
+            reply = scripted.pop(0)
+            print(f"  > {reply}")
+        elif interactive:
+            reply = _read_stdin_reply("  > ")
+            if reply is None or reply.strip().lower() in ("quit", "exit", "q"):
+                break
+        else:
+            break
+        agent.consult_step(session, reply, provider=args.provider)
+        newly = session.turns[-1].extracted
+        print(f"  ✓ recorded: {newly or '(nothing new)'}")
+        for note in session.turns[-1].notes:
+            print(f"  ⚑ {note}")
+
+    print(f"\nConsultation status: {session.status} "
+          f"({session.round_index} round(s), "
+          f"{len(session.known)} fact(s))")
+    if session.status != "ready":
+        gaps = [g for g in session.gaps() if g["above_threshold"]]
+        for g in gaps:
+            print(f"  ⚑ still unknown: {g['key']} — {g['why']}")
+
+    if args.session:
+        Path(args.session).write_text(
+            json.dumps(session.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8")
+        print(f"  (session saved to {args.session})")
+
+    if args.ask_only:
+        if args.json:
+            print(json.dumps(session.to_dict(), ensure_ascii=False, indent=2))
+        return 0
+
+    if not session.staging_ready() and not session.known.get("stage_group"):
+        missing = ", ".join(session.missing_staging_descriptors())
+        print(f"\nCannot produce a recommendation: {missing} still unknown.",
+              file=sys.stderr)
+        return 1
+
+    result = agent.finish_consult(session, provider=args.provider,
+                                  dry_run=args.dry_run)
+    print()
+    _print_result(result, args.json)
+    return 0 if not result.error else 1
 
 
 def cmd_run(args) -> int:
@@ -280,6 +410,42 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Assemble the prompt but do not call the model")
     run.add_argument("--json", action="store_true")
     run.set_defaults(func=cmd_run)
+
+    sl = sub.add_parser("slots",
+                        help="List consultation slots and what each decides")
+    sl.add_argument("--stage-group", dest="stage_group",
+                    help="Weight the slots for this stage group (e.g. IIIB)")
+    sl.add_argument("--lang", choices=("zh", "en"), default="zh")
+    sl.set_defaults(func=cmd_slots)
+
+    cs = sub.add_parser(
+        "consult",
+        help="Autonomous consultation (自主问诊): ask, read replies, recommend")
+    cs.add_argument("-c", "--config")
+    cs.add_argument("--presentation", help="Opening statement about the case")
+    cs.add_argument("--question", help="What the clinician wants answered")
+    cs.add_argument("--case", help="Seed the consultation from a JSON case")
+    cs.add_argument("--lang", choices=("zh", "en"), default="zh",
+                    help="Consultation language (default: zh)")
+    cs.add_argument("--max-rounds", type=int, dest="max_rounds",
+                    help="Stop asking after this many rounds (default 6)")
+    cs.add_argument("--questions-per-round", type=int,
+                    dest="questions_per_round",
+                    help="How many questions to ask per round (default 3)")
+    cs.add_argument("--answers", nargs="+",
+                    help="Scripted replies, one per round (non-interactive)")
+    cs.add_argument("--no-interactive", action="store_true",
+                    dest="no_interactive",
+                    help="Do not read replies from stdin")
+    cs.add_argument("--ask-only", action="store_true", dest="ask_only",
+                    help="Gather facts and stop; do not call the model")
+    cs.add_argument("--session", help="Save/resume the session at this path")
+    cs.add_argument("--images", nargs="+", help="Radiology film(s) to attach")
+    cs.add_argument("--vision-provider", dest="vision_provider")
+    cs.add_argument("-p", "--provider")
+    cs.add_argument("--dry-run", action="store_true")
+    cs.add_argument("--json", action="store_true")
+    cs.set_defaults(func=cmd_consult)
 
     rd = sub.add_parser("read", help="Read films into proposed TNM descriptors")
     rd.add_argument("--images", nargs="+", required=True,

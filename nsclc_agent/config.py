@@ -37,6 +37,11 @@ class Config:
     #: provider used to read radiology films (perception layer). Falls back to
     #: any provider flagged ``vision: true``, else the default provider.
     vision_provider: Optional[str] = None
+    #: ``evidence:`` block — literature retrieval backend. Absent/disabled
+    #: means citations are model recall, and every run says so explicitly.
+    evidence: dict[str, Any] = field(default_factory=dict)
+    #: ``consult:`` block — defaults for the autonomous consultation loop.
+    consult: dict[str, Any] = field(default_factory=dict)
     source: Optional[str] = None
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -123,11 +128,19 @@ def load_config(path: Optional[str | os.PathLike] = None) -> Config:
             f"vision_provider {vision_provider!r} is not among configured "
             f"providers: {', '.join(providers)}"
         )
+    evidence = raw.get("evidence") or {}
+    if not isinstance(evidence, dict):
+        raise ConfigError("'evidence' must be a mapping if present")
+    consult = raw.get("consult") or {}
+    if not isinstance(consult, dict):
+        raise ConfigError("'consult' must be a mapping if present")
     return Config(
         default_provider=default_provider,
         providers=providers,
         generation=generation,
         vision_provider=vision_provider,
+        evidence=evidence,
+        consult=consult,
         source=source,
         raw=raw,
     )
