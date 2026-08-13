@@ -25,8 +25,11 @@ from ..providers.base import GenerationParams, LLMProvider, Message
 from ..staging.tnm import M_CATEGORIES, N_CATEGORIES, T_CATEGORIES
 from .slots import SLOTS_BY_KEY
 
-#: Marker the offline mock keys on to recognise a consultation-extraction call.
-CONSULT_MARKER = "CONSULTATION FACT EXTRACTION"
+# Marker the offline mock keys on to recognise a consultation-extraction
+# request. Imported rather than restated so the two cannot drift apart — a
+# desync would silently turn every model-assisted extraction into a no-op.
+# (imaging.py imports IMAGING_MARKER from the same place for the same reason.)
+from ..providers.mock import CONSULT_MARKER
 
 # --------------------------------------------------------------------------- #
 # Deterministic patterns                                                      #

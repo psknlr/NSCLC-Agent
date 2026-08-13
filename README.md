@@ -95,7 +95,7 @@ the *swappable inference backend* for teaching and evaluation.
 | Agent orchestrator | `nsclc_agent/agent.py` | (ask →) (read films →) stage → route → retrieve → prompt → LLM |
 | CLI | `nsclc_agent/cli.py` | `consult`, `slots`, `stage`, `route`, `read`, `run`, `batch`, `selftest`, … |
 | Example cases | `examples/cases/*.json` | one per stage band + an imaging cross-check case |
-| Tests | `tests/` | 298 tests, offline |
+| Tests | `tests/` | 301 tests, offline |
 
 **Stage coverage.** The engine stages *all* groups (0/I through IVB), and a
 dedicated protocol module ships for **every treatment-bearing stage**: Stage I
@@ -436,7 +436,7 @@ skips film reading, since that is a model call). Attach films to `run` with
 
 ```bash
 pip install pytest
-python -m pytest -q        # 298 tests, fully offline
+python -m pytest -q        # 301 tests, fully offline
 ```
 
 See [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture, the mapping to the

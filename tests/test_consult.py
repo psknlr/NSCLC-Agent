@@ -426,3 +426,57 @@ def test_stage_label_survives_serialisation(agent):
 def test_nothing_at_all_is_still_unanswerable(agent):
     session = agent.start_consult(presentation="68F with a cough")
     assert not session.can_be_answered()
+
+
+def test_the_mock_recognises_a_consultation_extraction_call():
+    """The marker must be one object, not two literals that can drift apart."""
+    from nsclc_agent.consult.extract import CONSULT_MARKER, _EXTRACTION_PROMPT
+    from nsclc_agent.providers.mock import CONSULT_MARKER as MOCK_MARKER
+    assert CONSULT_MARKER is MOCK_MARKER
+    assert CONSULT_MARKER in _EXTRACTION_PROMPT
+
+
+def test_model_pass_runs_and_loses_to_the_deterministic_pass():
+    """A model may fill gaps but must not overwrite a pattern-matched value."""
+    from nsclc_agent.consult.extract import extract
+    from nsclc_agent.providers.base import (
+        GenerationParams, LLMProvider, LLMResponse,
+    )
+
+    class Contradicting(LLMProvider):
+        kind = "fake"
+
+        def __init__(self):
+            super().__init__("fake", "fake-1", GenerationParams())
+
+        def complete(self, messages, *, params=None):
+            return LLMResponse(
+                content=json.dumps({
+                    "values": {"t_category": "T4", "ecog_ps": 3},
+                    "notes": ["model note"],
+                }),
+                provider=self.name, model=self.model, finish_reason="stop")
+
+    values, notes = extract("T2b, adenocarcinoma", ["t_category", "ecog_ps"],
+                            provider=Contradicting())
+    assert values["t_category"] == "T2b"   # regex wins
+    assert values["ecog_ps"] == 3          # model fills the gap
+    assert "model note" in notes
+
+
+def test_a_broken_extraction_model_does_not_end_the_consultation():
+    from nsclc_agent.consult.extract import extract
+    from nsclc_agent.providers.base import GenerationParams, LLMProvider
+
+    class Broken(LLMProvider):
+        kind = "fake"
+
+        def __init__(self):
+            super().__init__("fake", "fake-1", GenerationParams())
+
+        def complete(self, messages, *, params=None):
+            raise RuntimeError("backend down")
+
+    values, notes = extract("T2b", ["ecog_ps"], provider=Broken())
+    assert values["t_category"] == "T2b"
+    assert any("EXTRACTION_MODEL_FAILED" in n for n in notes)
