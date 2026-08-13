@@ -480,3 +480,51 @@ def test_a_broken_extraction_model_does_not_end_the_consultation():
     values, notes = extract("T2b", ["ecog_ps"], provider=Broken())
     assert values["t_category"] == "T2b"
     assert any("EXTRACTION_MODEL_FAILED" in n for n in notes)
+
+
+def test_attached_films_make_a_session_worth_running(agent):
+    """The perception layer can supply descriptors the interview never got."""
+    session = agent.start_consult(presentation="68F, LUL mass")
+    assert not session.can_be_answered()
+    session.images = ["scan.png"]
+    assert session.can_be_answered()
+
+
+def test_films_seed_the_stage_a_consultation_could_not(tmp_path):
+    import base64
+    from nsclc_agent.providers.base import (
+        GenerationParams, LLMProvider, LLMResponse,
+    )
+
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQ"
+        "DwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    img = tmp_path / "s.png"
+    img.write_bytes(png)
+
+    class FakeVision(LLMProvider):
+        kind = "fake-vision"
+
+        def __init__(self):
+            super().__init__("fv", "fv-1", GenerationParams())
+            self.supports_vision = True
+
+        def complete(self, messages, *, params=None):
+            return LLMResponse(
+                content=json.dumps({"candidate_t": "T2b",
+                                    "candidate_n": "N2b",
+                                    "candidate_m": "M0"}),
+                provider=self.name, model=self.model, finish_reason="stop")
+
+    agent = NSCLCAgent(load_config(), lang="zh")
+    agent._provider_cache["fv"] = FakeVision()
+    agent.vision_provider = "fv"
+
+    session = agent.start_consult(presentation="68岁女性，左上肺占位，附 PET-CT。")
+    session.images = [str(img)]
+    result = agent.finish_consult(session)
+    assert result.staging["stage_group"] == "IIIB"
+    assert result.imaging["status"] == "MODEL_PROPOSED_UNVERIFIED"
+    assert any("RADIOGRAPHIC_TNM_PROPOSED" in f for f in result.flags)
+    # Film-derived descriptors are imaging provenance, not interview facts.
+    assert "t_category" not in result.consult["known"]

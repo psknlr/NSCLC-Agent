@@ -166,8 +166,16 @@ class ConsultSession:
         return case
 
     def can_be_answered(self) -> bool:
-        """Is there enough to route a case — a TNM triple or a stage label?"""
-        return self.staging_ready() or bool(self.stage_group_label)
+        """Is it worth running the pipeline on what we have?
+
+        True for a TNM triple, a stage label, or attached films — the
+        perception layer proposes descriptors the interview never got, so
+        refusing before reading them would throw away the one source that
+        could still stage the case. If the read comes back empty the run
+        fails with STAGE_UNRESOLVED, which says so plainly.
+        """
+        return (self.staging_ready() or bool(self.stage_group_label)
+                or bool(self.images))
 
     def _render_presentation(self) -> str:
         """Opening text plus a transcript of the interview, in order."""

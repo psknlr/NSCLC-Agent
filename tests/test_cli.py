@@ -309,3 +309,20 @@ def test_a_resumed_session_keeps_its_language(capsys, tmp_path):
     assert code == 0
     assert "↳ why:" in out
     assert "为什么问" not in out
+
+
+def test_consult_with_films_is_not_refused_before_reading_them(capsys,
+                                                               tmp_path):
+    """Films can supply the descriptors the interview never got."""
+    import base64
+    img = tmp_path / "s.png"
+    img.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQ"
+        "DwAEhQGAhKmMIQAAAABJRU5ErkJggg=="))
+    code, out, err = run(capsys, "consult", "--no-interactive", "--lang", "en",
+                         "--max-rounds", "1", "--presentation", "68F LUL mass",
+                         "--answers", "not sure", "--images", str(img))
+    # The offline mock cannot read films, so this still ends unstaged — but via
+    # the pipeline's own STAGE_UNRESOLVED, not a pre-emptive refusal.
+    assert "Cannot produce a recommendation" not in err
+    assert "STAGE_UNRESOLVED" in out or code == 1
