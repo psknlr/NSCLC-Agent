@@ -60,13 +60,49 @@ class RankedSlot:
 
 
 def staging_is_resolvable(known: dict[str, Any]) -> bool:
-    """Can the deterministic engine run on what we know?
+    """Can the deterministic engine actually run on what we know?
 
-    ``m_category`` is deliberately included: the agent will happily stage
+    Presence is not enough — the values must be ones the engine accepts. A
+    case seeded with the ambiguous ``T2``/``N2`` that ``tnm.py`` deliberately
+    refuses would otherwise look complete: the consultation would declare
+    itself ready, never ask the one question that mattered, and only fail at
+    the very end with a staging error.
+
+    ``m_category`` is deliberately required: the agent will happily stage
     without it, but only by *assuming* M0, and the point of the consultation is
     to ask rather than assume.
     """
-    return all(known.get(k) for k in STAGING_SLOTS)
+    if not all(known.get(k) for k in STAGING_SLOTS):
+        return False
+    return not unresolvable_staging_slots(known)
+
+
+def unresolvable_staging_slots(known: dict[str, Any]) -> list[str]:
+    """Staging slots holding a value the engine cannot use."""
+    from ..staging.tnm import TNM, StagingError  # local: avoids a cycle
+
+    present = {k: known.get(k) for k in STAGING_SLOTS if known.get(k)}
+    if not present:
+        return []
+    try:
+        TNM.parse(present.get("t_category") or "TX",
+                  present.get("n_category") or "NX",
+                  present.get("m_category") or "M0")
+    except StagingError:
+        # Narrow it down to the offending descriptor(s).
+        bad = []
+        for key, probe in (("t_category", lambda v: TNM.parse(v, "N0", "M0")),
+                           ("n_category", lambda v: TNM.parse("T1a", v, "M0")),
+                           ("m_category", lambda v: TNM.parse("T1a", "N0", v))):
+            value = present.get(key)
+            if not value:
+                continue
+            try:
+                probe(value)
+            except StagingError:
+                bad.append(key)
+        return bad
+    return []
 
 
 def rank_slots(
@@ -77,6 +113,11 @@ def rank_slots(
 ) -> list[RankedSlot]:
     """Score every still-relevant slot, most valuable first."""
     band = stage_band(stage_group)
+    # A descriptor the engine cannot use is not an answer — drop it here so the
+    # planner asks again instead of treating "T2" as a settled T category.
+    unusable = unresolvable_staging_slots(known)
+    if unusable:
+        known = {k: v for k, v in known.items() if k not in unusable}
     blocking_phase = not staging_is_resolvable(known)
     ranked: list[RankedSlot] = []
     for slot in slots:

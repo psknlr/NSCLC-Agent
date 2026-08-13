@@ -63,14 +63,27 @@ decision it was asked for), reproducible across backends, and testable offline
   testing is suppressed once histology is squamous; CCRT feasibility appears
   only once the tumour is unresectable).
 - `planner.py` — ordering and stopping. Staging descriptors get a blocking
-  bonus so they are resolved before anything downstream is scored. The loop
-  ends when no relevant unknown scores at or above the sufficiency threshold.
+  bonus so they are resolved before anything downstream is scored. Sufficiency
+  is judged on *validity*, not presence: a descriptor the engine would refuse
+  counts as unknown, so the loop cannot declare itself ready on a `T2`/`N2` it
+  will fail to stage later. It ends when no relevant unknown scores at or
+  above the sufficiency threshold.
 - `extract.py` — two passes. Deterministic patterns first (they work offline
   and are reproducible), the model second, deterministic wins on conflict.
   Ambiguous descriptors are recorded as notes, never canonicalised: `"N2"` in a
-  reply must not become `N2a` any more than it may in the staging engine.
+  reply must not become `N2a` any more than it may in the staging engine, and
+  a model that returns one anyway is rejected with
+  `MODEL_DESCRIPTOR_REJECTED`. Two rules earn their keep here, because
+  violating either produces a *silently wrong* clinical value rather than an
+  error: **negation is checked before any finding is recorded** (reading "no
+  malignant pleural effusion" as M1a stages a curative patient as IVA), and
+  **ASCII keywords are word-bounded** ("operable" inside "inoperable" inverts
+  the stage III fork; "nos" inside "diagnosis" invents a histology).
 - `session.py` — serialisable state. A consultation can be paused, stored,
-  resumed in another process and replayed in a test without a model.
+  resumed in another process and replayed in a test without a model. A later
+  round may *correct* an earlier fact — refusing that made a mis-extraction
+  permanent and reported the correction as "no new facts" — and the previous
+  value is kept in `provenance` so the correction stays auditable.
 
 What the consultation did **not** learn is carried forward rather than
 discarded: `CONSULT_INCOMPLETE`, `result.consult.outstanding`, and a prompt
@@ -250,4 +263,4 @@ only the prompt loader, router, tests and examples.)
 - `test_cli.py` — the argparse front-end, in-process, including the
   consultation and the error exit codes.
 
-All 304 tests run fully offline.
+All 353 tests run fully offline.

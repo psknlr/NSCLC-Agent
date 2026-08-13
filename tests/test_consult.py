@@ -203,10 +203,37 @@ def test_opening_statement_is_mined_before_the_first_question(agent):
     assert "t_category" not in [q["key"] for q in session.ask()]
 
 
-def test_known_values_are_not_overwritten_by_later_replies(agent):
+def test_a_later_reply_can_correct_an_earlier_fact(agent):
+    """A clinician correcting themselves must be heard, and it must be logged.
+
+    Regression: `record` skipped any key already present, so the first
+    extraction was permanent — including a wrong one — and the correcting
+    round was reported back as "no new facts".
+    """
     session = agent.start_consult(presentation="T2b N2b M0")
-    agent.consult_step(session, "其实是 T3")
-    assert session.known["t_category"] == "T2b"
+    agent.consult_step(session, "更正一下：其实是 T3。")
+    assert session.known["t_category"] == "T3"
+    assert session.turns[-1].extracted["t_category"] == "T3"
+    assert any("FACT_CORRECTED[t_category]" in n for n in session.notes)
+    assert session.provenance["t_category"]["corrected_from"] == "T2b"
+
+
+def test_a_correction_re_stages_the_case(agent):
+    session = agent.start_consult(presentation="腺癌 T2b N2a M0")
+    assert session.stage_group == "IIIA"
+    agent.consult_step(session, "更正：纵隔是多站的，N2b。")
+    assert session.known["n_category"] == "N2b"
+    assert session.stage_group == "IIIB"
+
+
+def test_two_readings_of_one_reply_do_not_fight(agent):
+    """Within a round the deterministic pass runs first and keeps its value."""
+    session = agent.start_consult(presentation="")
+    agent.consult_step(session, "T2b N2b M0")
+    before = dict(session.known)
+    session.record({"t_category": "T4"}, source="reply",
+                   round_index=session.round_index - 1)
+    assert session.known["t_category"] == before["t_category"]
 
 
 def test_provenance_records_where_each_fact_came_from(agent):
@@ -528,3 +555,208 @@ def test_films_seed_the_stage_a_consultation_could_not(tmp_path):
     assert any("RADIOGRAPHIC_TNM_PROPOSED" in f for f in result.flags)
     # Film-derived descriptors are imaging provenance, not interview facts.
     assert "t_category" not in result.consult["known"]
+
+
+# ===========================================================================
+# Regressions from the independent review of this subsystem. Each of these
+# produced a silently wrong clinical value, not a crash.
+# ===========================================================================
+
+@pytest.mark.parametrize("text", [
+    "PET-CT: no distant metastasis, no malignant pleural effusion.",
+    "PET-CT 未见远处转移，无恶性胸腔积液。",
+    "No pleural nodules and no pericardial involvement on CT.",
+    "未见胸膜转移，未见心包转移。",
+])
+def test_a_negated_finding_does_not_set_m1(text):
+    """"no malignant pleural effusion" set M1a — staging a curative case IVA."""
+    values, _ = extract_deterministic(text)
+    assert values.get("m_category") != "M1a"
+
+
+def test_a_real_m1a_finding_still_sets_m1a():
+    values, _ = extract_deterministic("CT shows a malignant pleural effusion.")
+    assert values["m_category"] == "M1a"
+
+
+def test_negated_case_does_not_route_to_the_metastatic_module(agent):
+    session = agent.start_consult(presentation=(
+        "65M, RUL adenocarcinoma, cT2b, multi-station mediastinal nodes N2b. "
+        "PET-CT: no distant metastasis, no malignant pleural effusion. "
+        "Brain MRI normal. ECOG 1."))
+    assert session.stage_group == "IIIB"
+    assert agent.finish_consult(session, dry_run=True).module_key == "stage3b"
+
+
+@pytest.mark.parametrize("text", [
+    "EGFR 19del positive / ALK negative / ROS1 negative",
+    "基因检测：EGFR 19del 阳性 ALK 阴性 ROS1 阴性",
+    "NGS: EGFR exon 19 deletion detected ALK not detected",
+])
+def test_one_genes_result_does_not_bleed_into_another(text):
+    """An EGFR-mutant patient was being recorded as EGFR-negative."""
+    values, _ = extract_deterministic(text)
+    assert "negative" not in str(values.get("egfr", "")).lower()
+    assert values.get("alk") in ("negative", "not_tested")
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("MDT deemed the tumour inoperable because of poor cardiac reserve.",
+     ("unresectable", "medically_inoperable")),
+    ("He is considered inoperable; definitive chemoradiation is planned.",
+     ("unresectable", "medically_inoperable")),
+    ("The tumour is not resectable.", ("unresectable",)),
+    ("MDT considers it resectable.", ("resectable",)),
+    ("Medically operable and technically resectable.", ("resectable",)),
+    ("Patient refused surgery.", ("declined_surgery",)),
+])
+def test_resectability_is_not_inverted(text, expected):
+    """"operable" matched inside "inoperable", flipping the stage III fork."""
+    assert extract_deterministic(text)[0].get("resectability") in expected
+
+
+def test_inoperable_still_opens_the_ccrt_question():
+    known = extract_deterministic("The tumour is inoperable.")[0]
+    assert "ccrt_feasibility" in [r.key for r in rank_slots(known, "IIIB")]
+
+
+@pytest.mark.parametrize("text", [
+    "There is no tissue diagnosis yet; the lesion was found on screening CT.",
+    "The diagnosis was made at another hospital.",
+    "Prognosis was discussed with the family.",
+])
+def test_histology_is_not_invented_from_diagnosis_or_prognosis(text):
+    """"nos" matched inside "diagnosis", and histology then never got asked."""
+    assert "histology" not in extract_deterministic(text)[0]
+
+
+def test_a_real_nsclc_nos_is_still_read():
+    assert extract_deterministic("Histology: NSCLC-NOS.")[0]["histology"] == \
+        "NSCLC_NOS"
+
+
+@pytest.mark.parametrize("text", [
+    "低剂量CT3年随访", "复查CT3次未见变化", "PET-CT4处高代谢灶",
+    "Serial CT4 weeks apart",
+])
+def test_a_t_descriptor_is_not_invented_from_the_word_ct(text):
+    """The 'C' of 'CT' was consumed as a staging prefix."""
+    assert "t_category" not in extract_deterministic(text)[0]
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("cT2b N2b M0", "T2b"), ("CT shows T3 disease", "T3"),
+    ("ypT1bN0M0", "T1b"), ("pT4 N0", "T4"),
+])
+def test_real_descriptors_survive_the_prefix_check(text, expected):
+    assert extract_deterministic(text)[0]["t_category"] == expected
+
+
+@pytest.mark.parametrize("text", [
+    "EBUS sampled 3 stations, all negative",
+    "N2 disease involving 4 stations",
+    "纵隔淋巴结肿大 共 2 组",
+])
+def test_a_count_of_stations_is_not_a_station_number(text):
+    assert not extract_deterministic(text)[0].get("n2_stations")
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("EBUS: station 7 positive", ["7"]),
+    ("7 组淋巴结受累", ["7"]),
+    ("第 4 组和第 7 组纵隔淋巴结", ["4", "7"]),
+])
+def test_station_identifiers_are_still_read(text, expected):
+    assert extract_deterministic(text)[0]["n2_stations"] == expected
+
+
+@pytest.mark.parametrize("text", [
+    "Brain MRI showed no brain metastases.",
+    "No bone metastases on the bone scan.",
+    "Liver ultrasound shows no liver metastasis.",
+])
+def test_english_negation_of_a_site_is_honoured(text):
+    """The negation guard existed only in Chinese, so English replies that
+    ruled a site out produced an audit note asserting M1."""
+    values, notes = extract_deterministic(text)
+    assert values.get("m_category") != "M1a"
+    assert not any("AMBIGUOUS_DESCRIPTOR" in n and "metastas" in n
+                   for n in notes)
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("PD-L1 (22C3) TPS 50%", 50),
+    ("PD-L1 22C3 TPS 60%", 60),
+    ("PD-L1 TPS 50%", 50),
+    ("PD-L1 (SP263) 1%", 1),
+])
+def test_a_named_assay_does_not_block_the_pd_l1_match(text, expected):
+    assert extract_deterministic(text)[0]["pd_l1"] == expected
+
+
+def test_spelled_out_performance_status_is_read():
+    assert extract_deterministic(
+        "ECOG performance status 1, no weight loss")[0]["ecog_ps"] == 1
+
+
+def test_an_ecog_range_records_the_worse_end_and_says_so():
+    values, notes = extract_deterministic("ECOG 0-1")
+    assert values["ecog_ps"] == 1
+    assert any("ECOG_RANGE" in n for n in notes)
+
+
+# --- validity, not just presence -------------------------------------------
+
+def test_ambiguous_seeded_descriptors_do_not_look_resolved(agent):
+    """A case seeded with T2/N2 declared itself ready and never asked again."""
+    case = Case.from_dict({"id": "c9", "t": "T2", "n": "N2", "m": "M0",
+                           "presentation": "腺癌，ECOG 1"})
+    session = agent.start_consult(case=case)
+    assert not session.staging_ready()
+    assert session.status == STATUS_GATHERING
+    asked = [q["key"] for q in session.ask()]
+    assert "t_category" in asked and "n_category" in asked
+
+
+def test_a_model_may_not_supply_an_ambiguous_descriptor():
+    from nsclc_agent.consult.extract import extract
+    from nsclc_agent.providers.base import (
+        GenerationParams, LLMProvider, LLMResponse,
+    )
+
+    class Ambiguous(LLMProvider):
+        kind = "fake"
+
+        def __init__(self):
+            super().__init__("f", "f1", GenerationParams())
+
+        def complete(self, messages, *, params=None):
+            return LLMResponse(
+                content=json.dumps({"values": {"t_category": "T2",
+                                               "n_category": "N2"}}),
+                provider="f", model="f1", finish_reason="stop")
+
+    values, notes = extract("no descriptors here",
+                            ["t_category", "n_category"],
+                            provider=Ambiguous())
+    assert "t_category" not in values and "n_category" not in values
+    assert sum("MODEL_DESCRIPTOR_REJECTED" in n for n in notes) == 2
+
+
+# --- _refresh idempotence ---------------------------------------------------
+
+def test_refresh_does_not_duplicate_the_exhausted_note(agent):
+    session = agent.start_consult(presentation="", max_rounds=1)
+    agent.consult_step(session, "不清楚")
+    before = len(session.notes)
+    for _ in range(3):
+        agent._refresh(session)
+    assert len(session.notes) == before
+
+
+def test_a_completed_session_is_not_dragged_back_into_gathering(agent):
+    session = agent.start_consult(presentation="腺癌 T2b N2b M0 ECOG 1")
+    agent.finish_consult(session)
+    assert session.status == "complete"
+    agent._refresh(session)
+    assert session.status == "complete"

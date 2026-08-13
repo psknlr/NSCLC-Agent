@@ -17,6 +17,7 @@ of the staging engine is not to let a model quietly restate a descriptor.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from typing import Any, Optional
@@ -37,19 +38,32 @@ from ..providers.mock import CONSULT_MARKER
 
 #: Written together ("cT2bN2bM0") the sub-letters make a plain lookbehind fail,
 #: so the concatenated form is matched as a unit before the separate ones.
+#: The staging prefix is captured rather than consumed so it can be checked:
+#: it must be absent or lowercase (cT/pN/ypT). Consuming an UPPERCASE prefix
+#: reads the "C" of "CT" as one, and "低剂量CT3年随访" becomes a T3 tumour.
 _TNM_RUN_RE = re.compile(
-    r"(?<![A-Za-z])[cpy]{0,2}(T(?:is|X|1mi|1[abc]|2[ab]|[34]))"
-    r"\s*[cp]?(N(?:X|0|1|2a|2b|3))"
+    r"(?<![A-Za-z])([cpy]{0,2})(T(?:is|X|1mi|1[abc]|2[ab]|[34]))"
+    r"\s*([cp]?)(N(?:X|0|1|2a|2b|3))"
     r"(?:\s*[cp]?(M(?:X|0|1a|1b|1c1|1c2)))?(?![a-zA-Z0-9])",
     re.IGNORECASE)
 _T_RE = re.compile(
-    r"(?<![A-Za-z])[cpy]{0,2}(T(?:is|X|1mi|1[abc]|2[ab]|[34]))(?![a-zA-Z0-9])",
-    re.IGNORECASE)
+    r"(?<![A-Za-z])([cpy]{0,2})(T(?:is|X|1mi|1[abc]|2[ab]|[34]))"
+    r"(?![a-zA-Z0-9])", re.IGNORECASE)
 _N_RE = re.compile(
-    r"(?<![A-Za-z])[cp]?(N(?:X|0|1|2a|2b|3))(?![a-zA-Z0-9])", re.IGNORECASE)
-_M_RE = re.compile(
-    r"(?<![A-Za-z])[cp]?(M(?:X|0|1a|1b|1c1|1c2))(?![a-zA-Z0-9])",
+    r"(?<![A-Za-z])([cp]{0,2})(N(?:X|0|1|2a|2b|3))(?![a-zA-Z0-9])",
     re.IGNORECASE)
+_M_RE = re.compile(
+    r"(?<![A-Za-z])([cp]{0,2})(M(?:X|0|1a|1b|1c1|1c2))(?![a-zA-Z0-9])",
+    re.IGNORECASE)
+
+
+def _prefix_ok(prefix: str) -> bool:
+    """A staging prefix is written lowercase (cT2b, pN0, ypT1b).
+
+    An uppercase one is almost always the tail of another word — "CT", "PET-CT"
+    — not a descriptor prefix.
+    """
+    return prefix == "" or prefix.islower()
 #: Ambiguous forms we must *not* silently canonicalise (see staging/tnm.py).
 _AMBIGUOUS_RE = re.compile(
     r"(?<![A-Za-z])[cp]?(T1|T2|N2|M1|M1c)(?![a-zA-Z0-9])")
@@ -58,13 +72,20 @@ _AMBIGUOUS_RE = re.compile(
 #: hides inside ordinary words — "bio(ps)y. 4.5 cm" reads as ECOG 4, i.e. a
 #: bedbound patient, which is about as wrong as an extraction can be.
 _ECOG_RE = re.compile(
-    r"(?:(?i:ECOG)(?:\s*(?i:PS))?|\bPS\b|体力状态|体能状态|一般情况|ECOG评分)"
-    r"[^0-9\n]{0,6}([0-4])(?!\d)")
+    r"(?:(?i:ECOG)(?:[^0-9\n]{0,22}?(?i:performance\s+status|PS))?"
+    r"|\bPS\b|体力状态|体能状态|一般情况|ECOG评分)"
+    r"[^0-9\n]{0,8}([0-4])(?!\d)")
+#: "ECOG 0-1" is a range, not a 0. Taking the first number silently records the
+#: better half; the worse end is the safe reading, and it is noted.
+_ECOG_RANGE_RE = re.compile(r"\s*[-–—~至到]\s*([0-4])(?!\d)")
 _AGE_RE = re.compile(r"(\d{1,3})\s*(?:岁|years?\s*old|y/?o\b|yr\b)",
                      re.IGNORECASE)
 _AGE_COMPACT_RE = re.compile(r"\b(\d{2,3})\s*(?:[MF]|男|女)\b")
+#: The gap must be allowed to contain digits: the assay clone is usually named
+#: ("PD-L1 (22C3) TPS 50%"), and forbidding digits blocked the whole match —
+#: on the exact phrasing the PD-L1 question invites ("…and which assay?").
 _PDL1_RE = re.compile(
-    r"PD-?L1[^0-9%]{0,25}?(\d{1,3})\s*%", re.IGNORECASE)
+    r"(?:PD-?L1|\bTPS\b|\bCPS\b)[^%\n]{0,40}?(\d{1,3})\s*%", re.IGNORECASE)
 _PDL1_NEG_RE = re.compile(
     r"PD-?L1[^。;；,，]{0,20}(阴性|negative|<\s*1\s*%)", re.IGNORECASE)
 #: A sentence has to be *about* nodes before bare numbers in it are read as
@@ -77,8 +98,15 @@ _NODE_SENTENCE_RE = re.compile(
 #: element — "4R, 7 and 10L" — never when embedded like "2 个淋巴结".
 _STATION_SIDED_RE = re.compile(r"(?<![\d.])(1[0-4]|[1-9])([RL])\b",
                                re.IGNORECASE)
-_STATION_WORDED_RE = re.compile(
-    r"(?<![\d.])(1[0-4]|[1-9])([RL])?\s*(?:组|站|station)", re.IGNORECASE)
+#: English puts the word first for an identifier ("station 7") and the number
+#: first for a count ("3 stations"). Matching either way round turned "EBUS
+#: sampled 3 stations" into station 3 — a fabricated nodal map.
+_STATION_WORDED_EN_RE = re.compile(
+    r"\bstations?\s*(?:no\.?\s*)?(1[0-4]|[1-9])([RL])?\b", re.IGNORECASE)
+#: Chinese writes the identifier as "7组"/"第7组"; a count carries a cue word.
+_STATION_WORDED_ZH_RE = re.compile(
+    r"第?\s*(1[0-4]|[1-9])([RL])?\s*(?:组|站)", re.IGNORECASE)
+_ZH_COUNT_CUE_RE = re.compile(r"(?:共|计|累计|总共|个|枚|肿大|有)\s*$")
 _STATION_BARE_RE = re.compile(r"^(1[0-4]|[1-9])([RL])?$", re.IGNORECASE)
 _STATION_SPLIT_RE = re.compile(r"[、,，/和&—–\-:：;；]|\band\b|\+",
                                re.IGNORECASE)
@@ -135,14 +163,21 @@ _HISTOLOGY = (
     ("NSCLC_NOS", ("nsclc-nos", "nsclc nos", "非小细胞肺癌未分型", "nos")),
 )
 
+#: Order matters: the "not-" rows are checked first, and every needle is
+#: word-bounded (see ``_needle_re``) so "operable" cannot fire inside
+#: "inoperable" — which used to invert the dominant fork of stage III.
 _RESECTABILITY = (
-    ("unresectable", ("不可切除", "无法切除", "不能切除", "unresectable",
-                      "not resectable", "inoperable tumour")),
-    ("medically_inoperable", ("不能耐受手术", "无法耐受手术", "medically "
-                              "inoperable", "unfit for surgery", "高危不宜手术")),
+    ("unresectable", ("不可切除", "无法切除", "不能切除", "不可手术切除",
+                      "unresectable", "not resectable", "non-resectable",
+                      "nonresectable", "unresected")),
+    ("medically_inoperable", ("不能耐受手术", "无法耐受手术", "高危不宜手术",
+                              "medically inoperable", "unfit for surgery",
+                              "inoperable")),
     ("declined_surgery", ("拒绝手术", "不愿手术", "declines surgery",
-                          "declined surgery", "refuses surgery")),
-    ("resectable", ("可切除", "能切除", "可以手术", "resectable", "operable")),
+                          "declined surgery", "refuses surgery",
+                          "refused surgery")),
+    ("resectable", ("可切除", "能切除", "可以手术", "可手术切除",
+                    "resectable", "operable")),
 )
 
 _SMOKING = (
@@ -153,35 +188,94 @@ _SMOKING = (
 )
 
 
-def _classify(text: str, table: tuple) -> Optional[str]:
-    low = text.lower()
+#: Negation cues, checked immediately before a matched phrase. Without this a
+#: reply that RULES OUT a finding reads as asserting it: "no malignant pleural
+#: effusion" set M1a, i.e. it staged a curative patient as IVA.
+_NEGATION_RE = re.compile(
+    r"(?:无|未见|没有|未发现|未|否认|排除|不伴|阴性"
+    r"|\b(?:no|not|without|negative\s+for|free\s+of|absent|denies|denied"
+    r"|ruled\s+out|excluded)\b)"
+    # …followed only by filler, never across a clause break, up to the phrase.
+    r"[^。.;；,，、\n]{0,24}$",
+    re.IGNORECASE)
+
+
+def _is_negated(text: str, start: int) -> bool:
+    """Is the phrase starting at ``start`` inside a negation?"""
+    return bool(_NEGATION_RE.search(text[max(0, start - 40):start]))
+
+
+def _needle_re(needle: str) -> re.Pattern:
+    """Match a keyword, with word boundaries when it is ASCII.
+
+    Substring matching is why "operable" fired inside "inoperable" (inverting
+    resectability) and "nos" fired inside "diagnosis" (inventing a histology).
+    CJK needles have no word boundaries and are matched as substrings.
+    """
+    if needle.isascii():
+        return re.compile(r"\b" + re.escape(needle) + r"\b", re.IGNORECASE)
+    return re.compile(re.escape(needle))
+
+
+@functools.lru_cache(maxsize=512)
+def _compiled(needle: str) -> re.Pattern:
+    return _needle_re(needle)
+
+
+def _find(text: str, needle: str, *, allow_negated: bool = True):
+    """First non-negated occurrence of ``needle``, or None."""
+    for m in _compiled(needle).finditer(text):
+        if allow_negated or not _is_negated(text, m.start()):
+            return m
+    return None
+
+
+def _classify(text: str, table: tuple, *,
+              allow_negated: bool = True) -> Optional[str]:
     for value, needles in table:
-        if any(n.lower() in low for n in needles):
+        if any(_find(text, n, allow_negated=allow_negated) for n in needles):
             return value
     return None
 
 
-def _driver_status(text: str, gene: str) -> Optional[str]:
-    """Read one gene's result out of a sentence mentioning it."""
-    low = text.lower()
-    idx = low.find(gene.lower())
-    if idx < 0:
-        return None
-    # Look at the clause the gene appears in, not the whole reply — otherwise a
-    # later sentence about something else gets captured as the gene's result.
-    window = _CLAUSE_RE.split(text[idx:idx + 60])[0].strip()
-    wlow = window.lower()
-    if any(n in wlow for n in _UNTESTED):
-        return "not_tested"
-    if any(n in wlow for n in _NEGATIVE):
-        return "negative"
-    if any(n in wlow for n in _POSITIVE):
-        return window or "positive"
-    return None
-
+#: Every gene name we recognise. A gene's result window must stop at the next
+#: gene: "EGFR 19del positive / ALK negative" has no clause punctuation, so an
+#: unbounded window read ALK's "negative" as EGFR's result and recorded an
+#: EGFR-mutant patient as wild-type.
+_GENE_NAMES = ("EGFR", "ALK", "ROS1", "BRAF", "KRAS", "MET", "RET", "NTRK",
+               "HER2", "ERBB2", "PD-L1", "PDL1", "NRG1", "TP53")
 
 #: Clause boundaries in both languages, used to bound a gene's result window.
 _CLAUSE_RE = re.compile(r"[。.;；,，、\n]")
+
+
+def _driver_status(text: str, gene: str) -> Optional[str]:
+    """Read one gene's result out of the clause naming it."""
+    m = _compiled(gene).search(text)
+    if m is None:
+        return None
+    start = m.end()
+    rest = text[start:start + 80]
+
+    # Stop at the first clause break…
+    cut = _CLAUSE_RE.search(rest)
+    end = cut.start() if cut else len(rest)
+    # …or at the next gene named, whichever comes first.
+    for other in _GENE_NAMES:
+        if other.upper() == gene.upper():
+            continue
+        found = _compiled(other).search(rest)
+        if found and found.start() < end:
+            end = found.start()
+
+    window = (m.group(0) + rest[:end]).strip(" \t/|-–—、,，;；:：")
+    if any(_find(window, n) for n in _UNTESTED):
+        return "not_tested"
+    if any(_find(window, n) for n in _NEGATIVE):
+        return "negative"
+    if any(_find(window, n) for n in _POSITIVE):
+        return window or "positive"
+    return None
 
 
 def _canon(value: str, vocab: tuple[str, ...]) -> Optional[str]:
@@ -210,21 +304,25 @@ def extract_deterministic(text: str) -> tuple[dict[str, Any], list[str]]:
     if not text or not text.strip():
         return values, notes
 
-    run = _TNM_RUN_RE.search(text)
-    if run:
-        for raw, key, vocab in ((run.group(1), "t_category", T_CATEGORIES),
-                                (run.group(2), "n_category", N_CATEGORIES),
-                                (run.group(3), "m_category", M_CATEGORIES)):
+    for run in _TNM_RUN_RE.finditer(text):
+        if not (_prefix_ok(run.group(1)) and _prefix_ok(run.group(3))):
+            continue
+        for raw, key, vocab in ((run.group(2), "t_category", T_CATEGORIES),
+                                (run.group(4), "n_category", N_CATEGORIES),
+                                (run.group(5), "m_category", M_CATEGORIES)):
             if raw:
                 _set_descriptor(values, key, raw, vocab)
+        break
     for regex, key, vocab in ((_T_RE, "t_category", T_CATEGORIES),
                               (_N_RE, "n_category", N_CATEGORIES),
                               (_M_RE, "m_category", M_CATEGORIES)):
         if key in values:
             continue
-        m = regex.search(text)
-        if m:
-            _set_descriptor(values, key, m.group(1), vocab)
+        for m in regex.finditer(text):
+            if not _prefix_ok(m.group(1)):
+                continue
+            _set_descriptor(values, key, m.group(2), vocab)
+            break
 
     # Ambiguous descriptors are recorded as a note, never canonicalised: "N2"
     # without a sub-letter is exactly the input the staging engine refuses.
@@ -240,7 +338,17 @@ def extract_deterministic(text: str) -> tuple[dict[str, Any], list[str]]:
 
     m = _ECOG_RE.search(text)
     if m:
-        values["ecog_ps"] = int(m.group(1))
+        score = int(m.group(1))
+        span = _ECOG_RANGE_RE.match(text, m.end())
+        if span:
+            upper = int(span.group(1))
+            if upper != score:
+                notes.append(
+                    f"ECOG_RANGE: the reply gave a range ({score}-{upper}); "
+                    f"recorded the worse end ({max(score, upper)})."
+                )
+            score = max(score, upper)
+        values["ecog_ps"] = score
 
     m = _AGE_RE.search(text) or _AGE_COMPACT_RE.search(text)
     if m:
@@ -256,15 +364,17 @@ def extract_deterministic(text: str) -> tuple[dict[str, Any], list[str]]:
     elif _PDL1_NEG_RE.search(text):
         values["pd_l1"] = "<1%"
 
-    hist = _classify(text, _HISTOLOGY)
+    # These three are assertions about the patient, so a negated mention
+    # ("no tissue diagnosis", "not resectable") must not set them.
+    hist = _classify(text, _HISTOLOGY, allow_negated=False)
     if hist:
         values["histology"] = hist
 
-    resect = _classify(text, _RESECTABILITY)
+    resect = _classify(text, _RESECTABILITY, allow_negated=False)
     if resect:
         values["resectability"] = resect
 
-    smoke = _classify(text, _SMOKING)
+    smoke = _classify(text, _SMOKING, allow_negated=False)
     if smoke:
         values["smoking"] = smoke
 
@@ -280,15 +390,14 @@ def extract_deterministic(text: str) -> tuple[dict[str, Any], list[str]]:
     # Only fall back to prose for M when no explicit descriptor was written.
     if "m_category" not in values:
         low = text.lower()
+        # Both of these describe findings, so a negated mention rules the
+        # finding OUT. Reading "no malignant pleural effusion" as M1a staged a
+        # curative patient as IVA and routed them to the metastatic module.
         named_site = next(
-            (s for s in _DISTANT_SITES
-             if s.lower() in low
-             and not any(neg + s in text for neg in ("无", "未见", "没有",
-                                                     "未发现"))),
+            (s for s in _DISTANT_SITES if _find(text, s, allow_negated=False)),
             None,
         )
-        m1 = next((code for code, needles in _M1_HINTS
-                   if any(n.lower() in low for n in needles)), None)
+        m1 = _classify(text, _M1_HINTS, allow_negated=False)
         says_m0 = (any(p.lower() in low for p in _M0_PHRASES)
                    or bool(_M0_WORKUP_RE.search(text)))
         if m1:
@@ -317,9 +426,15 @@ def _extract_stations(text: str) -> list[str]:
     """IASLC station numbers, read only out of node-related sentences."""
     found: set[str] = set()
     for sentence in _NODE_SENTENCE_RE.findall(text):
-        for regex in (_STATION_SIDED_RE, _STATION_WORDED_RE):
+        for regex in (_STATION_SIDED_RE, _STATION_WORDED_EN_RE):
             for m in regex.finditer(sentence):
                 found.add(m.group(1) + (m.group(2) or "").upper())
+        for m in _STATION_WORDED_ZH_RE.finditer(sentence):
+            # "共 2 组" / "肿大 2 组" is a count of stations, not station 2.
+            if _ZH_COUNT_CUE_RE.search(sentence[max(0, m.start() - 6):
+                                                m.start()]):
+                continue
+            found.add(m.group(1) + (m.group(2) or "").upper())
         # Bare numbers only as standalone list elements ("…, 7 and 10L").
         for chunk in _STATION_SPLIT_RE.split(sentence):
             m = _STATION_BARE_RE.match(chunk.strip())
@@ -383,12 +498,35 @@ def extract_with_model(
     if not isinstance(data, dict):
         return {}, []
     raw = data.get("values")
-    values = {} if not isinstance(raw, dict) else {
-        k: v for k, v in raw.items()
-        if k in SLOTS_BY_KEY and v not in (None, "", [], {})
-    }
     notes = [str(n) for n in (data.get("notes") or [])]
+    if not isinstance(raw, dict):
+        return {}, notes
+    values: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key not in SLOTS_BY_KEY or value in (None, "", [], {}):
+            continue
+        # The prompt forbids canonicalising an ambiguous descriptor, but a
+        # model that ignores it must not get one past the engine either: an
+        # unusable "T2" here would make the consultation look complete and
+        # then fail at staging time.
+        vocab = _DESCRIPTOR_VOCAB.get(key)
+        if vocab is not None and not _canon(str(value), vocab):
+            notes.append(
+                f"MODEL_DESCRIPTOR_REJECTED[{key}]: {value!r} is not a "
+                f"9th-edition category — discarded, the question stands."
+            )
+            continue
+        values[key] = value
     return values, notes
+
+
+#: Slots whose values must be 9th-edition descriptors, checked before a model
+#: is allowed to fill them.
+_DESCRIPTOR_VOCAB: dict[str, tuple[str, ...]] = {
+    "t_category": T_CATEGORIES + ("T1mi",),
+    "n_category": N_CATEGORIES,
+    "m_category": M_CATEGORIES,
+}
 
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)

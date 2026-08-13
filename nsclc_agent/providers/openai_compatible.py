@@ -181,7 +181,8 @@ class OpenAICompatibleProvider(LLMProvider):
         token_field_switched = False
         last_error: Optional[Exception] = None
 
-        for attempt in range(self.max_retries + 1):
+        attempt = 0
+        while True:
             try:
                 return self._parse(self._post(body))
             except urllib.error.HTTPError as exc:
@@ -189,6 +190,9 @@ class OpenAICompatibleProvider(LLMProvider):
                 # A model that wants max_completion_tokens instead of
                 # max_tokens: switch the field once and retry immediately
                 # rather than failing a whole batch on a naming difference.
+                # This retry does NOT consume an attempt — it is a corrected
+                # request, not a repeat of a failed one, and consuming one
+                # exhausted the loop when max_retries was 0.
                 other = _other_token_field(self.max_tokens_field)
                 if (exc.code == 400 and not token_field_switched
                         and other in detail):
@@ -218,10 +222,13 @@ class OpenAICompatibleProvider(LLMProvider):
             if attempt >= self.max_retries:
                 break
             self._sleep(self._retry_delay(attempt, retry_after))
+            attempt += 1
 
-        assert last_error is not None
         raise ProviderError(
-            f"{last_error} (gave up after {self.max_retries + 1} attempt(s))"
+            f"{last_error} (gave up after {attempt + 1} attempt(s))"
+            if last_error is not None else
+            f"{self.name}: request to {self._endpoint()} failed after "
+            f"{attempt + 1} attempt(s)"
         )
 
 

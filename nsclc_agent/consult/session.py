@@ -107,16 +107,41 @@ class ConsultSession:
 
     def record(self, values: dict[str, Any], *, source: str,
                round_index: Optional[int] = None) -> dict[str, Any]:
-        """Merge new facts in. Already-known values are not overwritten."""
+        """Merge new facts in.
+
+        A value from a *later* round replaces an earlier one, and the
+        replacement is recorded. Refusing to overwrite makes a mis-extraction
+        permanent: the clinician says "to be clear, M0", the correction is
+        dropped, and the round is reported as yielding nothing. The previous
+        value is kept in ``provenance`` so the correction is auditable rather
+        than invisible.
+        """
         accepted: dict[str, Any] = {}
         rnd = self.round_index if round_index is None else round_index
         for key, value in values.items():
             if value in (None, "", [], {}):
                 continue
-            if key in self.known and self.known[key] not in (None, "", [], {}):
-                continue
+            previous = self.known.get(key)
+            if previous not in (None, "", [], {}):
+                if previous == value:
+                    continue
+                prior_round = (self.provenance.get(key) or {}).get("round", -1)
+                if rnd <= prior_round:
+                    # Same round: two readings of one reply, first wins (the
+                    # deterministic pass runs first, and it is the trusted one).
+                    continue
+                self.notes.append(
+                    f"FACT_CORRECTED[{key}]: {previous!r} → {value!r} "
+                    f"(round {prior_round} → {rnd})"
+                )
+                self.provenance[key] = {
+                    "round": rnd, "source": source,
+                    "corrected_from": previous,
+                    "corrected_from_round": prior_round,
+                }
+            else:
+                self.provenance[key] = {"round": rnd, "source": source}
             self.known[key] = value
-            self.provenance[key] = {"round": rnd, "source": source}
             accepted[key] = value
         return accepted
 

@@ -669,7 +669,14 @@ class NSCLCAgent:
                        lang=session.lang)
 
     def _refresh(self, session: ConsultSession) -> ConsultSession:
-        """Re-stage on what is known and recompute the stopping condition."""
+        """Re-stage on what is known and recompute the stopping condition.
+
+        Idempotent: it runs on every start/step/finish and on resume, so it
+        must not accumulate duplicate notes, and it must not drag a session
+        that has already produced a recommendation back into gathering.
+        """
+        if session.status == STATUS_COMPLETE:
+            return session
         session.stage_group = None
         # A TNM triple stages deterministically; failing that, a stage label the
         # case arrived with still tells the planner which band to weight by.
@@ -681,12 +688,12 @@ class NSCLCAgent:
             session.status = STATUS_READY
         elif session.rounds_remaining <= 0:
             session.status = STATUS_EXHAUSTED
-            session.notes.append(
-                f"CONSULT_ROUNDS_EXHAUSTED: stopped after "
-                f"{session.max_rounds} round(s) with decision-relevant facts "
-                f"still unknown; they are carried into the result as "
-                f"information gaps."
-            )
+            note = (f"CONSULT_ROUNDS_EXHAUSTED: stopped after "
+                    f"{session.max_rounds} round(s) with decision-relevant "
+                    f"facts still unknown; they are carried into the result "
+                    f"as information gaps.")
+            if note not in session.notes:
+                session.notes.append(note)
         else:
             session.status = STATUS_GATHERING
         return session
