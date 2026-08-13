@@ -64,3 +64,29 @@ def test_ia_substaging():
     assert stage_from_strings("T1a", "N0", "M0").stage_group == "IA1"
     assert stage_from_strings("T1b", "N0", "M0").stage_group == "IA2"
     assert stage_from_strings("T1c", "N0", "M0").stage_group == "IA3"
+
+
+# --- ambiguity discipline (T1 sub-letter, empty M) -------------------------
+
+def test_ambiguous_t1_rejected():
+    """Bare 'T1' must be refused like 'T2': the sub-letter sets IA1/IA2/IA3."""
+    with pytest.raises(StagingError) as exc:
+        stage_from_strings("T1", "N0", "M0")
+    assert "T1a" in str(exc.value) and "T1c" in str(exc.value)
+
+
+def test_t1mi_still_accepted():
+    """T1mi (minimally invasive adenocarcinoma) is unambiguous → T1a/IA1."""
+    r = stage_from_strings("T1mi", "N0", "M0")
+    assert r.tnm.t == "T1a"
+    assert r.stage_group == "IA1"
+
+
+def test_empty_m_rejected_not_assumed_m0():
+    with pytest.raises(StagingError) as exc:
+        stage_from_strings("T3", "N2b", "")
+    assert "M0" in str(exc.value)
+
+
+def test_explicit_m0_default_still_works():
+    assert stage_from_strings("T3", "N2b").stage_group == "IIIB"

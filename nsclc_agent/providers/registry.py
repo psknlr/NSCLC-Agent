@@ -30,12 +30,27 @@ def _resolve_secret(cfg: dict, key_field: str, env_field: str) -> Optional[str]:
 
 def _gen_params(cfg: dict, defaults: GenerationParams) -> GenerationParams:
     gen = cfg.get("generation", {}) or {}
+    # ``merged`` unions the ``extra`` dicts, so a per-provider extra block
+    # extends the global one instead of replacing it.
     return defaults.merged(
         temperature=gen.get("temperature"),
         max_tokens=gen.get("max_tokens"),
         top_p=gen.get("top_p"),
         extra=gen.get("extra"),
     )
+
+
+def _transport(cfg: dict) -> dict:
+    """HTTP transport options shared by the OpenAI-shaped backends."""
+    opts: dict[str, Any] = {
+        "timeout": float(cfg.get("timeout", 120.0)),
+        "max_retries": int(cfg.get("max_retries", 3)),
+        "retry_backoff": float(cfg.get("retry_backoff", 1.0)),
+    }
+    field = cfg.get("max_tokens_field")
+    if field:
+        opts["max_tokens_field"] = str(field)
+    return opts
 
 
 def build_provider(
@@ -72,8 +87,8 @@ def build_provider(
             api_key=_resolve_secret(cfg, "api_key", "api_key_env") or "",
             endpoint=cfg.get("endpoint", ""),
             api_version=cfg.get("api_version", "2024-10-21"),
-            timeout=float(cfg.get("timeout", 120.0)),
             supports_vision=vision,
+            **_transport(cfg),
         )
 
     if kind == "poe":
@@ -81,8 +96,8 @@ def build_provider(
             name, cfg.get("model", "GPT-4o"), params,
             api_key=_resolve_secret(cfg, "api_key", "api_key_env") or "",
             base_url=cfg.get("base_url", "https://api.poe.com/v1"),
-            timeout=float(cfg.get("timeout", 120.0)),
             supports_vision=vision,
+            **_transport(cfg),
         )
 
     if kind == "minimax":
@@ -91,8 +106,8 @@ def build_provider(
             api_key=_resolve_secret(cfg, "api_key", "api_key_env") or "",
             base_url=cfg.get("base_url", "https://api.minimaxi.com/v1"),
             group_id=_resolve_secret(cfg, "group_id", "group_id_env"),
-            timeout=float(cfg.get("timeout", 120.0)),
             supports_vision=vision,
+            **_transport(cfg),
         )
 
     raise ProviderError(

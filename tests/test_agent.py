@@ -100,3 +100,66 @@ def test_example_cases_route_and_run(agent, case_file):
     assert result.error is None, f"{case_file.name}: {result.error}"
     assert result.module_key is not None
     assert result.response is not None
+
+
+# --- silent-assumption discipline -----------------------------------------
+
+def test_missing_m_is_flagged_not_silently_m0(agent):
+    """Staging without an M category must never look like a verified M0."""
+    result = agent.run(Case(t="T3", n="N2b"), dry_run=True)
+    assert result.staging["stage_group"] == "IIIB"
+    assert any(f.startswith("M_ASSUMED_M0") for f in result.flags)
+    assert any("assumed" in n for n in result.staging["descriptor_notes"])
+
+
+def test_explicit_m0_is_not_flagged(agent):
+    result = agent.run(Case(t="T3", n="N2b", m="M0"), dry_run=True)
+    assert not any(f.startswith("M_ASSUMED_M0") for f in result.flags)
+
+
+def test_bare_t1_reaches_the_user_as_a_staging_error(agent):
+    result = agent.run(Case(t="T1", n="N0", m="M0"))
+    assert result.error is not None
+    assert any("STAGING_ERROR" in f and "T1a" in f for f in result.flags)
+
+
+# --- stage-label handling --------------------------------------------------
+
+def test_less_specific_label_is_not_a_mismatch(agent):
+    """'IA' vs a computed 'IA1' is a coarser label, not a contradiction."""
+    result = agent.run(Case(t="T1a", n="N0", m="M0", stage_group="IA"),
+                       dry_run=True)
+    assert not any("STAGE_MISMATCH" in f for f in result.flags)
+
+
+def test_real_mismatch_still_flagged(agent):
+    result = agent.run(Case(t="T2b", n="N2b", m="M0", stage_group="IIIA"),
+                       dry_run=True)
+    assert any("STAGE_MISMATCH" in f for f in result.flags)
+
+
+def test_freeform_stage_label_routes(agent):
+    result = agent.run(Case(stage_group="stage 3b"), dry_run=True)
+    assert result.module_key == "stage3b"
+    assert any("STAGE_FROM_LABEL" in f and "normalized" in f
+               for f in result.flags)
+
+
+def test_unrecognizable_stage_label_reports_clearly(agent):
+    result = agent.run(Case(stage_group="not-a-stage"), dry_run=True)
+    assert result.error is not None
+    assert any("STAGE_LABEL_UNRECOGNIZED" in f for f in result.flags)
+
+
+def test_ambiguous_family_label_refused(agent):
+    result = agent.run(Case(stage_group="IV"), dry_run=True)
+    assert result.module_key is None
+    assert any("MODULE_UNAVAILABLE" in f for f in result.flags)
+
+
+def test_routing_dict_is_serializable(agent):
+    """result.routing must be a plain dict copy, not RouteResult.__dict__."""
+    result = agent.run(Case(t="T2b", n="N2b", m="M0"), dry_run=True)
+    json.dumps(result.routing)
+    result.routing["module_key"] = "tampered"
+    assert result.module_key == "stage3b"

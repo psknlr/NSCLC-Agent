@@ -26,6 +26,7 @@ class PoeProvider(OpenAICompatibleProvider):
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 120.0,
         supports_vision: bool = False,
+        **transport,
     ):
         super().__init__(
             name, model, params,
@@ -35,4 +36,5 @@ class PoeProvider(OpenAICompatibleProvider):
             timeout=timeout,
             auth_scheme="bearer",
             supports_vision=supports_vision,
+            **transport,
         )

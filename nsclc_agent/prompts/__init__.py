@@ -1,16 +1,19 @@
 """Loader for the stage-specific NSCLC protocol modules.
 
-Each module is a self-contained Markdown system prompt (v3.3, 2026-06) that
-encodes the evidence-based decision framework, JSON output schema and safety
-rules for one stage band. The Markdown *is* the protocol; this loader just
-reads it and exposes light metadata.
+Each module is a self-contained Markdown system prompt that encodes the
+evidence-based decision framework, JSON output schema and safety rules for one
+stage band. The Markdown *is* the protocol; this loader just reads it and
+exposes light metadata, including the version banner parsed from the file
+itself so the shipped version is never asserted from a stale docstring.
 """
 
 from __future__ import annotations
 
 import functools
+import re
 from pathlib import Path
 from dataclasses import dataclass
+from typing import Optional
 
 _PROMPT_DIR = Path(__file__).resolve().parent
 
@@ -29,6 +32,9 @@ MODULES: dict[str, tuple[str, str, tuple[str, ...]]] = {
 }
 
 
+_VERSION_RE = re.compile(r"^\s*Version\s+(.+?)\s*$", re.MULTILINE)
+
+
 @dataclass
 class PromptModule:
     key: str
@@ -36,6 +42,8 @@ class PromptModule:
     stage_groups: tuple[str, ...]
     path: Path
     system_prompt: str
+    #: version banner as written in the Markdown itself (never hard-coded)
+    version: Optional[str] = None
 
 
 class PromptNotFound(FileNotFoundError):
@@ -54,7 +62,9 @@ def load_module(key: str) -> PromptModule:
     if not path.is_file():
         raise PromptNotFound(f"Protocol file missing: {path}")
     text = path.read_text(encoding="utf-8")
-    return PromptModule(key, label, groups, path, text)
+    m = _VERSION_RE.search(text[:2000])
+    return PromptModule(key, label, groups, path, text,
+                        version=m.group(1) if m else None)
 
 
 def list_modules() -> list[PromptModule]:

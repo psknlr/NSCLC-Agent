@@ -100,12 +100,18 @@ def _normalize_t(t: str) -> str:
     # only when unambiguous for staging; T1 (any) behaves identically in the
     # stage table, but T2 does NOT (T2a vs T2b differ), so require the letter.
     canon = raw[0].upper() + raw[1:].lower() if raw else raw
-    fix = {"T1": "T1a", "T1A": "T1a", "T1B": "T1b", "T1C": "T1c",
+    fix = {"T1A": "T1a", "T1B": "T1b", "T1C": "T1c",
            "T2A": "T2a", "T2B": "T2b", "T3": "T3", "T4": "T4"}
     if canon in T_CATEGORIES:
         return canon
     if raw.upper() in fix:
         return fix[raw.upper()]
+    if raw.upper() == "T1":
+        raise StagingError(
+            "Ambiguous 'T1': specify T1a (≤1 cm), T1b (>1-2 cm) or T1c "
+            "(>2-3 cm) — the sub-letter sets the IA1/IA2/IA3 substage "
+            "(use T1mi for minimally invasive adenocarcinoma)"
+        )
     if raw.upper() == "T2":
         raise StagingError(
             "Ambiguous 'T2': specify T2a (>3-4 cm) or T2b (>4-5 cm) — "
@@ -134,7 +140,14 @@ def _normalize_n(n: str) -> str:
 def _normalize_m(m: str) -> str:
     raw = _clean(m).upper()
     if not raw:
-        return "M0"
+        # An empty M is *not* silently read as M0: assuming "no metastases"
+        # is the difference between a curative and a palliative pathway. The
+        # caller must pass M0 explicitly (``TNM.parse``/``stage_from_strings``
+        # default to it) so the assumption is always visible in provenance.
+        raise StagingError(
+            "Empty M category: pass M0 explicitly if the metastatic workup "
+            "is complete and negative, or MX if it is not yet done"
+        )
     aliases = {"MX": "MX", "M0": "M0", "M1A": "M1a", "M1B": "M1b",
                "M1C1": "M1c1", "M1C2": "M1c2"}
     if raw in aliases:

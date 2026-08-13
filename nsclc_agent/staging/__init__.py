@@ -10,7 +10,15 @@ from .tnm import (
     N_CATEGORIES,
     M_CATEGORIES,
 )
-from .router import RouteResult, route, available_modules
+from .router import (
+    CANONICAL_STAGE_GROUPS,
+    RouteResult,
+    available_modules,
+    expand_stage_group,
+    normalize_stage_group,
+    route,
+    stage_groups_compatible,
+)
 
 __all__ = [
     "TNM",
@@ -24,4 +32,8 @@ __all__ = [
     "RouteResult",
     "route",
     "available_modules",
+    "normalize_stage_group",
+    "expand_stage_group",
+    "stage_groups_compatible",
+    "CANONICAL_STAGE_GROUPS",
 ]

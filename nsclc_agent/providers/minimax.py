@@ -34,6 +34,7 @@ class MiniMaxProvider(OpenAICompatibleProvider):
         group_id: Optional[str] = None,
         timeout: float = 120.0,
         supports_vision: bool = False,
+        **transport,
     ):
         chat_path = CHAT_PATH
         if group_id:
@@ -46,5 +47,6 @@ class MiniMaxProvider(OpenAICompatibleProvider):
             timeout=timeout,
             auth_scheme="bearer",
             supports_vision=supports_vision,
+            **transport,
         )
         self.group_id = group_id

@@ -68,6 +68,12 @@ class GenerationParams:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def merged(self, **overrides) -> "GenerationParams":
+        """Return a copy with non-``None`` overrides applied.
+
+        ``extra`` is *merged* key-by-key rather than replaced, so a
+        per-provider ``extra`` block extends the global one instead of
+        silently dropping it.
+        """
         data = {
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
@@ -75,7 +81,11 @@ class GenerationParams:
             "extra": dict(self.extra),
         }
         for k, v in overrides.items():
-            if v is not None:
+            if v is None:
+                continue
+            if k == "extra" and isinstance(v, dict):
+                data["extra"] = {**data["extra"], **v}
+            else:
                 data[k] = v
         return GenerationParams(**data)
 

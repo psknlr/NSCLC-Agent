@@ -252,3 +252,32 @@ def test_mock_reports_vision_capability():
                                  "vision": True, "api_key": "x"})
     assert prov.supports_vision is True
     assert prov.describe()["supports_vision"] is True
+
+
+# --- descriptor-vocabulary discipline --------------------------------------
+
+def test_out_of_vocabulary_proposal_is_discarded_not_staged(tmp_path):
+    """The reader was told not to answer 'N2'; if it does, drop it and say so."""
+    img = tmp_path / "s.png"
+    img.write_bytes(_PNG)
+    agent, _ = _agent_with_vision({
+        "candidate_t": "T2b", "candidate_n": "N2", "candidate_m": "M0",
+    })
+    case = Case(images=[str(img)])
+    result = agent.run(case)
+    assert any("IMAGING_DESCRIPTOR_INVALID[N]" in f for f in result.flags)
+    # T and M were valid and still seeded; N stayed unresolved
+    assert any("RADIOGRAPHIC_TNM_PROPOSED" in f for f in result.flags)
+    assert any("NEXT_STEP_SUGGESTED" in f and "EBUS" in f
+               for f in result.flags)
+
+
+def test_descriptor_case_differences_are_not_discordance(tmp_path):
+    """'t2b' from the case vs 'T2b' from the reader is agreement, not conflict."""
+    img = tmp_path / "s.png"
+    img.write_bytes(_PNG)
+    agent, _ = _agent_with_vision({
+        "candidate_t": "T2b", "candidate_n": "N2b", "candidate_m": "M0",
+    })
+    result = agent.run(Case(t=" t2b ", n="n2B", m="M0", images=[str(img)]))
+    assert not any("IMAGING_DISCORDANCE" in f for f in result.flags)

@@ -22,8 +22,16 @@ from .imaging import ImagingFindings, ImagingReader
 from .prompts import PromptModule, load_module
 from .providers.base import GenerationParams, LLMProvider, LLMResponse, Message
 from .providers.registry import build_provider
-from .staging import RouteResult, StageResult, StagingError, route, stage_from_strings
-from .staging.tnm import TNM
+from .staging import (
+    RouteResult,
+    StageResult,
+    StagingError,
+    normalize_stage_group,
+    route,
+    stage_from_strings,
+    stage_groups_compatible,
+)
+from .staging.tnm import M_CATEGORIES, N_CATEGORIES, T_CATEGORIES, TNM
 
 _EDU_DISCLAIMER = (
     "EDUCATIONAL / RESEARCH USE ONLY. This system generates decision-support "
@@ -31,6 +39,17 @@ _EDU_DISCLAIMER = (
     "device and its output must not be used for real patient care without "
     "review by a qualified multidisciplinary oncology team."
 )
+
+
+def _in_vocabulary(value: str, vocab: tuple[str, ...]) -> bool:
+    """Case/whitespace-insensitive membership in a descriptor vocabulary."""
+    key = "".join(str(value).split()).upper()
+    return any(key == v.upper() for v in vocab)
+
+
+def _same_descriptor(a: str, b: str) -> bool:
+    """Compare two TNM descriptors ignoring case and whitespace."""
+    return "".join(str(a).split()).upper() == "".join(str(b).split()).upper()
 
 
 @dataclass
@@ -135,17 +154,28 @@ class NSCLCAgent:
         radiographic/unverified so the deterministic engine can still stage.
         """
         flags: list[str] = []
-        proposed = {
-            "t": findings.candidate_t,
-            "n": findings.candidate_n,
-            "m": findings.candidate_m,
-        }
+        proposed: dict[str, Optional[str]] = {}
+        for desc, vocab in (("t", T_CATEGORIES), ("n", N_CATEGORIES),
+                            ("m", M_CATEGORIES)):
+            value = getattr(findings, f"candidate_{desc}")
+            if value and not _in_vocabulary(value, vocab):
+                # The reader answered outside the 9th-edition vocabulary (e.g.
+                # the ambiguous "N2" it was told not to use). Drop it rather
+                # than feeding an unusable descriptor to the engine, and say so.
+                flags.append(
+                    f"IMAGING_DESCRIPTOR_INVALID[{desc.upper()}]: the film "
+                    f"reader proposed {value!r}, which is not a 9th-edition "
+                    f"{desc.upper()} category — discarded. Valid: "
+                    f"{', '.join(vocab)}."
+                )
+                value = None
+            proposed[desc] = value
         seeded: dict[str, str] = {}
         for desc in ("t", "n", "m"):
             human = getattr(case, desc)
             prop = proposed[desc]
             if human and prop:
-                if str(human).strip() != str(prop).strip():
+                if not _same_descriptor(human, prop):
                     flags.append(
                         f"IMAGING_DISCORDANCE[{desc.upper()}]: case says "
                         f"{human} but the film reader proposed {prop} — the "
@@ -200,12 +230,28 @@ class NSCLCAgent:
     def resolve_stage(self, case: Case) -> tuple[Optional[StageResult], list[str]]:
         flags: list[str] = []
         if case.has_tnm():
+            m_assumed = not case.m
             try:
                 result = stage_from_strings(case.t, case.n, case.m or "M0")
             except StagingError as exc:
                 flags.append(f"STAGING_ERROR: {exc}")
                 return None, flags
-            if case.stage_group and case.stage_group != result.stage_group:
+            if m_assumed:
+                # Never let "no M supplied" quietly become "no metastases":
+                # that assumption alone separates a curative from a palliative
+                # pathway, so it is recorded in provenance every time.
+                flags.append(
+                    "M_ASSUMED_M0: no M category was supplied — staged as M0 "
+                    "by assumption. Confirm the metastatic workup (PET-CT + "
+                    "brain MRI) before acting on a curative-intent stage."
+                )
+                result.descriptor_notes.append(
+                    "M0 was assumed, not supplied — the stage group is "
+                    "provisional pending metastatic staging."
+                )
+            if case.stage_group and not stage_groups_compatible(
+                case.stage_group, result.stage_group
+            ):
                 flags.append(
                     f"STAGE_MISMATCH: provided {case.stage_group} but TNM "
                     f"{result.tnm} computes to {result.stage_group} (using "
@@ -213,13 +259,24 @@ class NSCLCAgent:
                 )
             return result, flags
         if case.stage_group:
-            flags.append("STAGE_FROM_LABEL: no TNM provided; using the given "
-                         "stage_group without deterministic verification")
+            norm = normalize_stage_group(case.stage_group)
+            if norm is None:
+                flags.append(
+                    f"STAGE_LABEL_UNRECOGNIZED: {case.stage_group!r} is not a "
+                    f"recognizable stage group; supply a TNM triple or a "
+                    f"label such as 'IIIB'"
+                )
+                return None, flags
+            note = (f"STAGE_FROM_LABEL: no TNM provided; using the given "
+                    f"stage_group without deterministic verification")
+            if norm != str(case.stage_group).strip():
+                note += f" (normalized {case.stage_group!r} → {norm!r})"
+            flags.append(note)
             return (
                 StageResult(
                     tnm=TNM(t=case.t or "TX", n=case.n or "NX",
                             m=case.m or "MX"),
-                    stage_group=case.stage_group,
+                    stage_group=norm,
                 ),
                 flags,
             )
@@ -326,7 +383,7 @@ class NSCLCAgent:
         stage_result, route_result, flags = self.route_case(case)
         flags = imaging_flags + flags
         staging_dict = stage_result.to_dict() if stage_result else None
-        routing_dict = route_result.__dict__ if route_result else {}
+        routing_dict = route_result.to_dict() if route_result else {}
 
         if stage_result is None or route_result is None:
             return AgentResult(

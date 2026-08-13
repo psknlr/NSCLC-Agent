@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import ssl
 import os
+import random
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Optional
@@ -41,6 +43,15 @@ def _ssl_context() -> ssl.SSLContext:
     return ctx
 
 
+#: HTTP statuses worth retrying: rate limiting and transient server errors.
+_RETRYABLE_STATUS = frozenset({408, 409, 429, 500, 502, 503, 504})
+
+#: Reasoning-tier models (o-series, GPT-5-class) reject ``max_tokens`` and want
+#: ``max_completion_tokens``. We start with whichever the config asks for and
+#: switch once, automatically, when the API says so.
+_TOKEN_FIELDS = ("max_tokens", "max_completion_tokens")
+
+
 class OpenAICompatibleProvider(LLMProvider):
     kind = "openai_compatible"
 
@@ -58,12 +69,20 @@ class OpenAICompatibleProvider(LLMProvider):
         extra_headers: Optional[dict[str, str]] = None,
         send_model_in_body: bool = True,
         supports_vision: bool = False,
+        max_retries: int = 3,
+        retry_backoff: float = 1.0,
+        max_tokens_field: str = "max_tokens",
     ):
         super().__init__(name, model, params)
         if not api_key and auth_scheme != "none":
             raise ProviderError(
                 f"Provider {name!r} has no API key. Set the configured "
                 f"api_key_env environment variable."
+            )
+        if max_tokens_field not in _TOKEN_FIELDS:
+            raise ProviderError(
+                f"Provider {name!r}: max_tokens_field must be one of "
+                f"{', '.join(_TOKEN_FIELDS)}, got {max_tokens_field!r}"
             )
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -73,6 +92,9 @@ class OpenAICompatibleProvider(LLMProvider):
         self.extra_headers = extra_headers or {}
         self.send_model_in_body = send_model_in_body
         self.supports_vision = supports_vision
+        self.max_retries = max(0, int(max_retries))
+        self.retry_backoff = float(retry_backoff)
+        self.max_tokens_field = max_tokens_field
         self._ctx = _ssl_context()
 
     # -- hooks subclasses may override --------------------------------------
@@ -93,7 +115,7 @@ class OpenAICompatibleProvider(LLMProvider):
         body: dict[str, Any] = {
             "messages": [m.to_openai() for m in messages],
             "temperature": p.temperature,
-            "max_tokens": p.max_tokens,
+            self.max_tokens_field: p.max_tokens,
         }
         if self.send_model_in_body:
             body["model"] = self.model
@@ -128,33 +150,80 @@ class OpenAICompatibleProvider(LLMProvider):
 
     # -- transport ----------------------------------------------------------
 
-    def complete(
-        self, messages: list[Message], *, params: Optional[GenerationParams] = None
-    ) -> LLMResponse:
-        p = params or self.params
-        payload = json.dumps(self._payload(messages, p)).encode("utf-8")
+    def _sleep(self, seconds: float) -> None:  # pragma: no cover - timing
+        time.sleep(seconds)
+
+    def _retry_delay(self, attempt: int, retry_after: Optional[str]) -> float:
+        """Honor ``Retry-After`` when present, else exponential backoff."""
+        if retry_after:
+            try:
+                return min(60.0, max(0.0, float(retry_after)))
+            except ValueError:
+                pass
+        return self.retry_backoff * (2 ** attempt) + random.uniform(0, 0.25)
+
+    def _post(self, body: dict) -> dict:
+        payload = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             self._endpoint(), data=payload, headers=self._headers(),
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(
-                req, timeout=self.timeout, context=self._ctx
-            ) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            raise ProviderError(
-                f"{self.name}: HTTP {exc.code} from {self._endpoint()}: "
-                f"{body[:800]}"
-            ) from exc
-        except urllib.error.URLError as exc:
-            raise ProviderError(
-                f"{self.name}: connection error to {self._endpoint()}: "
-                f"{exc.reason}"
-            ) from exc
-        except json.JSONDecodeError as exc:
-            raise ProviderError(
-                f"{self.name}: non-JSON response from {self._endpoint()}"
-            ) from exc
-        return self._parse(data)
+        with urllib.request.urlopen(
+            req, timeout=self.timeout, context=self._ctx
+        ) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def complete(
+        self, messages: list[Message], *, params: Optional[GenerationParams] = None
+    ) -> LLMResponse:
+        p = params or self.params
+        body = self._payload(messages, p)
+        token_field_switched = False
+        last_error: Optional[Exception] = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                return self._parse(self._post(body))
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")
+                # A model that wants max_completion_tokens instead of
+                # max_tokens: switch the field once and retry immediately
+                # rather than failing a whole batch on a naming difference.
+                other = _other_token_field(self.max_tokens_field)
+                if (exc.code == 400 and not token_field_switched
+                        and other in detail):
+                    body[other] = body.pop(self.max_tokens_field, p.max_tokens)
+                    self.max_tokens_field = other
+                    token_field_switched = True
+                    continue
+                last_error = ProviderError(
+                    f"{self.name}: HTTP {exc.code} from {self._endpoint()}: "
+                    f"{detail[:800]}"
+                )
+                if exc.code not in _RETRYABLE_STATUS:
+                    raise last_error from exc
+                retry_after = exc.headers.get("Retry-After") if exc.headers \
+                    else None
+            except urllib.error.URLError as exc:
+                last_error = ProviderError(
+                    f"{self.name}: connection error to {self._endpoint()}: "
+                    f"{exc.reason}"
+                )
+                retry_after = None
+            except json.JSONDecodeError as exc:
+                raise ProviderError(
+                    f"{self.name}: non-JSON response from {self._endpoint()}"
+                ) from exc
+
+            if attempt >= self.max_retries:
+                break
+            self._sleep(self._retry_delay(attempt, retry_after))
+
+        assert last_error is not None
+        raise ProviderError(
+            f"{last_error} (gave up after {self.max_retries + 1} attempt(s))"
+        )
+
+
+def _other_token_field(current: str) -> str:
+    return _TOKEN_FIELDS[1] if current == _TOKEN_FIELDS[0] else _TOKEN_FIELDS[0]

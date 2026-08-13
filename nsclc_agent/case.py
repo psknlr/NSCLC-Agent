@@ -47,7 +47,10 @@ class Case:
         extras = {k: v for k, v in data.items()
                   if k not in known and k not in ("id", "t_category",
                                                    "n_category", "m_category")}
-        core.setdefault("staging_system", "AJCC9")
+        # An explicit ``"staging_system": null`` must still fall back to the
+        # default — ``setdefault`` alone would leave the None in place.
+        if not core.get("staging_system"):
+            core["staging_system"] = "AJCC9"
         if isinstance(core.get("images"), str):
             core["images"] = [core["images"]]
         elif core.get("images") is None and "images" in core:
