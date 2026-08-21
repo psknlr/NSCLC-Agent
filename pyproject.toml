@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nsclc-agent"
+version = "0.2.0"
+description = "Evidence-governed, stage-verified NSCLC agent harness: deterministic AJCC-9 staging + a control plane the model cannot bypass (educational use only)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["nsclc", "oncology", "clinical-decision-support", "llm", "agent", "education"]
+dependencies = []
+
+[project.optional-dependencies]
+litellm = ["litellm>=1.40"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+nsclc-agent = "nsclc_agent.cli:main"
+
+[tool.setuptools]
+packages = [
+    "nsclc_agent",
+    "nsclc_agent.agents",
+    "nsclc_agent.interview",
+    "nsclc_agent.knowledge",
+    "nsclc_agent.llm",
+    "nsclc_agent.perception",
+    "nsclc_agent.prompts",
+    "nsclc_agent.safety",
+    "nsclc_agent.staging",
+    "nsclc_agent.tools",
+]
+
+[tool.setuptools.package-data]
+"nsclc_agent.prompts" = ["*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

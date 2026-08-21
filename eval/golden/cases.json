@@ -1,0 +1,183 @@
+{
+  "_comment": "Golden decision-quality cases. Each entry: a case payload plus machine-checkable expectations. Runs fully offline against the deterministic (rule-mode) pipeline; with a real model configured, the same expectations apply to the model-driven plan — that is the point.",
+  "cases": [
+    {
+      "id": "migration_t1n1_iia",
+      "case": {"t": "T1b", "n": "N1", "m": "M0",
+               "presentation": "Resected pT1bN1M0 adenocarcinoma. No hemoptysis, no leg weakness, no fever.",
+               "tnm_prefix": "p", "clinical_scenario": "POSTOP_RESECTED",
+               "histologic_category": "adenocarcinoma",
+               "driver_mutations": {"egfr": "negative", "alk": "negative"},
+               "pd_l1": {"tps": 5, "tc": 5}},
+      "expect": {"stage_group": "IIA", "module": "stage2",
+                 "migration_contains": "downstaged",
+                 "regimens_any": ["adjuvant_platinum_doublet"],
+                 "release_status": ["treatment_recommendation"]}
+    },
+    {
+      "id": "migration_t1n2a_iib",
+      "case": {"t": "T1c", "n": "N2a", "m": "M0",
+               "presentation": "Single-station N2a on EBUS. PET-CT and brain MRI negative. No red flags: no hemoptysis, no weakness, no fever.",
+               "histologic_category": "adenocarcinoma",
+               "driver_mutations": {"egfr": "negative", "alk": "negative"},
+               "pd_l1": {"tps": 30}},
+      "expect": {"stage_group": "IIB", "module": "stage2",
+                 "migration_contains": "N2 discipline"}
+    },
+    {
+      "id": "migration_t3n2a_iiia",
+      "case": {"t": "T3", "n": "N2a", "m": "M0",
+               "presentation": "T3 with single-station N2a, MDT resectable, operable. PET-CT/brain MRI negative. No hemoptysis, no weakness, no fever.",
+               "histologic_category": "adenocarcinoma",
+               "driver_mutations": {"egfr": "negative", "alk": "negative"},
+               "resectability_category": "RESECTABLE"},
+      "expect": {"stage_group": "IIIA", "module": "stage3a",
+                 "regimens_any": ["pembro_perioperative"],
+                 "regimens_none": ["nivo_chemo_neoadjuvant_iiib_violation"]}
+    },
+    {
+      "id": "migration_t2bn2b_iiib_egfr_consolidation",
+      "case": {"t": "T2b", "n": "N2b", "m": "M0",
+               "presentation": "Multi-station N2b, unresectable per MDT. PET-CT and brain MRI confirm M0. EGFR L858R. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+               "histologic_category": "adenocarcinoma",
+               "driver_mutations": {"egfr": "L858R", "alk": "negative"},
+               "resectability_category": "UNRESECTABLE", "ecog_ps": 1},
+      "expect": {"stage_group": "IIIB", "module": "stage3b",
+                 "migration_contains": "upstaged",
+                 "regimens_any": ["osimertinib_consolidation"],
+                 "regimens_none": ["durva_consolidation"],
+                 "trial_refs_any": ["LAURA"],
+                 "release_status": ["treatment_recommendation"]}
+    },
+    {
+      "id": "n3_iiic_no_surgery",
+      "case": {"t": "T4", "n": "N3", "m": "M0",
+               "presentation": "Contralateral mediastinal and supraclavicular nodes, biopsy-confirmed N3. Encompassable, ECOG 1. PET-CT/brain MRI negative. EGFR/ALK negative. No hemoptysis, no weakness, no fever.",
+               "histologic_category": "squamous",
+               "driver_mutations": {"egfr": "negative", "alk": "negative"},
+               "pd_l1": {"tps": 15}, "ecog_ps": 1},
+      "expect": {"stage_group": "IIIC", "module": "stage3c",
+                 "regimens_any": ["ccrt_60gy", "durva_consolidation"],
+                 "plan_must_not_mention": ["lobectomy", "pneumonectomy", "upfront surgery"],
+                 "no_violations": ["N3_NO_SURGERY"]}
+    },
+    {
+      "id": "iv_egfr_first_line",
+      "case": {"t": "T2a", "n": "N0", "m": "M1b",
+               "presentation": "Single adrenal metastasis, brain MRI negative. EGFR exon 19 deletion, NGS complete. ECOG 0. No hemoptysis, no weakness, no fever.",
+               "histologic_category": "adenocarcinoma",
+               "driver_mutations": {"egfr": "Ex19del", "alk": "negative"},
+               "pd_l1": {"tps": 5}, "ngs_done": true, "ecog_ps": 0,
+               "disease_extent": "OLIGOMETASTATIC"},
+      "expect": {"stage_group": "IVA", "module": "stage4a",
+                 "regimens_any": ["osimertinib_first_line"],
+                 "regimens_none": ["pembro_pemetrexed_platinum", "pembro_monotherapy"],
+                 "regimens_any_2": ["sbrt_oligomet_lct"],
+                 "no_violations": ["DRIVER_FIRST_LINE"]}
+    },
+    {
+      "id": "iv_alk_first_line",
+      "case": {"t": "T1c", "n": "N2b", "m": "M1c1",
+               "presentation": "Multiple hepatic metastases (single organ system). Brain MRI negative. ALK fusion positive. ECOG 1. No hemoptysis, no weakness, no fever.",
+               "histologic_category": "adenocarcinoma",
+               "driver_mutations": {"egfr": "negative", "alk": "fusion_positive"},
+               "ngs_done": true, "ecog_ps": 1},
+      "expect": {"stage_group": "IVB", "module": "stage4b",
+                 "regimens_any": ["lorlatinib_first_line"],
+                 "regimens_none": ["nivo_ipi_chemo"]}
+    },
+    {
+      "id": "ivb_squamous_driver_negative",
+      "case": {"t": "T3", "n": "N2b", "m": "M1c2",
+               "presentation": "Liver, bone and adrenal metastases (multiple organ systems). Brain MRI negative. Squamous histology, PD-L1 TPS 5. ECOG 1. No hemoptysis, no weakness, no fever.",
+               "histologic_category": "squamous",
+               "driver_mutations": {"egfr": "not_tested", "alk": "not_tested"},
+               "pd_l1": {"tps": 5}, "ecog_ps": 1},
+      "expect": {"stage_group": "IVB", "module": "stage4b",
+                 "regimens_any": ["pembro_carbo_taxane"]}
+    },
+    {
+      "id": "ivb_pdl1_high_mono",
+      "case": {"t": "T2a", "n": "N3", "m": "M1c1",
+               "presentation": "Multiple bone metastases. Brain MRI negative. PD-L1 TPS 80, EGFR/ALK negative, NGS complete. ECOG 1. No hemoptysis, no weakness, no fever.",
+               "histologic_category": "adenocarcinoma",
+               "driver_mutations": {"egfr": "negative", "alk": "negative"},
+               "pd_l1": {"tps": 80}, "ngs_done": true, "ecog_ps": 1},
+      "expect": {"stage_group": "IVB",
+                 "regimens_any": ["pembro_monotherapy"]}
+    },
+    {
+      "id": "stage0_ais_no_systemic",
+      "case": {"t": "Tis", "n": "N0", "m": "M0",
+               "presentation": "8 mm pure ground-glass nodule, resected wedge shows AIS. No red flags: no hemoptysis, no weakness, no fever.",
+               "histologic_category": "adenocarcinoma",
+               "driver_mutations": {"egfr": "negative", "alk": "negative"}},
+      "expect": {"stage_group": "0", "module": "stage0",
+                 "regimens_none": ["adjuvant_platinum_doublet", "pembro_adjuvant",
+                                    "osimertinib_adjuvant"],
+                 "no_violations": ["STAGE0_NO_SYSTEMIC"]}
+    },
+    {
+      "id": "ib_egfr_postop_adaura",
+      "case": {"t": "T2a", "n": "N0", "m": "M0", "tnm_prefix": "p",
+               "presentation": "Lobectomy, pT2aN0M0 R0, 3.5 cm adenocarcinoma. EGFR L858R. PD-L1 TPS 30. No hemoptysis, no weakness, no fever.",
+               "clinical_scenario": "POSTOP_RESECTED",
+               "histologic_category": "adenocarcinoma",
+               "driver_mutations": {"egfr": "L858R", "alk": "negative"},
+               "pd_l1": {"tps": 30}},
+      "expect": {"stage_group": "IB", "module": "stage1",
+                 "regimens_any": ["osimertinib_adjuvant"],
+                 "trial_refs_any": ["ADAURA"]}
+    },
+    {
+      "id": "occult_routes_to_workup",
+      "case": {"t": "TX", "n": "N0", "m": "M0",
+               "presentation": "Positive sputum cytology, no localized primary on CT. No hemoptysis, no weakness, no fever.",
+               "histologic_category": "adenocarcinoma",
+               "driver_mutations": {"egfr": "not_tested", "alk": "not_tested"}},
+      "expect": {"stage_group": "Occult", "module": "workup",
+                 "release_status": ["needs_more_information",
+                                     "needs_staging_workup"]}
+    },
+    {
+      "id": "missing_m_refused",
+      "case": {"t": "T2a", "n": "N0",
+               "presentation": "3.5 cm lesion, no metastatic workup done yet. No hemoptysis, no weakness, no fever.",
+               "histologic_category": "adenocarcinoma"},
+      "expect": {"release_status": ["needs_staging_workup"],
+                 "flag_contains": "STAGING_ERROR",
+                 "workup_mentions": "brain MRI"}
+    },
+    {
+      "id": "biomarker_gap_blocks_systemic",
+      "case": {"t": "T2b", "n": "N2b", "m": "M0",
+               "presentation": "Multi-station N2b adenocarcinoma, unresectable. PET-CT/brain MRI negative. Biomarkers pending. No hemoptysis, no weakness, no fever.",
+               "histologic_category": "adenocarcinoma",
+               "driver_mutations": {"egfr": "not_tested", "alk": "not_tested"},
+               "resectability_category": "UNRESECTABLE"},
+      "expect": {"stage_group": "IIIB",
+                 "plan_intent": "workup",
+                 "release_status": ["needs_more_information"]}
+    },
+    {
+      "id": "emergency_cord_compression",
+      "case": {"presentation": "肺癌病史，这两天双腿无力加重，今天尿潴留，会阴发麻。",
+               "question": "怎么办？"},
+      "expect": {"release_status": ["emergency_action_plan"],
+                 "risk_mode": "emergency"}
+    },
+    {
+      "id": "resectable_iiib_periop_covers",
+      "case": {"t": "T4", "n": "N2a", "m": "M0",
+               "presentation": "T4N2a, MDT judges R0 achievable, operable. PET-CT/brain MRI negative. EGFR/ALK negative. PD-L1 TPS 40. ECOG 0. No hemoptysis, no weakness, no fever.",
+               "histologic_category": "adenocarcinoma",
+               "driver_mutations": {"egfr": "negative", "alk": "negative"},
+               "pd_l1": {"tps": 40},
+               "resectability_category": "RESECTABLE", "ecog_ps": 0},
+      "expect": {"stage_group": "IIIB",
+                 "regimens_any": ["pembro_perioperative"],
+                 "trial_refs_any": ["KEYNOTE671"],
+                 "no_violations": ["TRIAL_STAGE_BOUNDARY"]}
+    }
+  ]
+}
