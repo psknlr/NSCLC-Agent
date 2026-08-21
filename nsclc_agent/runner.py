@@ -34,6 +34,7 @@ from .agents import (
 )
 from .agents.planner import AGENT_CATALOG
 from .case import Case
+from .interview import InterviewLoop
 from .journal import Journal, JournaledLLM
 from .llm.base import NullLLMClient
 from .llm.providers import describe_client
@@ -82,21 +83,42 @@ class NSCLCRunner:
         self.journal = journal
         base_llm = llm or NullLLMClient()
         if self.journal is not None:
+            # The journal is a single ordered lane; concurrent panel members
+            # would record in completion order and replay would diverge on
+            # scheduling alone. Journaled runs therefore convene sequentially.
+            panel_concurrency = 1
             self.llm = JournaledLLM(
                 base_llm, self.journal,
                 offline=self.journal.mode == "replay"
                 and not getattr(base_llm, "available", False),
             )
+            if vision_llm is not None or self.journal.mode == "replay":
+                vision_llm = JournaledLLM(
+                    vision_llm or NullLLMClient(), self.journal,
+                    offline=self.journal.mode == "replay"
+                    and not getattr(vision_llm, "available", False),
+                    meta_prefix="vision",
+                )
             if self.journal.mode == "record":
                 self.journal.write_meta({
                     "llm_model": getattr(base_llm, "model", "none"),
                     "llm_provider": getattr(base_llm, "name", "none"),
                     "llm_available": bool(getattr(base_llm, "available", False)),
+                    "vision_model": getattr(
+                        getattr(vision_llm, "inner", vision_llm), "model", "none"),
+                    "vision_provider": getattr(
+                        getattr(vision_llm, "inner", vision_llm), "name", "none"),
+                    "vision_available": bool(getattr(vision_llm, "available", False)),
+                    "vision_supports_vision": bool(
+                        getattr(vision_llm, "supports_vision", False)),
                     "panel_concurrency": panel_concurrency,
                 })
         else:
             self.llm = base_llm
         self.vision_llm = vision_llm
+        #: Explicit loop = a continuing conversation whose stall history must
+        #: span turns. Absent that, every run gets a fresh loop (see run()).
+        self._interview_loop_override = interview_loop
         self.health = ToolHealth()
         self.agents: dict[str, Any] = {
             "IntakeAgent": IntakeAgent(self.llm),
@@ -177,6 +199,14 @@ class NSCLCRunner:
 
     # --------------------------------------------------------------------- run
     def run(self, state: CaseRunState, *, resumed: bool = False) -> CaseRunState:
+        # Per-run scoping: interview stall history and the circuit breaker are
+        # run-local state. On one long-lived runner they contaminated later,
+        # unrelated cases — three identical cases in a row hit the stall
+        # detector and the third came back BLOCKED. An explicitly provided
+        # loop (a continuing conversation) is deliberately reused.
+        self.health = ToolHealth()
+        loop = self._interview_loop_override or InterviewLoop(self.llm)
+        self.agents["InterviewAgent"] = InterviewAgent(self.llm, loop=loop)
         try:
             if not resumed:
                 self._bootstrap(state)
@@ -200,10 +230,27 @@ class NSCLCRunner:
         finally:
             # The critic is unconditional: it observes every run, including
             # failed-closed ones and ones that skipped every clinical task.
-            if "safety_audit" not in state.outputs:
-                self._critic(state)
-            self._check_replay_fidelity(state)
-            self._finalize(state)
+            # The finally body is itself guarded — a journal divergence (or
+            # any crash) inside the terminal audit must still leave a
+            # failed-closed, finalized state rather than escaping the runner.
+            try:
+                if "safety_audit" not in state.outputs:
+                    self._critic(state)
+            except Exception as exc:  # noqa: BLE001
+                state.fail_closed(
+                    f"terminal audit crashed, failed closed: "
+                    f"{type(exc).__name__}: {exc}")
+                state.outputs.setdefault("safety_audit", {
+                    "checks_run": ["crashed"], "issues": [str(exc)],
+                    "violations": [], "repair_requests": [],
+                })
+            try:
+                self._check_replay_fidelity(state)
+                self._finalize(state)
+            except Exception as exc:  # noqa: BLE001
+                state.fail_closed(
+                    f"finalization crashed, failed closed: "
+                    f"{type(exc).__name__}: {exc}")
         return state
 
     # ------------------------------------------------------------------- nodes

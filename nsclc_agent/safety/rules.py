@@ -31,24 +31,90 @@ from typing import Any
 from ..knowledge import regimens as regimen_lib
 from ..knowledge.trials import PERIOP_ADJUVANT_IO_TRIALS, TRIALS_BY_ID, resolve_trial_id
 
-#: Dose patterns a *model* output may never contain (mg, mg/m², AUC, Gy…).
-#: Doses enter plans only through the deterministic regimen library.
+#: Spelled-out quantities that precede a dose unit ("eighty milligrams").
+_SPELLED_NUM = (
+    r"(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|"
+    r"fifty|sixty|seventy|eighty|ninety|hundred|thousand)(?:[- ]\w+)?"
+)
+
+#: Dose patterns a *model* output may never contain. Doses enter plans only
+#: through the deterministic regimen library. Covers digit and spelled-out
+#: quantities against mg/µg/IU-class units (red-team hardened: "milligrams",
+#: "mcg", "μg", "IU" all count).
 DOSE_RE = re.compile(
-    r"\d+(?:\.\d+)?\s*(?:mg/m2|mg/m²|mg/kg|mg\b|毫克|g\b|克|Gy\b|戈瑞)|AUC\s*\d",
+    r"\d+(?:\.\d+)?\s*(?:mg/m2|mg/m²|mg/kg|mg\b|milligrams?\b|micrograms?\b|"
+    r"mcg\b|[μµ]g\b|iu\b|毫克|g\b|克|Gy\b|戈瑞)"
+    rf"|{_SPELLED_NUM}\s+(?:mg\b|milligrams?\b|micrograms?\b|mcg\b|grays?\b)"
+    r"|AUC\s*\d",
     re.IGNORECASE,
 )
 
+#: Surgery as the proposed management. Two layers: explicit procedure names
+#: (any mention blocks under N3) and generic surgery words only in a
+#: recommendation context, so "unresectable — resection not indicated" does
+#: not false-positive.
 _SURGERY_RE = re.compile(
-    r"lobectomy|pneumonectomy|segmentectomy|surgical resection|resection as primary|"
-    r"upfront surgery|肺叶切除|全肺切除|肺段切除|手术切除|直接手术",
+    r"lobectomy|pneumonectomy|segmentectomy|wedge resection|sleeve resection|"
+    r"surgical (?:resection|excision)|resection as primary|upfront surgery|"
+    r"r0 resection|vats\b|肺叶切除|全肺切除|肺段切除|楔形切除|袖式切除|"
+    r"手术切除|手术根治|根治性切除|直接手术|"
+    r"(?:(?<![不没])recommend|proceed (?:to|with)|perform|undergo|offer|"
+    r"take .{0,20}to (?:the )?(?:or\b|operating room)|(?<![不没])建议行?)"
+    r"[^.。;；]{0,30}(?:resection|surgery|切除|手术|tumor removal)",
     re.IGNORECASE,
 )
-_CONCURRENT_DURVA_RE = re.compile(
-    r"(?:concurrent|simultaneous|同期|同步)[^.。;；]{0,40}durvalumab|"
-    r"durvalumab[^.。;；]{0,40}(?:concurrent(?:ly)?\s+with\s+(?:chemo)?radi|同期|同步放化疗)",
+
+#: Concurrent durvalumab + (chemo)radiation, detected by proximity rather
+#: than one phrasing: a durvalumab mention within a clause containing both a
+#: concurrency word and a radiation word (red-team hardened: "together with",
+#: "during", "alongside", 同步/同期 without a fixed suffix).
+_DURVA_RE = re.compile(r"durvalumab|度伐利尤|度伐鲁", re.IGNORECASE)
+_CONCURRENCY_RE = re.compile(
+    r"concurrent|simultaneous|together with|alongside|during|combined with|同期|同步",
     re.IGNORECASE,
 )
-_RT_DOSE_RE = re.compile(r"(\d{2}(?:\.\d+)?)\s*Gy", re.IGNORECASE)
+_RADIATION_RE = re.compile(
+    r"radiation|radiotherapy|chemoradi|\bc?crt\b|\brt\b|放疗|放化疗", re.IGNORECASE,
+)
+_CLAUSE_RE = re.compile(r"[^.。;；\n]+")
+
+
+def _string_leaves(value: Any) -> list[str]:
+    """Every string leaf in a nested payload, each its own unit.
+
+    Proximity checks must run per authored string, not over the serialized
+    JSON: a JSON blob has no sentence punctuation, so unrelated fields would
+    concatenate into one giant pseudo-clause and cross-field words would
+    false-positive together.
+    """
+    out: list[str] = []
+    if isinstance(value, str):
+        out.append(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            out.extend(_string_leaves(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            out.extend(_string_leaves(item))
+    return out
+
+#: Absolute RT doses (1–3 digits) and per-fraction arithmetic. Only explicit
+#: multiplication ("2 Gy × 37") or "per fraction … N fractions" multiplies —
+#: "60 Gy in 30 fractions" states a TOTAL of 60, never 60 × 30.
+_RT_DOSE_RE = re.compile(r"(\d{1,3}(?:\.\d+)?)\s*Gy", re.IGNORECASE)
+_RT_FRACTION_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*Gy\s*(?:per fraction|/fx|/fraction)\s*"
+    r"[^.。;；]{0,20}?[×x*]?\s*(\d{1,2})\s*(?:fx|fractions?|次|分次)"
+    r"|(\d+(?:\.\d+)?)\s*Gy\s*[×x*]\s*(\d{1,2})\b",
+    re.IGNORECASE,
+)
+#: A dose mention inside a prohibition ("do NOT escalate to 74 Gy") is the
+#: safety note itself, not a proposal.
+_RT_NEGATED_RE = re.compile(
+    r"(?:do not|don't|never|avoid|not to|without)\s[^.。;；]{0,30}$|"
+    r"(?:不得|不要|不应|勿|避免)[^.。;；]{0,15}$",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -109,19 +175,14 @@ class PlanContext:
         return out
 
     def driver_positive(self, *genes: str) -> bool:
-        drivers = self.facts.get("driver_mutations") or {}
-        for gene in genes:
-            value = str(drivers.get(gene.lower()) or drivers.get(gene.upper()) or "").lower()
-            if value and value not in ("negative", "wild type", "wildtype", "wt",
-                                       "not detected", "none", "阴性", "not_tested",
-                                       "unknown", "pending"):
-                return True
-        return False
+        from ..knowledge.biomarkers import driver_positive
+
+        return driver_positive(self.facts, *genes)
 
     def driver_status_known(self, gene: str) -> bool:
-        drivers = self.facts.get("driver_mutations") or {}
-        value = str(drivers.get(gene.lower()) or drivers.get(gene.upper()) or "").lower()
-        return bool(value) and value not in ("not_tested", "unknown", "pending", "")
+        from ..knowledge.biomarkers import gene_status
+
+        return gene_status(self.facts, gene) != "unknown"
 
 
 # --------------------------------------------------------------------- rules
@@ -187,27 +248,48 @@ def _rule_egfr_iii_consolidation(ctx: PlanContext) -> list[Violation]:
 
 
 def _rule_no_concurrent_durvalumab(ctx: PlanContext) -> list[Violation]:
-    if _CONCURRENT_DURVA_RE.search(ctx.plan_text):
-        return [Violation(
-            "NO_CONCURRENT_DURVALUMAB", "block",
-            "Durvalumab given concurrently with chemoradiation — PACIFIC-2 was "
-            "negative; durvalumab is consolidation only, started after CRT.",
-        )]
+    for leaf in _string_leaves(ctx.plan):
+        for clause in _CLAUSE_RE.findall(leaf):
+            if not (_DURVA_RE.search(clause) and _CONCURRENCY_RE.search(clause)
+                    and _RADIATION_RE.search(clause)):
+                continue
+            return [Violation(
+                "NO_CONCURRENT_DURVALUMAB", "block",
+                "Durvalumab given concurrently with (chemo)radiation — "
+                "PACIFIC-2 was negative; durvalumab is consolidation only, "
+                "started after CRT.",
+            )]
     return []
 
 
 def _rule_rt_dose(ctx: PlanContext) -> list[Violation]:
-    out: list[Violation] = []
-    for match in _RT_DOSE_RE.finditer(ctx.plan_text):
-        dose = float(match.group(1))
-        if dose > 66:
-            out.append(Violation(
+    # The RT-escalation check deliberately scans the WHOLE plan including the
+    # deterministic dose_plan: an escalated total is wrong wherever it lives.
+    text = json.dumps(ctx.plan, ensure_ascii=False) if ctx.plan else ""
+    totals: list[float] = []
+    fraction_spans: list[tuple[int, int]] = []
+    for match in _RT_FRACTION_RE.finditer(text):
+        fraction_spans.append(match.span())
+        if match.group(1) is not None:
+            totals.append(float(match.group(1)) * float(match.group(2)))
+        else:
+            totals.append(float(match.group(3)) * float(match.group(4)))
+    for match in _RT_DOSE_RE.finditer(text):
+        # Skip per-fraction doses already counted through the arithmetic form,
+        # and doses inside a prohibition — the caution is not the proposal.
+        if any(start <= match.start() < end for start, end in fraction_spans):
+            continue
+        if _RT_NEGATED_RE.search(text[max(0, match.start() - 40):match.start()]):
+            continue
+        totals.append(float(match.group(1)))
+    for total in totals:
+        if total > 66:
+            return [Violation(
                 "NO_RT_DOSE_ESCALATION", "block",
-                f"Thoracic RT dose {dose:g} Gy exceeds the definitive standard — "
-                f"RTOG 0617 showed 74 Gy *worsened* survival vs 60 Gy/30 fx.",
-            ))
-            break
-    return out
+                f"Thoracic RT dose {total:g} Gy exceeds the definitive standard "
+                f"— RTOG 0617 showed 74 Gy *worsened* survival vs 60 Gy/30 fx.",
+            )]
+    return []
 
 
 def _rule_trial_stage_boundary(ctx: PlanContext) -> list[Violation]:

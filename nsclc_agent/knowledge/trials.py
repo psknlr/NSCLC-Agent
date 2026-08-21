@@ -85,8 +85,10 @@ TRIALS: tuple[Trial, ...] = (
         _s(*_EARLY), histology="nonsquamous", driver_required="EGFR",
         regimen_ids=("osimertinib_adjuvant",),
         results=(
-            "DFS HR 0.20 (99.12% CI 0.14–0.30) in stage II–IIIA; DFS benefit also in IB",
-            "OS HR 0.49 (95.03% CI 0.33–0.73) overall population",
+            "DFS HR 0.17 (99.06% CI 0.11–0.26) in stage II–IIIA (primary); "
+            "HR 0.20 (99.12% CI 0.14–0.30) overall IB–IIIA",
+            "OS HR 0.49 (95.03% CI 0.34–0.70) overall population; "
+            "0.49 (95.03% CI 0.33–0.73) in stage II–IIIA",
         ),
         source="NEJM 2020;383:1711 (primary DFS); NEJM 2023;389:137 (OS)",
         approval="FDA 2020-12 adjuvant osimertinib, resected IB–IIIA EGFR ex19del/L858R",
@@ -99,7 +101,8 @@ TRIALS: tuple[Trial, ...] = (
         "ALINA", "ALINA (adjuvant alectinib)", "NCT03456076", "adjuvant",
         _s(*_EARLY), driver_required="ALK",
         regimen_ids=("alectinib_adjuvant",),
-        results=("DFS HR 0.24 (95% CI 0.13–0.43) in stage II–IIIA; consistent in IB ≥4 cm",),
+        results=("DFS HR 0.24 (95% CI 0.13–0.45) in stage II–IIIA (primary); "
+                 "HR 0.24 (95% CI 0.13–0.43) in the ITT incl. IB ≥4 cm",),
         source="NEJM 2024;390:1265",
         approval="FDA 2024-04 adjuvant alectinib, resected IB(≥4 cm)–IIIA ALK+",
         enrollment_note="Enrolled by AJCC 8th edition IB(≥4 cm)–IIIA",
@@ -180,8 +183,11 @@ TRIALS: tuple[Trial, ...] = (
         regimen_ids=("pembro_adjuvant",),
         results=("DFS HR 0.76 (95% CI 0.63–0.91) in the ITT population, irrespective of PD-L1",),
         source="Lancet Oncol 2022;23:1274",
-        approval="FDA 2023-01 adjuvant pembrolizumab, IB(≥4 cm)–IIIA after resection ± chemo",
-        enrollment_note="Enrolled IB(≥4 cm)–IIIA by AJCC 7th; ITT benefit — PD-L1 not required",
+        approval="FDA 2023-01 adjuvant pembrolizumab, IB(≥4 cm)–IIIA following "
+                 "resection AND platinum-based chemotherapy",
+        enrollment_note="Enrolled IB(≥4 cm)–IIIA by AJCC 7th, adjuvant chemo optional "
+                        "in-trial (~86% received it); the FDA label requires it. "
+                        "ITT benefit — PD-L1 not required",
         caveats=("EGFR/ALK-positive: prefer targeted adjuvant standards",),
         keywords=("pembrolizumab", "adjuvant"),
     ),
@@ -248,12 +254,14 @@ TRIALS: tuple[Trial, ...] = (
     # ------------------------------------------------ stage IV, driver-positive
     Trial(
         "FLAURA", "FLAURA (first-line osimertinib)", "NCT02296125", "first_line",
-        _s(*_STAGE_IV), histology="nonsquamous", driver_required="EGFR",
+        _s(*_STAGE_IV), driver_required="EGFR",
         regimen_ids=("osimertinib_first_line",),
         results=("PFS HR 0.46 (95% CI 0.37–0.57); OS HR 0.80 (95.05% CI 0.64–1.00)",),
         source="NEJM 2018;378:113 (PFS); NEJM 2020;382:41 (OS)",
-        approval="FDA 2018-04 first-line osimertinib, metastatic EGFR ex19del/L858R",
-        enrollment_note="Advanced/metastatic EGFR+; CNS-active",
+        approval="FDA 2018-04 first-line osimertinib, metastatic EGFR ex19del/L858R "
+                 "(no histology restriction in the label)",
+        enrollment_note="Advanced/metastatic EGFR+, predominantly adenocarcinoma "
+                        "enrolled; CNS-active",
         keywords=("osimertinib", "EGFR", "first line"),
     ),
     Trial(
@@ -268,7 +276,7 @@ TRIALS: tuple[Trial, ...] = (
     ),
     Trial(
         "MARIPOSA", "MARIPOSA (amivantamab + lazertinib)", "NCT04487080", "first_line",
-        _s(*_STAGE_IV), histology="nonsquamous", driver_required="EGFR",
+        _s(*_STAGE_IV), driver_required="EGFR",
         regimen_ids=("amivantamab_lazertinib",),
         results=("PFS HR 0.70 (95% CI 0.58–0.85) vs osimertinib; OS benefit reported at later analysis",),
         source="NEJM 2024;391:1486; OS update 2025",
@@ -371,20 +379,38 @@ _ALIASES = {
 }
 
 
+#: Wrapper words a free-text reference may carry ("the CheckMate-816 trial").
+_WRAPPER_WORDS = frozenset({"THE", "TRIAL", "STUDY", "REGIMEN", "PER", "试验", "研究"})
+
+def _compact(text: str) -> str:
+    return "".join(ch for ch in text if ch.isalnum())
+
+
 def resolve_trial_id(reference: str) -> Optional[str]:
-    """Resolve a free-text trial reference to a registry id, or None."""
-    key = " ".join(str(reference).upper().split())
+    """Resolve a free-text trial reference to a registry id, or None.
+
+    Tolerates wrapper words ("the CheckMate-816 trial"), case, hyphens and
+    spacing — a reference the resolver drops silently also drops the safety
+    checks keyed on it, so resolution errs toward matching.
+    """
+    words = [w for w in str(reference).upper().replace("-", " ").split()
+             if w not in _WRAPPER_WORDS]
+    key = " ".join(words)
     if key in TRIALS_BY_ID:
         return key
     if key in _ALIASES:
         return _ALIASES[key]
-    compact = key.replace(" ", "").replace("-", "")
+    compact = _compact(key)
+    if not compact:
+        return None
     for tid in TRIALS_BY_ID:
         if compact == tid:
             return tid
-    # NCT number lookup
+    for alias, tid in _ALIASES.items():
+        if compact == _compact(alias):
+            return tid
     for trial in TRIALS:
-        if trial.nct and key == trial.nct.upper():
+        if trial.nct and compact == trial.nct.upper():
             return trial.trial_id
     return None
 

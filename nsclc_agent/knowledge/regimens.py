@@ -167,7 +167,8 @@ REGIMENS: tuple[Regimen, ...] = (
         (_C("pembrolizumab", "200 mg", schedule="q3w", duration="~1 year (18 cycles)"),),
         trial_ids=("KEYNOTE091",), contains_ici=True,
         dose_gates=("egfr_alk_negative", "autoimmune_screen"),
-        label_note="IB(≥4 cm)–IIIA after resection ± chemo, irrespective of PD-L1",
+        label_note="IB(≥4 cm)–IIIA following resection AND platinum-based "
+                   "chemotherapy (FDA label), irrespective of PD-L1",
     ),
     # -------------------------------------------------------- unresectable III
     Regimen(

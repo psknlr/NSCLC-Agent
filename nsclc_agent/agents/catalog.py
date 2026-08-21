@@ -269,19 +269,16 @@ class StagingAgent:
 
 # ------------------------------------------------------------------ treatment
 
-def _driver_value(facts: dict[str, Any], gene: str) -> str:
-    return str((facts.get("driver_mutations") or {}).get(gene) or "").lower()
-
-
 def _driver_positive(facts: dict[str, Any], gene: str) -> bool:
-    value = _driver_value(facts, gene)
-    return bool(value) and value not in (
-        "negative", "wild type", "wildtype", "wt", "not detected", "none",
-        "阴性", "not_tested", "unknown", "pending")
+    from ..knowledge.biomarkers import gene_status
+
+    return gene_status(facts, gene) == "positive"
 
 
 def _driver_unknown(facts: dict[str, Any], gene: str) -> bool:
-    return _driver_value(facts, gene) in ("", "not_tested", "unknown", "pending")
+    from ..knowledge.biomarkers import gene_status
+
+    return gene_status(facts, gene) == "unknown"
 
 
 def _nonsquamous(facts: dict[str, Any]) -> bool:
@@ -600,12 +597,21 @@ class DosePlanAgent:
                     "reason": "; ".join(f"{g['gate']}: {g['note']}" for g in failed),
                 })
                 continue
+            unverified = [g for g in gate.data.get("gates", [])
+                          if g["status"] == "unverified"]
             detail = tools.call(broker, "regimen_detail", regimen_id=rid)
             if detail.ok:
                 eid = state.add_evidence(
                     detail.resolved_level(), "regimen_detail", detail.summary,
                     detail.data, source_version=detail.source_version)
-                expanded.append({**detail.data.get("regimen", {}), "evidence_id": eid})
+                entry = {**detail.data.get("regimen", {}), "evidence_id": eid}
+                if unverified:
+                    # Carried forward loudly: the tumor board resolves these
+                    # before any approval — a silent inclusion would read as
+                    # a passed gate in the audit trail.
+                    entry["gates_unverified"] = [
+                        {"gate": g["gate"], "note": g["note"]} for g in unverified]
+                expanded.append(entry)
         interactions = tools.call(
             broker, "interaction_check",
             medications=[c["drug"] for r in expanded for c in r.get("components", [])]

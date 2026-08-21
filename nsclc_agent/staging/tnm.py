@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 
 # --- Canonical descriptor vocabularies -------------------------------------
 
-T_CATEGORIES = ("Tis", "T1a", "T1b", "T1c", "T2a", "T2b", "T3", "T4", "TX")
+T_CATEGORIES = ("Tis", "T1mi", "T1a", "T1b", "T1c", "T2a", "T2b", "T3", "T4", "TX")
 N_CATEGORIES = ("N0", "N1", "N2a", "N2b", "N3", "NX")
 M_CATEGORIES = ("M0", "M1a", "M1b", "M1c1", "M1c2", "MX")
 PREFIXES = ("c", "p", "yp", "yc", "r", "a")
@@ -49,7 +49,7 @@ EDITION_LABEL = "AJCC/UICC 9th edition"
 # Coarse T families used by the stage table.
 _T_FAMILY = {
     "Tis": "Tis",
-    "T1a": "T1", "T1b": "T1", "T1c": "T1",
+    "T1mi": "T1", "T1a": "T1", "T1b": "T1", "T1c": "T1",
     "T2a": "T2a", "T2b": "T2b",
     "T3": "T3", "T4": "T4",
     "TX": "TX",
@@ -112,11 +112,15 @@ class StageResult:
 
 # --- Normalization ----------------------------------------------------------
 
+#: Full-width → ASCII fold for the whole FF01–FF5E block, so any full-width
+#: letter/digit from a Chinese clinical note normalizes (not just a hand-picked
+#: few — ＴＩＳ and Ｔ１Ａ must fold as well as Ｔ２ａ).
+_FULLWIDTH_FOLD = {code: code - 0xFEE0 for code in range(0xFF01, 0xFF5F)}
+
+
 def _clean(value: str) -> str:
-    # Also fold full-width characters, which appear in Chinese clinical notes.
     text = "".join(str(value).split()).replace("–", "-")
-    return text.translate({ord(f): ord(t) for f, t in zip(
-        "ＴＮＭ０１２３４５６７８９ａｂｃｘＸ", "TNM0123456789abcxX")})
+    return text.translate(_FULLWIDTH_FOLD)
 
 
 def _normalize_prefix(prefix: str) -> str:
@@ -135,7 +139,9 @@ def _normalize_t(t: str) -> str:
     if not raw:
         raise StagingError("Empty T category")
     low = raw.lower()
-    aliases = {"t1mi": "T1a", "tis": "Tis", "tx": "TX"}
+    # T1mi is first-class: MIA identity is decision-relevant (surveillance vs
+    # resection fork) and must not be silently rewritten to T1a.
+    aliases = {"t1mi": "T1mi", "tis": "Tis", "tx": "TX"}
     if low in aliases:
         return aliases[low]
     fix = {"T1A": "T1a", "T1B": "T1b", "T1C": "T1c", "T2A": "T2a", "T2B": "T2b",
@@ -223,12 +229,32 @@ def normalize_stage_group(label: str) -> str:
     base = base.upper()
     base = _ROMAN.get(base, base)
     if base == "0":
+        if letter or sub:
+            raise StagingError(
+                f"{label!r} is not an AJCC/UICC 9th-edition stage group "
+                f"(stage 0 has no sub-letters)"
+            )
         return "0"
     group = base + (letter.upper() if letter else "")
     if sub:
         if group != "IA":
             raise StagingError(f"Sub-stage digit only valid for IA (got {label!r})")
         group += sub
+    if group == "IA":
+        raise StagingError(
+            f"Ambiguous stage label {label!r}: specify IA1/IA2/IA3 (by T1a/b/c size)"
+        )
+    if group not in STAGE_GROUPS:
+        if group in ("I", "II", "III", "IV"):
+            raise StagingError(
+                f"Ambiguous stage label {label!r}: specify the sub-stage "
+                f"(e.g. {group}A/{group}B) — sub-stages route to different "
+                f"protocol pathways"
+            )
+        raise StagingError(
+            f"{group!r} is not an AJCC/UICC 9th-edition stage group "
+            f"(valid: {', '.join(sorted(STAGE_GROUPS))})"
+        )
     return group
 
 
@@ -281,7 +307,15 @@ _MIGRATIONS: dict[tuple[str, str], str] = {
     ("T2b", "N2b"): "T2N2b upstaged from 8th-edition IIIA to 9th-edition IIIB.",
 }
 
-_IA_SUBSTAGE = {"T1a": "IA1", "T1b": "IA2", "T1c": "IA3"}
+_IA_SUBSTAGE = {"T1mi": "IA1", "T1a": "IA1", "T1b": "IA2", "T1c": "IA3"}
+
+#: The closed set of routable stage groups. ``normalize_stage_group`` validates
+#: against it so "IVC"/"IC" cannot leak into routing as if they were real, and
+#: bare families ("Stage III") are refused as the ambiguity they are.
+STAGE_GROUPS = frozenset({
+    "0", "IA1", "IA2", "IA3", "IB", "IIA", "IIB",
+    "IIIA", "IIIB", "IIIC", "IVA", "IVB", "Occult",
+})
 
 
 def stage(tnm: TNM, *, edition: str = SUPPORTED_EDITION) -> StageResult:
@@ -290,9 +324,15 @@ def stage(tnm: TNM, *, edition: str = SUPPORTED_EDITION) -> StageResult:
     ``edition`` is the edition the *input descriptors* were assigned under.
     Anything other than AJCC9 is refused: computing 8th-edition descriptors on
     the 9th-edition table and stamping the result "9th edition" is precisely
-    the staging-edition trap the protocol modules warn about.
+    the staging-edition trap the protocol modules warn about. Spelled variants
+    of the 9th edition ("AJCC 9", "9th edition", "UICC9") are accepted — a
+    wrong refusal instructs a pointless restaging.
     """
-    if str(edition).upper().replace("-", "").replace("_", "") not in ("AJCC9", "AJCC/UICC9", "TNM9", "9"):
+    edition_key = "".join(str(edition).upper().split()).replace("-", "").replace("_", "")
+    if edition_key not in (
+        "AJCC9", "AJCC/UICC9", "AJCCUICC9", "UICC9", "TNM9", "9",
+        "9TH", "9THEDITION", "AJCC9THEDITION", "NINTH", "NINTHEDITION",
+    ):
         raise StagingError(
             f"This engine implements the AJCC/UICC 9th edition only; the case is "
             f"labeled {edition!r}. Restage the descriptors under the 9th edition "
@@ -356,6 +396,13 @@ def stage(tnm: TNM, *, edition: str = SUPPORTED_EDITION) -> StageResult:
     if key in _MIGRATIONS:
         migrations.append(_MIGRATIONS[key])
 
+    if t == "T1mi":
+        notes.append(
+            "T1mi = minimally invasive adenocarcinoma (MIA, ≤3 cm lepidic-"
+            "predominant, invasion ≤5 mm): staged IA1, but the MIA identity is "
+            "decision-relevant — sublobar resection is typically definitive "
+            "and adjuvant therapy has no role."
+        )
     if n in ("N2a", "N2b"):
         notes.append(
             "N2 subcategory is decision-relevant in the 9th edition "

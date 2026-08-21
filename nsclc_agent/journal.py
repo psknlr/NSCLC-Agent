@@ -107,6 +107,11 @@ class Journal:
             raise JournalError(f"unknown journal mode {mode!r}; expected record|replay|off")
         self.path = Path(path) if path else None
         self.mode = mode
+        # A fresh recording must not append to an old file: appended entries
+        # restart the sequence at 1 and permanently corrupt the journal.
+        if self.mode == "record" and self.path is not None \
+                and not entries and self.path.exists():
+            self.path.unlink()
         self.entries: list[JournalEntry] = list(entries or [])
         self.meta: dict[str, Any] = dict(meta or {})
         self._cursor = 0
@@ -243,24 +248,45 @@ class JournaledLLM:
 
     ``offline=True`` (replay with no live model) makes journal exhaustion an
     error rather than a silent degradation to the deterministic path.
+    ``meta_prefix`` separates the main reasoning model from the vision model —
+    both ride the same journal, but each mirrors its own recorded identity and
+    availability on replay.
     """
 
-    def __init__(self, inner: Any, journal: Journal, *, offline: bool = False) -> None:
+    def __init__(
+        self,
+        inner: Any,
+        journal: Journal,
+        *,
+        offline: bool = False,
+        meta_prefix: str = "llm",
+    ) -> None:
         self.inner = inner
         self.journal = journal
         self.offline = offline
+        self.meta_prefix = meta_prefix
+
+    def _meta(self, key: str, default: Any) -> Any:
+        return self.journal.meta.get(f"{self.meta_prefix}_{key}", default)
 
     @property
     def name(self) -> str:
         if self.journal.mode == "replay":
-            return str(self.journal.meta.get("llm_provider", getattr(self.inner, "name", "journal")))
+            return str(self._meta("provider", getattr(self.inner, "name", "journal")))
         return getattr(self.inner, "name", "unknown")
 
     @property
     def model(self) -> str:
         if self.journal.mode == "replay":
-            return str(self.journal.meta.get("llm_model", getattr(self.inner, "model", "journal")))
+            return str(self._meta("model", getattr(self.inner, "model", "journal")))
         return getattr(self.inner, "model", "unknown")
+
+    @property
+    def supports_vision(self) -> bool:
+        if self.journal.mode == "replay":
+            return bool(self._meta("supports_vision",
+                                   getattr(self.inner, "supports_vision", False)))
+        return bool(getattr(self.inner, "supports_vision", False))
 
     @property
     def available(self) -> bool:
@@ -268,8 +294,9 @@ class JournaledLLM:
             # Mirror what the recording ran with: a run recorded without a
             # model must replay without one, or the replay issues LLM calls
             # the journal never saw and diverges on the very first entry.
-            if "llm_available" in self.journal.meta:
-                return bool(self.journal.meta["llm_available"]) or bool(
+            key = f"{self.meta_prefix}_available"
+            if key in self.journal.meta:
+                return bool(self.journal.meta[key]) or bool(
                     getattr(self.inner, "available", False))
             return bool(self.journal.entries) or bool(
                 getattr(self.inner, "available", False))

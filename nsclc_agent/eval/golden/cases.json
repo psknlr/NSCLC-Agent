@@ -33,7 +33,7 @@
                "resectability_category": "RESECTABLE"},
       "expect": {"stage_group": "IIIA", "module": "stage3a",
                  "regimens_any": ["pembro_perioperative"],
-                 "regimens_none": ["nivo_chemo_neoadjuvant_iiib_violation"]}
+                 "regimens_none": ["nivo_chemo_neoadjuvant"]}
     },
     {
       "id": "migration_t2bn2b_iiib_egfr_consolidation",

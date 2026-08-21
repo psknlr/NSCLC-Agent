@@ -286,6 +286,8 @@ class InterviewLoop:
             if budget is not None:
                 budget.charge_llm_tokens(response.total_tokens)
         except (LLMError, Exception):  # noqa: BLE001 - never break a turn
+            if budget is not None:
+                budget.refund_llm()
             return None
 
         arguments = self._ask_arguments(response)

@@ -157,4 +157,4 @@ failed-closed run stays failed closed.
 - `eval/` — 16 golden decision cases with machine-checkable expectations;
   the same expectations grade any configured real model.
 
-All 209 tests run fully offline.
+All 271 tests run fully offline (including the adversarial-review regression suite in test_hardening.py).

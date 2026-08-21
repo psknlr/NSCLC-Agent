@@ -20,9 +20,18 @@ from dataclasses import dataclass, field
 #: Clause boundaries for Chinese and English clinical narrative.
 _CLAUSE_SPLIT = re.compile(r"[。！？!?；;，,\n]")
 
-_NEGATION_CUES = (
-    "没有", "无", "否认", "不曾", "未见", "未出现", "没出现", "不存在", "无明显",
-    "no ", "not ", "denies", "denied", "without", "negative for", "absent",
+#: Negation detection is REGEX-based and evaluated on the clause with the
+#: matched symptom span masked out. Both properties are load-bearing:
+#: substring matching read the 无 inside 双腿无力 ("bilateral leg weakness")
+#: and the not inside "cannot lie flat" as denials, silently suppressing the
+#: canonical Chinese cord-compression presentation. 无 therefore only counts
+#: with a lookahead excluding 无力/无法/无奈 (ability-negation compounds, not
+#: symptom denial), English cues carry word boundaries, and the symptom term
+#: itself is removed before the clause is inspected.
+_NEGATION_RE = re.compile(
+    r"没有|否认|不曾|未见|未出现|没出现|不存在|无明显|无(?!力|法|奈)|"
+    r"\b(?:no|not|denies|denied|without|absent)\b|negative for",
+    re.IGNORECASE,
 )
 _THIRD_PARTY_CUES = ("父亲", "母亲", "家人", "朋友", "同事", "father", "mother", "family member")
 _HYPOTHETICAL_CUES = ("如果", "万一", "要是", "担心会", "怕会", "if i", "what if", "in case")
@@ -139,19 +148,24 @@ class ScreenResult:
         }
 
 
-def _clause_suppressed(clause: str) -> str | None:
+def _clause_suppressed(clause: str, matched_terms: tuple[str, ...] = ()) -> str | None:
     """Return the suppression kind for a clause, or None if it stands.
 
-    Present-tense cues veto history/hypothetical suppression: "以前没有咯血，
-    但今天咯了一大口" must not be suppressed by the leading negation, which is
-    why suppression is per-clause in the first place.
+    ``matched_terms`` are the symptom substrings that raised/screened the
+    pattern; they are masked out before negation is evaluated so a negation
+    character *inside the symptom itself* (双腿无力) can never suppress it.
+    Suppression is per-clause so "以前没有咯血，但今天咯了一大口" keeps its
+    second clause.
     """
     lowered = clause.lower()
     if any(cue in lowered for cue in _THIRD_PARTY_CUES):
         return "third_party"
     if any(cue in lowered for cue in _HYPOTHETICAL_CUES):
         return "hypothetical"
-    if any(cue in lowered for cue in _NEGATION_CUES):
+    masked = lowered
+    for term in matched_terms:
+        masked = masked.replace(term.lower(), "□")
+    if _NEGATION_RE.search(masked):
         return "negation"
     return None
 
@@ -167,13 +181,14 @@ def screen(narrative: str) -> ScreenResult:
         if not clause:
             continue
         lowered = clause.lower()
-        suppression = _clause_suppressed(clause)
         for pattern in PATTERNS:
+            matched = tuple(
+                term for term in (*pattern.cues, *pattern.screen_terms)
+                if term in lowered)
             raised = any(cue in lowered for cue in pattern.cues)
-            screened = raised or any(
-                term in lowered for term in pattern.screen_terms)
-            if not screened:
+            if not matched:
                 continue
+            suppression = _clause_suppressed(clause, matched)
             if suppression == "negation":
                 # A negated mention *answers* the screening question.
                 if pattern.signal_id not in seen_negated:

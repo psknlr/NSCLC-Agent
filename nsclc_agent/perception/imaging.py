@@ -216,6 +216,8 @@ class ImagingReader:
                 temperature=0.0, max_tokens=1500,
             )
         except LLMError as exc:
+            if budget is not None:
+                budget.refund_llm()
             raise ImagingError(f"film reading failed: {exc}") from exc
         if budget is not None:
             budget.charge_llm_tokens(response.total_tokens)

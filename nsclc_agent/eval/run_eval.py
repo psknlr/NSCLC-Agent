@@ -16,8 +16,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from nsclc_agent import Case, NSCLCRunner
-from nsclc_agent.llm.providers import build_client
+from .. import Case, NSCLCRunner
+from ..llm.providers import build_client
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 

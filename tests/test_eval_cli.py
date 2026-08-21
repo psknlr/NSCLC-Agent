@@ -7,8 +7,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from eval.run_eval import run_eval  # noqa: E402
 from nsclc_agent.cli import main  # noqa: E402
+from nsclc_agent.eval.run_eval import run_eval  # noqa: E402
 
 
 def test_golden_eval_all_pass():

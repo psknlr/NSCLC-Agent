@@ -23,6 +23,7 @@ nsclc-agent = "nsclc_agent.cli:main"
 packages = [
     "nsclc_agent",
     "nsclc_agent.agents",
+    "nsclc_agent.eval",
     "nsclc_agent.interview",
     "nsclc_agent.knowledge",
     "nsclc_agent.llm",
@@ -35,6 +36,7 @@ packages = [
 
 [tool.setuptools.package-data]
 "nsclc_agent.prompts" = ["*.md"]
+"nsclc_agent.eval" = ["golden/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

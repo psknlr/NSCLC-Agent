@@ -176,7 +176,7 @@ nsclc_agent/
   prompts/     9个协议模块(.md, sha256钉版) · cores.py 蒸馏决策核心
   state.py 证据台账/预算/状态 · journal.py 记录/重放 · runner.py · render.py
   schemas.py · skills.py · case.py · cli.py
-tests/         209 个用例，全离线    eval/       16 例金标准 + 指标
+tests/         271 个用例，全离线    eval/       16 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -184,7 +184,7 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 209 passed，全离线
+python -m pytest -q            # 271 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方案11/11 安全16/16
 ```

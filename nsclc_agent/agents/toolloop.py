@@ -241,6 +241,7 @@ class ToolLoop:
                     max_tokens=self.max_tokens,
                 )
             except (LLMError, Exception) as exc:  # noqa: BLE001 - never break the run
+                self.state.budget.refund_llm()
                 result.steps.append(LoopStep(
                     step, "error", summary=f"{type(exc).__name__}: {exc}"[:200], ok=False))
                 result.mode, result.error = "llm_error", type(exc).__name__

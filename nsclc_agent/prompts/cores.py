@@ -37,10 +37,11 @@ STAGE I (IA1–IB, N0 M0) DECISION CORE
 3. Adjuvant therapy is the EXCEPTION in stage I:
    • EGFR ex19del/L858R after resection: adjuvant osimertinib (ADAURA covers
      IB and up; IA is NOT covered).
-   • IB (T2a, per current edition ≤4 cm) does NOT reach the ≥4 cm threshold
-     most adjuvant IO/chemo evidence used — check the trial registry before
-     recommending anything adjuvant; high-risk-feature chemo is a discussion,
-     not a default.
+   • Watch the ≥4 cm threshold most adjuvant IO/chemo evidence used: a
+     current-edition IB tumor of >3–<4 cm does NOT reach it, while an
+     exactly-4-cm IB does — check the trial registry before recommending
+     anything adjuvant; high-risk-feature chemo is a discussion, not a
+     default.
    • PD-L1 is NOT a stage I treatment driver.
 4. Ground-glass/subsolid lesions and AIS/MIA behave indolently — do not
    over-treat; surveillance schedules come from the protocol module.""",

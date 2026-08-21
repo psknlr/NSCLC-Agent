@@ -370,30 +370,35 @@ class ToolRegistry:
             return ToolResult("dose_gate_check", False, f"unknown regimen {regimen_id!r}",
                               error="unknown_regimen", recoverable=True)
         facts = facts or {}
-        drivers = facts.get("driver_mutations") or {}
         pd_l1 = facts.get("pd_l1") or {}
         comorbid = facts.get("comorbidities") or {}
 
-        def driver_positive(gene: str) -> bool:
-            value = str(drivers.get(gene) or "").lower()
-            return bool(value) and value not in (
-                "negative", "wild type", "wildtype", "wt", "not detected",
-                "none", "阴性", "not_tested", "unknown", "pending", "")
+        from ..knowledge.biomarkers import gene_status
 
         results: list[dict[str, Any]] = []
         for gate in regimen.dose_gates:
             status, note = "unverified", "no matching fact on record"
             if gate == "egfr_alk_negative":
-                if driver_positive("egfr") or driver_positive("alk"):
+                egfr, alk = gene_status(facts, "egfr"), gene_status(facts, "alk")
+                if "positive" in (egfr, alk):
                     status, note = "fail", "EGFR/ALK alteration on record"
-                elif drivers.get("egfr") and drivers.get("alk"):
+                elif egfr == alk == "negative":
                     status, note = "pass", "EGFR/ALK negative on record"
+                else:
+                    # Untested is NOT negative: the gate stays unverified and
+                    # the dose plan carries it forward for the tumor board.
+                    status, note = "unverified", (
+                        f"EGFR {egfr} / ALK {alk} — Tier-A testing incomplete")
             elif gate == "egfr_positive":
-                status, note = ("pass", "EGFR alteration on record") if driver_positive("egfr") \
-                    else ("fail", "no EGFR alteration on record")
+                status, note = (
+                    ("pass", "EGFR alteration on record")
+                    if gene_status(facts, "egfr") == "positive"
+                    else ("fail", "no EGFR alteration on record"))
             elif gate == "alk_positive":
-                status, note = ("pass", "ALK alteration on record") if driver_positive("alk") \
-                    else ("fail", "no ALK alteration on record")
+                status, note = (
+                    ("pass", "ALK alteration on record")
+                    if gene_status(facts, "alk") == "positive"
+                    else ("fail", "no ALK alteration on record"))
             elif gate == "pd_l1_tps_ge_50":
                 tps = pd_l1.get("tps")
                 if isinstance(tps, (int, float)):

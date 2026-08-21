@@ -272,6 +272,7 @@ class PlannerAgent:
             )
             state.budget.charge_llm_tokens(response.total_tokens)
         except (LLMError, Exception) as exc:  # noqa: BLE001
+            state.budget.refund_llm()
             return f"llm_error:{type(exc).__name__}"
         payload = extract_json(response.text, None)
         if payload is None:

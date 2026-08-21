@@ -195,7 +195,7 @@ def cmd_selftest(args) -> int:
 
 
 def cmd_eval(args) -> int:
-    from eval.run_eval import run_eval  # local package, repo layout
+    from .eval.run_eval import run_eval
 
     report = run_eval(golden_dir=args.golden)
     print(json.dumps(report["summary"], ensure_ascii=False, indent=2))

@@ -200,6 +200,8 @@ class AdequacyJudge:
             if budget is not None:
                 budget.charge_llm_tokens(response.total_tokens)
         except (LLMError, Exception):  # noqa: BLE001 - fail open to the rule verdict
+            if budget is not None:
+                budget.refund_llm()
             return None
 
         payload = response.json(None)
