@@ -44,6 +44,19 @@ class MockLLMClient:
 
             return self._reply(mock_findings_payload())
 
+        if "CLINICAL DOCUMENT EXTRACTION" in system_text:
+            return self._reply(json.dumps({
+                "document_types": [],
+                "histologic_category": None, "driver_mutations": {},
+                "pd_l1": {}, "candidate_t": None, "candidate_n": None,
+                "candidate_m": None, "specimen": None, "report_dates": [],
+                "key_findings": [],
+                "uncertainties": [
+                    "Offline mock cannot read documents; configure a "
+                    "vision-capable backend for real report reading."
+                ],
+            }, ensure_ascii=False))
+
         if "问诊充分性审核者" in system_text or "病史充分性审核者" in system_text:
             return self._reply(json.dumps({
                 "adequate": False, "missing_axes": [],

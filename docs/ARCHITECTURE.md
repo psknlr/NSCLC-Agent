@@ -83,6 +83,21 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     `output_truncated`, never a parsed-looking result; protocol modules are
     served through `protocol_lookup` in sections instead of being inlined
     into the prompt, and each module declares `min_output_tokens`.
+11. **Parallelism never costs reproducibility.** The Treatment∥Panel wave
+    runs each agent against a `_WaveScope`; scopes merge in task order, so
+    evidence ids depend on the plan, not the scheduler (tested: parallel and
+    serial runs produce identical ledgers). Journaled runs are always serial
+    — the journal is a single ordered lane. The wave panel reviews the case
+    WITHOUT the treatment plan in context (independent, anchor-free), and
+    `run_meta.execution` records which mode ran.
+12. **A report photo is a proposal, not a chart.** The report reader seeds
+    only *missing* facts, tracks every seeded path in
+    `facts["_report_proposed"]`, cross-checks (never overwrites) existing
+    values, vocabulary-validates any TNM mention, and the dose channel stays
+    shut while a Tier-A biomarker rests on a report proposal — confirming
+    the source document and resuming is what re-opens it. The vision client
+    auto-selects (Poe→Gemini on a bare `POE_API_KEY`) so attaching an image
+    is the entire integration; auto-selection is recorded provenance.
 
 ## 3. LLM containment table
 

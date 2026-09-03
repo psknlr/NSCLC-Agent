@@ -254,28 +254,65 @@ def build_client(provider: str | None = None, *, model: str | None = None) -> An
     )
 
 
-def build_vision_client(*, provider: str | None = None, model: str | None = None) -> Any:
-    """Build the film-reading client from NSCLC_VISION_* configuration.
+#: Default Poe bot for auto-selected film/report reading. Overridable via
+#: NSCLC_VISION_MODEL — set it to whatever Gemini bot your Poe account exposes.
+POE_VISION_DEFAULT_MODEL = "Gemini-2.5-Pro"
 
-    Returns None when nothing is configured — the perception agent then flags
-    ``NO_VISION_PROVIDER`` and skips, rather than feeding images to a text model.
+
+def build_vision_client(*, provider: str | None = None, model: str | None = None) -> Any:
+    """Build the film/report-reading client — zero-config where possible.
+
+    Resolution order:
+    1. Explicit ``provider`` argument / ``NSCLC_VISION_PROVIDER``.
+    2. **Auto-detect**: a ``POE_API_KEY`` in the environment is enough — the
+       reader comes up on Poe→Gemini (``NSCLC_VISION_MODEL`` or
+       {default!r}) with no further configuration, so attaching an image to a
+       run just works. The client is marked ``auto_selected`` and the run
+       records that provenance.
+    3. Nothing available → None; the perception agent flags
+       ``NO_VISION_PROVIDER`` and skips rather than feeding images to a text
+       model.
     """
     provider = (provider or _env("NSCLC_VISION_PROVIDER")).lower()
-    if not provider:
+    if provider in ("none", "off", "disabled"):
+        # The explicit off-switch: a POE_API_KEY for the *text* provider must
+        # not force film-reading on an operator who does not want it.
         return None
     if provider == "mock":
         from .mock import MockLLMClient
 
         return MockLLMClient(vision=True)
-    client = build_client(provider, model=model or _env("NSCLC_VISION_MODEL") or None)
-    client.supports_vision = True
-    return client
+    if provider:
+        client = build_client(provider,
+                              model=model or _env("NSCLC_VISION_MODEL") or None)
+        client.supports_vision = True
+        return client
+    # Auto-detection: Poe key present → Gemini reader, instantly usable.
+    poe_key = _env("POE_API_KEY")
+    if poe_key:
+        client = PoeClient(
+            "poe-vision-auto",
+            model or _env("NSCLC_VISION_MODEL") or POE_VISION_DEFAULT_MODEL,
+            api_key=poe_key,
+            base_url=_env("POE_BASE_URL") or POE_DEFAULT_BASE_URL,
+            supports_vision=True,
+        )
+        client.auto_selected = True
+        return client
+    return None
+
+
+build_vision_client.__doc__ = build_vision_client.__doc__.format(
+    default=POE_VISION_DEFAULT_MODEL)
 
 
 def describe_client(client: Any) -> dict[str, Any]:
-    return {
+    info = {
         "provider": getattr(client, "name", "none"),
         "model": getattr(client, "model", "none"),
         "available": bool(getattr(client, "available", False)),
         "vision": bool(getattr(client, "supports_vision", False)),
     }
+    if getattr(client, "auto_selected", False):
+        info["auto_selected"] = True
+    return info

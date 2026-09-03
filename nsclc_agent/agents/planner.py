@@ -150,6 +150,11 @@ def validate_plan(
     ids = [t.task_id for t in tasks]
     if len(ids) != len(set(ids)):
         return False, "duplicate task ids"
+    agents = [t.agent for t in tasks]
+    if len(agents) != len(set(agents)):
+        # Two tasks for one agent write the same outputs key — and two
+        # TreatmentAgents would even run concurrently in a wave.
+        return False, "duplicate agent"
     known_ids = set(ids)
     for task in tasks:
         if task.agent not in AGENT_CATALOG:

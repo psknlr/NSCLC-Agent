@@ -61,6 +61,14 @@ def load_image_ref(ref: str, *, base_dir: Path | None = None) -> str:
             path = candidate
     if not path.is_file():
         raise ImagingError(f"Image not found: {ref}")
+    suffix = path.suffix.lower()
+    if suffix and suffix not in _IMAGE_EXTS:
+        # A PDF (or DICOM, docx…) silently base64'd into an image_url part is
+        # a request the vision endpoint cannot honor — refuse with the fix.
+        raise ImagingError(
+            f"{path.name}: {suffix} is not a supported image format — export "
+            f"the page(s) to PNG/JPEG first (supported: "
+            f"{', '.join(sorted(_IMAGE_EXTS))})")
     size = path.stat().st_size
     if size > _MAX_INLINE_BYTES:
         raise ImagingError(

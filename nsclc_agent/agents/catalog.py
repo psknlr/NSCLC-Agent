@@ -139,6 +139,14 @@ class InterviewAgent:
 # ----------------------------------------------------------------- perception
 
 class PerceptionAgent:
+    """Reads attached radiology films AND clinical-document images.
+
+    Both readers run through the same vision client (auto-selected from the
+    environment when possible — see ``build_vision_client``), both produce
+    MODEL-graded, never-releasable evidence, and both fold their proposals
+    into the case through the guarded seeding paths.
+    """
+
     skill_id = "nsclc.perception"
 
     def __init__(self, llm: Any | None = None, *, base_dir: Path | None = None) -> None:
@@ -146,9 +154,19 @@ class PerceptionAgent:
         self.base_dir = base_dir
 
     def run(self, state: CaseRunState, tools: Any, broker: Any) -> None:
-        refs = [img.get("ref") for img in state.images if img.get("ref")]
-        if not refs:
+        films = [str(img["ref"]) for img in state.images
+                 if img.get("ref") and img.get("kind", "radiology") != "report"]
+        reports = [str(img["ref"]) for img in state.images
+                   if img.get("ref") and img.get("kind") == "report"]
+        if not films and not reports:
             return
+        if films:
+            self._read_films(state, films)
+        if reports:
+            self._read_reports(state, reports)
+
+    # ------------------------------------------------------------------ films
+    def _read_films(self, state: CaseRunState, refs: list[str]) -> None:
         try:
             reader = ImagingReader(self.llm)
         except ImagingError as exc:
@@ -156,22 +174,13 @@ class PerceptionAgent:
             return
         try:
             findings = reader.read(
-                [str(r) for r in refs],
-                context=state.complaint,
-                base_dir=self.base_dir,
-                budget=state.budget,
+                refs, context=state.complaint,
+                base_dir=self.base_dir, budget=state.budget,
             )
         except ImagingError as exc:
             state.flag(f"IMAGING_READ_FAILED: {exc}")
             return
-        tnm = dict(state.facts.get("tnm") or {})
-        seeded, flags = fold_into_case(
-            tnm.get("t"), tnm.get("n"), tnm.get("m"), findings)
-        for kind, value in seeded.items():
-            tnm[kind] = value
-        state.facts["tnm"] = tnm
-        for flag in flags:
-            state.flag(flag)
+        self._fold_tnm(state, findings)
         eid = state.add_evidence(
             EvidenceLevel.MODEL, "imaging_reader",
             f"proposed cT={findings.candidate_t} cN={findings.candidate_n} "
@@ -179,8 +188,59 @@ class PerceptionAgent:
             findings.to_dict(),
         )
         state.outputs["imaging"] = findings.to_dict()
-        state.trace("PerceptionAgent", "read", evidence_ids=[eid],
-                    output_summary=f"{findings.n_images} image(s) read")
+        state.trace("PerceptionAgent", "read_films", evidence_ids=[eid],
+                    output_summary=f"{findings.n_images} film(s) read")
+
+    # ---------------------------------------------------------------- reports
+    def _read_reports(self, state: CaseRunState, refs: list[str]) -> None:
+        from ..perception.reports import ReportReader, fold_report_facts
+
+        try:
+            reader = ReportReader(self.llm)
+        except ImagingError as exc:
+            state.flag(f"NO_VISION_PROVIDER: {exc} — documents not read")
+            return
+        try:
+            findings = reader.read(
+                refs, context=state.complaint,
+                base_dir=self.base_dir, budget=state.budget,
+            )
+        except ImagingError as exc:
+            state.flag(f"REPORT_READ_FAILED: {exc}")
+            return
+        seeded, flags = fold_report_facts(state.facts, findings)
+        for flag in flags:
+            state.flag(flag)
+        self._fold_tnm(state, findings)
+        eid = state.add_evidence(
+            EvidenceLevel.MODEL, "report_reader",
+            f"read {len(findings.document_types) or '?'} document type(s); "
+            f"seeded {len(seeded)} fact(s)",
+            findings.to_dict(),
+        )
+        state.outputs["report_findings"] = findings.to_dict()
+        state.trace("PerceptionAgent", "read_reports", evidence_ids=[eid],
+                    output_summary=f"{findings.n_images} document(s), "
+                                   f"{len(seeded)} fact(s) seeded")
+
+    def _fold_tnm(self, state: CaseRunState, findings: Any) -> None:
+        tnm = dict(state.facts.get("tnm") or {})
+        seeded, flags = fold_into_case(
+            tnm.get("t"), tnm.get("n"), tnm.get("m"), findings)
+        for kind, value in seeded.items():
+            tnm[kind] = value
+        state.facts["tnm"] = tnm
+        if seeded:
+            # A model-proposed descriptor may stage and draft, never dose:
+            # track it with the same guard the report facts use, so the dose
+            # channel stays shut until a human confirms the seeded cTNM.
+            proposed = state.facts.setdefault("_report_proposed", [])
+            for kind in seeded:
+                path = f"tnm.{kind}"
+                if path not in proposed:
+                    proposed.append(path)
+        for flag in flags:
+            state.flag(flag)
 
 
 # -------------------------------------------------------------------- staging

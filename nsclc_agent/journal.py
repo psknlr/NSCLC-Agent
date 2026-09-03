@@ -289,6 +289,14 @@ class JournaledLLM:
         return bool(getattr(self.inner, "supports_vision", False))
 
     @property
+    def auto_selected(self) -> bool:
+        """Provenance passthrough: an auto-selected reader stays labeled so
+        even in journaled runs and replays."""
+        if self.journal.mode == "replay":
+            return bool(self._meta("auto_selected", False))
+        return bool(getattr(self.inner, "auto_selected", False))
+
+    @property
     def available(self) -> bool:
         if self.journal.mode == "replay":
             # Mirror what the recording ran with: a run recorded without a

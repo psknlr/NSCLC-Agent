@@ -118,14 +118,23 @@ class PanelAgent:
         self.llm = llm
         self.concurrency = max(1, min(int(concurrency), 8))
 
-    def run(self, state: CaseRunState, tools: Any, broker_factory: Any) -> None:
+    _UNSET = object()
+
+    def run(self, state: CaseRunState, tools: Any, broker_factory: Any, *,
+            treatment_plan_context: Any = _UNSET) -> None:
         staging_block = _staging_block(state)
+        # In a parallel wave the runner passes an explicit None: the panel
+        # reviews independently, and must not read the shared outputs dict
+        # that the treatment loop is writing mid-wave (a race that would also
+        # leak unmapped wave temp ids into member prompts).
+        if treatment_plan_context is self._UNSET:
+            treatment_plan_context = state.outputs.get("treatment_plan")
         context = {
             "complaint": state.complaint[:3000],
             "facts": {k: v for k, v in state.facts.items()
                       if k not in ("tumor_board_review",)},
             "staging": state.staging,
-            "treatment_plan_so_far": state.outputs.get("treatment_plan"),
+            "treatment_plan_so_far": treatment_plan_context,
         }
 
         def convene(persona: tuple[str, str]) -> MemberResult:

@@ -53,7 +53,19 @@ class CriticAgent:
         checks_run.append("citation_guard")
         issues.extend(self._citation_guard(state, tools, broker, plan))
 
-        # -- 3. truncation / schema re-check --------------------------------
+        # -- 3. report-proposed fact check ----------------------------------
+        checks_run.append("proposed_fact_check")
+        proposed = state.facts.get("_report_proposed") or []
+        if proposed and plan.get("regimen_ids"):
+            issues.append(
+                "PLAN_RESTS_ON_REPORT_PROPOSED_FACTS: "
+                + ", ".join(str(p) for p in proposed)
+                + " were read from uploaded document images and are "
+                "unconfirmed — the plan is provisional and the dose channel "
+                "stays closed until the source documents are verified"
+            )
+
+        # -- 4. truncation / schema re-check --------------------------------
         checks_run.append("truncation_check")
         loop_meta = state.outputs.get("treatment_loop") or {}
         if loop_meta.get("mode") == "output_truncated":

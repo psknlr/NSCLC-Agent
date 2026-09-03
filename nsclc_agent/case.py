@@ -31,13 +31,16 @@ class Case:
     #: Radiology film references (paths / data: URLs / https URLs) for the
     #: perception layer. Never the bytes themselves.
     images: list[str] = field(default_factory=list)
+    #: Photographed/scanned clinical documents (pathology, NGS, PD-L1,
+    #: written imaging reports) for the report reader.
+    reports: list[str] = field(default_factory=list)
     #: Structured facts: driver_mutations, pd_l1, ecog_ps, comorbidities,
     #: medications, histologic_category, workup {...}, resectability…
     facts: dict[str, Any] = field(default_factory=dict)
 
     _KNOWN = {
         "case_id", "t", "n", "m", "tnm_prefix", "stage_group", "staging_system",
-        "presentation", "question", "images",
+        "presentation", "question", "images", "reports",
     }
     _ALIASES = {
         "id": "case_id",
@@ -63,15 +66,16 @@ class Case:
             if isinstance(nested, dict):
                 facts.update(nested)
         core.setdefault("staging_system", "AJCC9")
-        if isinstance(core.get("images"), str):
-            core["images"] = [core["images"]]
-        elif core.get("images") is None:
-            core.pop("images", None)
+        for key in ("images", "reports"):
+            if isinstance(core.get(key), str):
+                core[key] = [core[key]]
+            elif core.get(key) is None:
+                core.pop(key, None)
         return cls(facts=facts, **core)
 
     # ------------------------------------------------------------------ helpers
     def has_images(self) -> bool:
-        return bool(self.images)
+        return bool(self.images or self.reports)
 
     def has_tnm(self) -> bool:
         return bool(self.t and self.n)
@@ -112,5 +116,6 @@ class Case:
             "presentation": self.presentation,
             "question": self.question,
             "images": list(self.images),
+            "reports": list(self.reports),
             "facts": dict(self.facts),
         }

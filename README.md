@@ -77,6 +77,32 @@ batch 断点续跑。
 
 ---
 
+### 会诊提速（v0.2.1）
+
+* **Treatment∥Panel 并行波**：治疗推理与 MDT 会诊这两条最长的模型循环并发执行
+  （默认开启，`--serial` 关闭；记录日志的运行自动回退串行以保证可重放）。
+  台账合并按任务序确定性进行——证据 ID 与线程调度无关，并行与串行产出**逐条
+  相同的台账**（有测试钉住）。并行波里的会诊是**独立评审**（不预读治疗方案，
+  免锚定），`run_meta.execution` 记录执行模式。
+* **视觉模块即插即用**：只要环境里有 `POE_API_KEY`，读片器自动接 Poe→Gemini
+  （`NSCLC_VISION_MODEL` 可换 bot，默认 Gemini-2.5-Pro）——挂上图片就能读，
+  零配置。自动选择记录在 `run_meta.vision.auto_selected`。
+* **报告直读**：`--reports` 上传拍照/扫描的病理、NGS、PD-L1、影像报告单，
+  读出的结构化事实（组织学/驱动基因/PD-L1/TNM 提及）**只种入缺失项**、逐项
+  打 `REPORT_FACT_PROPOSED` 标记并交叉核对已有值（不一致 →
+  `REPORT_DISCORDANCE`，绝不覆盖）；方案可以立刻据此起草（加速），但**剂量
+  通道对报告种入的 Tier-A 事实保持关闭**，确认原件后 `resume` 即解锁。
+* **即时读片命令**：`nsclc-agent read --images 扫描目录/ --reports 报告.jpg`
+  ——不跑全流程，秒回提议的描述符与报告事实。`--images/--reports` 接受
+  文件、URL 或整个目录。
+* **批量并行**：`batch --jobs N` 每例独立 runner 并发执行。
+
+```bash
+export POE_API_KEY=...            # 这一行就够：视觉模块自动上线
+nsclc-agent read --images ./ct_slices/ --reports ./ngs_report.jpg   # 即时审阅
+nsclc-agent run --case case.json --reports ./pathology.jpg --panel  # 全流程（并行波）
+```
+
 ## 快速开始（零依赖、离线）
 
 ```bash

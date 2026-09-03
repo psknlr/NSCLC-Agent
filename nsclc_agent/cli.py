@@ -40,6 +40,50 @@ def _read_case(path: str) -> Case:
     return Case.from_dict(data)
 
 
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
+                   ".tif", ".tiff"}
+
+
+def _expand_image_args(refs: Optional[list[str]],
+                       base_dir: Optional[Path] = None) -> list[str]:
+    """Accept files, URLs, or whole directories — easy upload.
+
+    A directory expands to its image files in sorted order, so
+    ``--images ./scans/`` just works; skipped non-image files are named on
+    stderr rather than silently dropped. ``base_dir`` resolves relative
+    directories named inside a case file.
+    """
+    out: list[str] = []
+    for ref in refs or []:
+        path = Path(ref)
+        # A relative ref inside a case file resolves against the case file's
+        # directory FIRST — before the CWD, whose unrelated same-named
+        # directory must never shadow it.
+        if base_dir is not None and not path.is_absolute() \
+                and (base_dir / path).exists():
+            path = base_dir / path
+        if path.is_dir():
+            found, skipped = [], []
+            for child in sorted(path.iterdir()):
+                if not child.is_file():
+                    continue
+                if child.suffix.lower() in _IMAGE_SUFFIXES:
+                    found.append(str(child))
+                else:
+                    skipped.append(child.name)
+            if skipped:
+                print(f"warning: skipped non-image file(s) in {ref}: "
+                      f"{', '.join(skipped)} (export documents to PNG/JPEG)",
+                      file=sys.stderr)
+            if not found:
+                print(f"warning: no image files in directory {ref}",
+                      file=sys.stderr)
+            out.extend(found)
+        else:
+            out.append(ref)
+    return out
+
+
 def cmd_stage(args) -> int:
     try:
         result = stage_from_strings(args.t, args.n, args.m, prefix=args.prefix)
@@ -114,15 +158,65 @@ def _build_runner(args, *, case_base_dir: Optional[Path] = None) -> NSCLCRunner:
         checkpoint_dir=getattr(args, "checkpoint_dir", None),
         panel_concurrency=getattr(args, "panel_concurrency", 4) or 4,
         case_base_dir=case_base_dir,
+        parallel_tasks=not getattr(args, "serial", False),
     )
+
+
+def cmd_read(args) -> int:
+    """Instant review: read films/reports into proposed findings, no full run.
+
+    The vision backend is auto-selected when possible (a POE_API_KEY alone is
+    enough — Gemini via Poe), so `nsclc-agent read --images scan.png` is the
+    entire workflow for a quick look.
+    """
+    from .perception import ImagingError, ImagingReader, ReportReader
+
+    films = _expand_image_args(args.images)
+    reports = _expand_image_args(args.reports)
+    if not films and not reports:
+        print("nothing to read: pass --images and/or --reports",
+              file=sys.stderr)
+        return 2
+    try:
+        vision = build_vision_client(provider=args.vision_provider or None)
+    except LLMError as exc:
+        print(f"LLM configuration error: {exc}", file=sys.stderr)
+        return 2
+    if vision is None:
+        print("no vision backend: set NSCLC_VISION_PROVIDER, or just set "
+              "POE_API_KEY (auto-selects Gemini via Poe)", file=sys.stderr)
+        return 2
+    out: dict = {"read_by": describe_client(vision), "errors": []}
+    # Films and reports fail independently: a bad report path must not
+    # discard a film read that already succeeded.
+    if films:
+        try:
+            out["imaging"] = ImagingReader(vision).read(
+                films, context=args.context or "").to_dict()
+        except ImagingError as exc:
+            out["errors"].append(f"films: {exc}")
+    if reports:
+        try:
+            out["report_findings"] = ReportReader(vision).read(
+                reports, context=args.context or "").to_dict()
+        except ImagingError as exc:
+            out["errors"].append(f"reports: {exc}")
+    had_errors = bool(out["errors"])
+    if not had_errors:
+        out.pop("errors")
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    return 1 if had_errors else 0
 
 
 def cmd_run(args) -> int:
     if args.case:
         case = _read_case(args.case)
         base_dir = Path(args.case).resolve().parent
-        if args.images:
-            case.images = list(args.images)
+        # Directories named in the case file expand too, relative to it.
+        case.images = _expand_image_args(args.images or case.images,
+                                         base_dir=base_dir)
+        case.reports = _expand_image_args(args.reports or case.reports,
+                                          base_dir=base_dir)
     else:
         facts = {}
         if args.facts:
@@ -134,7 +228,8 @@ def cmd_run(args) -> int:
             stage_group=args.stage_group,
             presentation=args.presentation or "",
             question=args.question or "",
-            images=list(args.images or []),
+            images=_expand_image_args(args.images),
+            reports=_expand_image_args(args.reports),
             facts=facts,
         )
         base_dir = Path.cwd()
@@ -150,6 +245,8 @@ def cmd_run(args) -> int:
 
 
 def cmd_batch(args) -> int:
+    from concurrent.futures import ThreadPoolExecutor
+
     in_dir = Path(args.directory)
     files = sorted(in_dir.glob("*.json"))
     if not files:
@@ -158,30 +255,41 @@ def cmd_batch(args) -> int:
     out_dir = Path(args.out) if args.out else None
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
-    exit_code = 0
-    for path in files:
+
+    def run_one(path: Path) -> tuple[str, str]:
         result_path = out_dir / f"{path.stem}.result.json" if out_dir else None
         if result_path and result_path.exists() and args.resume:
-            print(f"{path.name}: skipped (result exists)")
-            continue
+            return "skipped", f"{path.name}: skipped (result exists)"
+        # One runner per case: no shared breaker/interview state, and each
+        # case may run its Treatment∥Panel wave independently.
         runner = _build_runner(args, case_base_dir=path.resolve().parent)
         state = runner.run_case(
             _read_case(str(path)), role=args.role,
             allow_dose_planning=args.allow_dose_planning,
             enable_panel=args.panel,
         )
-        if state.release_status == "failed_closed":
-            exit_code = 3
-        line = (f"{path.name}: stage="
-                f"{state.staging.get('stage_group', '?') if state.staging else '?'} "
-                f"module={state.routing.get('module_key')} "
-                f"status={state.release_status}")
-        print(line)
         if result_path:
             result_path.write_text(
                 json.dumps(audit(state), ensure_ascii=False, indent=2,
                            default=str),
                 encoding="utf-8")
+        line = (f"{path.name}: stage="
+                f"{state.staging.get('stage_group', '?') if state.staging else '?'} "
+                f"module={state.routing.get('module_key')} "
+                f"status={state.release_status}")
+        return state.release_status, line
+
+    jobs = max(1, int(getattr(args, "jobs", 1) or 1))
+    exit_code = 0
+    if jobs == 1:
+        results = [run_one(path) for path in files]
+    else:
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            results = list(pool.map(run_one, files))
+    for status, line in results:
+        print(line)
+        if status == "failed_closed":
+            exit_code = 3
     return exit_code
 
 
@@ -267,13 +375,20 @@ def build_parser() -> argparse.ArgumentParser:
                    "(driver_mutations, pd_l1, ecog_ps, comorbidities…)")
     p.add_argument("--facts-file", dest="facts_file",
                    help="Structured facts from a JSON file")
-    p.add_argument("--images", nargs="+")
+    p.add_argument("--images", nargs="+",
+                   help="Radiology films: files, URLs, or whole directories")
+    p.add_argument("--reports", nargs="+",
+                   help="Photographed/scanned clinical documents (pathology, "
+                        "NGS, PD-L1, written reports): files or directories")
     p.add_argument("--role", default="oncologist",
                    choices=("patient", "oncologist", "researcher"))
     p.add_argument("--allow-dose-planning", action="store_true")
     p.add_argument("--panel", action="store_true",
                    help="Convene the MDT panel")
     p.add_argument("--panel-concurrency", type=int, default=4)
+    p.add_argument("--serial", action="store_true",
+                   help="Disable the Treatment∥Panel parallel wave "
+                        "(journaled runs are always serial)")
     p.add_argument("--journal", help="Record every host call to this JSONL")
     p.add_argument("--replay", help="Replay a recorded journal offline")
     p.add_argument("--checkpoint-dir")
@@ -282,16 +397,33 @@ def build_parser() -> argparse.ArgumentParser:
     _add_llm_flags(p)
     p.set_defaults(func=cmd_run)
 
+    p = sub.add_parser(
+        "read",
+        help="Instantly read films/reports into proposed findings (no full run)")
+    p.add_argument("--images", nargs="+",
+                   help="Radiology films: files, URLs, or directories")
+    p.add_argument("--reports", nargs="+",
+                   help="Clinical document images: files or directories")
+    p.add_argument("--context", help="Optional clinical context for the reader")
+    p.add_argument("--vision-provider",
+                   help="Override the reader backend (default: auto-detect)")
+    p.set_defaults(func=cmd_read)
+
     p = sub.add_parser("batch", help="Run all case files in a directory")
     p.add_argument("directory")
     p.add_argument("-o", "--out")
     p.add_argument("--resume", action="store_true",
                    help="Skip cases whose result file already exists")
+    p.add_argument("--jobs", type=int, default=1,
+                   help="Run up to N cases concurrently (each case gets its "
+                        "own isolated runner)")
     p.add_argument("--role", default="oncologist",
                    choices=("patient", "oncologist", "researcher"))
     p.add_argument("--allow-dose-planning", action="store_true")
     p.add_argument("--panel", action="store_true")
     p.add_argument("--panel-concurrency", type=int, default=4)
+    p.add_argument("--serial", action="store_true",
+                   help="Disable the Treatment∥Panel parallel wave per case")
     _add_llm_flags(p)
     p.set_defaults(func=cmd_batch)
 
