@@ -1,0 +1,6 @@
+{
+  "id": "CONSULT-INCOMPLETE-REFERRAL",
+  "presentation": "62-year-old woman referred from a district hospital. Chest CT shows a 4.5 cm right lower lobe mass. Biopsy pending at the time of referral; no PET-CT, no brain imaging, no mediastinal sampling, no biomarker testing.",
+  "question": "What should happen next, and what is still needed before a treatment decision?",
+  "note_for_learner": "A deliberately incomplete referral: it CANNOT be staged and CANNOT be routed. Running it through `run` correctly fails with STAGE_UNRESOLVED — that is the point. Feed it to `consult` instead (`python -m nsclc_agent consult --case examples/cases/consult_incomplete_referral.json --lang en`) and the agent asks for T, N and M first, explains that N2a vs N2b decides IIIA vs IIIB, and reports every gap it could not close."
+}

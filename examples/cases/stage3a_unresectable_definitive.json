@@ -1,0 +1,16 @@
+{
+  "id": "STAGE3A-UNRESECTABLE-DEFINITIVE",
+  "t": "T4",
+  "n": "N0",
+  "m": "M0",
+  "staging_system": "AJCC9",
+  "presentation": "70-year-old former smoker, ECOG 1. Left upper lobe adenocarcinoma invading the mediastinum and left pulmonary artery; no nodal disease on EBUS-TBNA of stations 4L, 7 and 11L. PET-CT and brain MRI negative for distant disease. MDT judged the primary unresectable (R0 not achievable). EGFR exon 19 deletion detected; ALK negative; PD-L1 TPS 5%. Pulmonary function adequate for concurrent chemoradiotherapy.",
+  "question": "Definitive management and consolidation strategy?",
+  "clinical_scenario": "UNRESECTABLE_DEFINITIVE",
+  "histologic_category": "adenocarcinoma",
+  "resectability": { "determination": "unresectable", "basis": "mediastinal and pulmonary-artery invasion; R0 not achievable" },
+  "driver_mutations": { "egfr": "exon 19 deletion", "alk": "negative" },
+  "pd_l1": { "tps": 5 },
+  "ccrt_feasibility": "feasible",
+  "note_for_learner": "Exercises the Stage IIIA module's ARM B (unresectable/definitive). T4N0M0 is 9th-edition IIIA and is frequently NOT resectable, which the module previously declared out of scope. Two traps: (1) adjuvant osimertinib/atezolizumab/pembrolizumab all require a complete resection and must not be cited here; (2) an EGFR-mutant patient after chemoradiation is a consolidation-osimertinib question, not a default consolidation-immunotherapy question."
+}
