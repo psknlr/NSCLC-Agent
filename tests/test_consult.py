@@ -347,11 +347,20 @@ def test_chinese_language_override_is_injected(agent):
     system_zh = agent.build_messages(
         Case(t="T2b", n="N2b", m="M0"), load_module("stage3b"), stage_result,
         lang="zh")[0].content
-    assert "OUTPUT LANGUAGE OVERRIDE" in system_zh
+    # The modules *mention* the override in their English requirement; the
+    # block itself starts with its own banner.
+    assert "=== OUTPUT LANGUAGE OVERRIDE" in system_zh
     system_en = agent.build_messages(
         Case(t="T2b", n="N2b", m="M0"), load_module("stage3b"), stage_result,
         lang="en")[0].content
-    assert "OUTPUT LANGUAGE OVERRIDE" not in system_en
+    assert "=== OUTPUT LANGUAGE OVERRIDE" not in system_en
+
+
+def test_every_module_defers_to_the_language_override():
+    """The override only works if the module's own rule yields to it."""
+    from nsclc_agent.prompts import list_modules
+    for m in list_modules():
+        assert "OUTPUT LANGUAGE OVERRIDE" in m.system_prompt, m.key
 
 
 _CJK = range(0x4E00, 0x9FFF)
@@ -760,3 +769,145 @@ def test_a_completed_session_is_not_dragged_back_into_gathering(agent):
     assert session.status == "complete"
     agent._refresh(session)
     assert session.status == "complete"
+
+
+# ===========================================================================
+# Second adversarial pass — realistic phrasing that produced wrong values.
+# Convention: a value that would route the case wrongly is the failure that
+# matters; leaving a slot unknown is cheap because the consultation asks.
+# ===========================================================================
+
+@pytest.mark.parametrize("text", [
+    "Non-squamous NSCLC, PD-L1 30%",
+    "非鳞状非小细胞肺癌，PD-L1 30%",
+    "non-small cell, non-squamous histology",
+])
+def test_non_squamous_is_not_squamous(text):
+    """Inverted the histology that gates driver testing and pemetrexed."""
+    assert extract_deterministic(text)[0].get("histology") != "squamous"
+
+
+def test_squamous_itself_is_still_read():
+    assert extract_deterministic("Squamous cell carcinoma on biopsy.")[0][
+        "histology"] == "squamous"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("PD-L1 TPS <1%", "<1%"),
+    ("PD-L1 ≥50%", ">=50%"),
+    ("PD-L1 小于1%", "<1%"),
+    ("PD-L1 (22C3) TPS 50%", 50),
+])
+def test_pd_l1_comparator_is_kept(text, expected):
+    """"<1%" and "1%" sit on opposite sides of the immunotherapy threshold."""
+    assert extract_deterministic(text)[0]["pd_l1"] == expected
+
+
+@pytest.mark.parametrize("text", [
+    "Small pericardial effusion, likely benign.",
+    "A 4 mm contralateral lung nodule, probably a granuloma.",
+    "Trace pleural effusion, not sampled.",
+])
+def test_a_finding_that_may_be_benign_is_not_m1a(text):
+    assert "m_category" not in extract_deterministic(text)[0]
+
+
+@pytest.mark.parametrize("text", [
+    "Malignant pleural effusion confirmed on cytology.",
+    "恶性胸腔积液，细胞学阳性。",
+    "Pleural metastases on thoracoscopy.",
+])
+def test_an_explicitly_malignant_finding_is_m1a(text):
+    assert extract_deterministic(text)[0]["m_category"] == "M1a"
+
+
+@pytest.mark.parametrize("text", [
+    "PET-CT shows a hypermetabolic bone lesion and brain MRI negative",
+    "PET-CT shows bone lesions, brain MRI negative",
+    "PET-CT: avid adrenal mass; brain MRI negative",
+])
+def test_pet_negative_does_not_reach_across_a_positive_finding(text):
+    """"PET-CT … negative" was matched across the lesion in between."""
+    assert extract_deterministic(text)[0].get("m_category") != "M0"
+
+
+def test_pet_and_brain_mri_negative_still_reads_m0():
+    assert extract_deterministic("PET-CT and brain MRI negative")[0][
+        "m_category"] == "M0"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("非常大的恶性胸腔积液", "M1a"),          # 非常 = "very", not a negation
+    ("无症状恶性胸腔积液", "M1a"),            # 无症状 = asymptomatic
+    ("denies chest pain but has a malignant pleural effusion", "M1a"),
+])
+def test_negation_does_not_over_reach(text, expected):
+    assert extract_deterministic(text)[0]["m_category"] == expected
+
+
+@pytest.mark.parametrize("text", [
+    "Bone metastases in three vertebrae.",
+    "Multiple liver metastases on CT.",
+    "Intracranial metastasis, single lesion.",
+])
+def test_english_site_stems_are_detected(text):
+    """Word-bounding the needles had made every English site invisible."""
+    _, notes = extract_deterministic(text)
+    assert any("AMBIGUOUS_DESCRIPTOR" in n for n in notes)
+
+
+@pytest.mark.parametrize("text,key,expected", [
+    ("smoked for 40 yr", "age", None),
+    ("30 pack-years", "age", None),
+    ("68女性，腺癌", "age", 68),
+    ("患者 72 岁男性", "age", 72),
+    ("68F adenocarcinoma", "age", 68),
+    ("68 years old", "age", 68),
+])
+def test_age_is_read_only_from_age_phrasing(text, key, expected):
+    assert extract_deterministic(text)[0].get(key) == expected
+
+
+def test_a_count_of_involved_stations_is_not_a_station():
+    assert not extract_deterministic("淋巴结转移 2 组")[0].get("n2_stations")
+    assert extract_deterministic("转移至7组淋巴结")[0]["n2_stations"] == ["7"]
+
+
+@pytest.mark.parametrize("text", [
+    "ALK rearranged on FISH", "ALK rearrangement detected",
+    "EGFR exon 19 deletion", "EGFR exon 20 insertion",
+])
+def test_driver_stems_are_read_as_positive(text):
+    values, _ = extract_deterministic(text)
+    key = "alk" if text.startswith("ALK") else "egfr"
+    assert values.get(key) and "negative" not in str(values[key]).lower()
+
+
+def test_unusable_seeded_descriptors_are_reported_as_missing(agent):
+    case = Case.from_dict({"t": "T2", "n": "N2", "m": "M0"})
+    session = agent.start_consult(case=case)
+    assert set(session.missing_staging_descriptors()) == {"t_category",
+                                                          "n_category"}
+
+
+def test_model_descriptors_are_stored_canonically(agent):
+    """"t2b" from a model and "T2b" from a regex must not read as a
+    correction of one another."""
+    from nsclc_agent.consult.extract import extract
+    from nsclc_agent.providers.base import (
+        GenerationParams, LLMProvider, LLMResponse,
+    )
+
+    class Lower(LLMProvider):
+        kind = "fake"
+
+        def __init__(self):
+            super().__init__("f", "f1", GenerationParams())
+
+        def complete(self, messages, *, params=None):
+            return LLMResponse(
+                content=json.dumps({"values": {"n_category": "n2b"}}),
+                provider="f", model="f1", finish_reason="stop")
+
+    values, _ = extract("no descriptor", ["n_category"], provider=Lower())
+    assert values["n_category"] == "N2b"

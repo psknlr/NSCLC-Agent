@@ -110,8 +110,27 @@ def query_plan(
     band = stage_band(stage_group)
     queries = list(_STAGE_QUERIES.get(band, ()))
     for key, template in _BIOMARKER_QUERIES:
-        value = str(facts.get(key) or "").lower()
-        if value and value not in ("negative", "not_tested", "wild",
-                                   "wild-type", "unknown"):
+        value = str(_driver_fact(facts, key) or "").lower()
+        if value and not any(neg in value for neg in _NEGATIVE_DRIVER_WORDS):
             queries.append(template)
     return queries[:max(1, limit)]
+
+
+#: Anything a driver result may say that means "no actionable alteration".
+_NEGATIVE_DRIVER_WORDS = ("negative", "not_tested", "not tested", "wild",
+                          "unknown", "pending", "阴性", "野生", "未做", "未检测")
+
+
+def _driver_fact(facts: dict[str, Any], key: str) -> Any:
+    """A driver result, whether flat (consultation) or nested (case files).
+
+    Consultation sessions record ``{"egfr": ...}``; the shipped case files
+    record ``{"driver_mutations": {"egfr": ...}}``. Reading only the flat form
+    meant no example case ever triggered a biomarker query.
+    """
+    if facts.get(key) is not None:
+        return facts[key]
+    nested = facts.get("driver_mutations")
+    if isinstance(nested, dict):
+        return nested.get(key)
+    return None

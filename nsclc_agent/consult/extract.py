@@ -78,14 +78,23 @@ _ECOG_RE = re.compile(
 #: "ECOG 0-1" is a range, not a 0. Taking the first number silently records the
 #: better half; the worse end is the safe reading, and it is noted.
 _ECOG_RANGE_RE = re.compile(r"\s*[-–—~至到]\s*([0-4])(?!\d)")
-_AGE_RE = re.compile(r"(\d{1,3})\s*(?:岁|years?\s*old|y/?o\b|yr\b)",
+#: Bare "yr" is dropped: "smoked for 40 yr" is a duration, and it was read as
+#: an age of 40. CJK characters are word characters to ``\b``, so "68女性"
+#: needs the compact form to end without a boundary.
+_AGE_RE = re.compile(r"(\d{1,3})\s*(?:岁|years?[\s-]*old|y/?o\b)",
                      re.IGNORECASE)
-_AGE_COMPACT_RE = re.compile(r"\b(\d{2,3})\s*(?:[MF]|男|女)\b")
+_AGE_COMPACT_RE = re.compile(r"(?<![\d.])(\d{2,3})\s*(?:[MF]\b|男|女)")
 #: The gap must be allowed to contain digits: the assay clone is usually named
 #: ("PD-L1 (22C3) TPS 50%"), and forbidding digits blocked the whole match —
 #: on the exact phrasing the PD-L1 question invites ("…and which assay?").
+#: The comparator is captured: "TPS <1%" and "TPS 1%" sit on opposite sides
+#: of the threshold that gates immunotherapy monotherapy, and dropping the
+#: "<" recorded the wrong side.
 _PDL1_RE = re.compile(
-    r"(?:PD-?L1|\bTPS\b|\bCPS\b)[^%\n]{0,40}?(\d{1,3})\s*%", re.IGNORECASE)
+    r"(?:PD-?L1|\bTPS\b|\bCPS\b)[^%\n]{0,40}?"
+    r"([<>≤≥]|小于|不足|大于|不低于)?\s*(\d{1,3})\s*%", re.IGNORECASE)
+_PDL1_COMPARATOR = {"<": "<", "≤": "<=", ">": ">", "≥": ">=", "小于": "<",
+                    "不足": "<", "大于": ">", "不低于": ">="}
 _PDL1_NEG_RE = re.compile(
     r"PD-?L1[^。;；,，]{0,20}(阴性|negative|<\s*1\s*%)", re.IGNORECASE)
 #: A sentence has to be *about* nodes before bare numbers in it are read as
@@ -106,7 +115,7 @@ _STATION_WORDED_EN_RE = re.compile(
 #: Chinese writes the identifier as "7组"/"第7组"; a count carries a cue word.
 _STATION_WORDED_ZH_RE = re.compile(
     r"第?\s*(1[0-4]|[1-9])([RL])?\s*(?:组|站)", re.IGNORECASE)
-_ZH_COUNT_CUE_RE = re.compile(r"(?:共|计|累计|总共|个|枚|肿大|有)\s*$")
+_ZH_COUNT_CUE_RE = re.compile(r"(?:共|计|累计|总共|个|枚|肿大|有|转移)\s*$")
 _STATION_BARE_RE = re.compile(r"^(1[0-4]|[1-9])([RL])?$", re.IGNORECASE)
 _STATION_SPLIT_RE = re.compile(r"[、,，/和&—–\-:：;；]|\band\b|\+",
                                re.IGNORECASE)
@@ -122,17 +131,30 @@ _M0_PHRASES = (
 #: A whole-body staging study reported negative also establishes M0. The bar is
 #: deliberately PET-CT (or PET): "brain MRI negative" alone excludes brain
 #: metastases, not bone or liver, and must not be read as M0 on its own.
+#: The gap between "PET-CT" and "negative" may not cross a comma, and may not
+#: contain a positive finding: "PET-CT shows bone lesions, brain MRI negative"
+#: is M1 disease, and read as M0 it was.
 _M0_WORKUP_RE = re.compile(
-    r"(PET[\s/-]?CT|PET)[^。.;；\n]{0,40}?"
-    r"(negative|clear|unremarkable|no evidence|阴性|未见异常|未见转移|无异常)",
+    r"(PET[\s/-]?CT|PET)"
+    r"(?:(?!lesion|uptake|avid|hypermetabol|metasta|positive|转移|病灶|摄取"
+    r"|高代谢|阳性|浓聚)[^。.;；,，\n]){0,40}?"
+    r"(negative|clear|unremarkable|no evidence|阴性|未见异常|未见转移|无异常"
+    r"|无远处转移)",
     re.IGNORECASE)
+#: Only descriptors that *state* malignancy. "pericardial effusion" and
+#: "contralateral lung nodule" are findings that are often benign; reading
+#: them as M1a moved a curative patient to the metastatic pathway. If the
+#: reply is not explicit, M stays unknown and the consultation asks — the
+#: cheap direction to be wrong in.
 _M1_HINTS = (
-    ("M1c2", ("多器官转移", "多个器官系统", "multiple organ systems")),
+    ("M1c2", ("多器官转移", "多个器官系统转移", "multiple organ systems")),
     ("M1c1", ("单器官多发转移", "multiple metastases in one organ",
               "single organ system")),
-    ("M1a", ("胸膜转移", "恶性胸腔积液", "对侧肺转移", "心包转移",
-             "malignant pleural effusion", "contralateral lung nodule",
-             "pleural nodule", "pericardial")),
+    ("M1a", ("胸膜转移", "恶性胸腔积液", "恶性心包积液", "对侧肺转移", "心包转移",
+             "malignant pleural effusion", "malignant pericardial effusion",
+             "pleural metastas*", "pericardial metastas*",
+             "contralateral lung metastas*", "contralateral lobe metastas*",
+             "malignant pleural nodule*")),
 )
 #: Named distant sites. Their presence means M1, but not *which* M1 — the
 #: sub-category depends on lesion count and organ-system count, so the reply is
@@ -143,13 +165,14 @@ _M1_HINTS = (
 #: negative metastatic work-up into a conflict.
 _DISTANT_SITES = (
     "脑转移", "颅内转移", "骨转移", "肝转移", "肾上腺转移",
-    "brain metastas", "cerebral metastas", "bone metastas",
-    "liver metastas", "hepatic metastas", "adrenal metastas",
+    "brain metastas*", "cerebral metastas*", "intracranial metastas*",
+    "bone metastas*", "osseous metastas*", "liver metastas*",
+    "hepatic metastas*", "adrenal metastas*",
 )
 
-_POSITIVE = ("阳性", "突变", "重排", "融合", "positive", "mutant", "mutation",
-             "rearrange", "fusion", "detected", "19del", "l858r", "exon20",
-             "exon 20", "g12c", "v600e", "skipping")
+_POSITIVE = ("阳性", "突变", "重排", "融合", "positive", "mutant", "mutation*",
+             "rearrange*", "fusion", "detected", "19del", "l858r", "exon20",
+             "exon 20", "g12c", "v600e", "skipping", "deletion", "insertion")
 _NEGATIVE = ("阴性", "野生", "未见", "未检出", "negative", "wild", "wt",
              "not detected", "no mutation", "absent")
 _UNTESTED = ("未做", "没做", "未检测", "未查", "not tested", "not done",
@@ -191,18 +214,45 @@ _SMOKING = (
 #: Negation cues, checked immediately before a matched phrase. Without this a
 #: reply that RULES OUT a finding reads as asserting it: "no malignant pleural
 #: effusion" set M1a, i.e. it staged a curative patient as IVA.
-_NEGATION_RE = re.compile(
-    r"(?:无|未见|没有|未发现|未|否认|排除|不伴|阴性"
-    r"|\b(?:no|not|without|negative\s+for|free\s+of|absent|denies|denied"
-    r"|ruled\s+out|excluded)\b)"
-    # …followed only by filler, never across a clause break, up to the phrase.
-    r"[^。.;；,，、\n]{0,24}$",
+#:
+#: Cues differ in how much may sit between them and the phrase. "非"/"non-"
+#: bind directly ("非鳞癌", "non-squamous") — giving them filler let "非常大的…"
+#: ("a very large …") negate what followed. Chinese cues take a few characters
+#: ("未见明显…"); English ones take a short clause ("no evidence of …"). None
+#: may cross a clause break.
+_NEG_CUES: tuple[re.Pattern, ...] = (
+    re.compile(r"(?:非|未)$"),
+    re.compile(r"\bnon-?$", re.IGNORECASE),
+    re.compile(r"(?:无|未见|未发现|未检出|未探及|未提示|没有|否认|排除|不伴|不存在)"
+               r"([^。.;；,，、\n]{0,8})$"),
+    re.compile(r"\b(?:no|not|without|negative\s+for|free\s+of|absent|denies"
+               r"|denied|ruled\s+out|excluded)\b([^。.;；,，、\n]{0,24})$",
+               re.IGNORECASE),
+)
+#: A contrast between the cue and the phrase re-asserts it: "denies chest
+#: pain BUT has a malignant pleural effusion".
+_CONTRAST_RE = re.compile(
+    r"\b(?:but|however|although|except|yet|whereas)\b|但|而|然而|不过|除了|却",
     re.IGNORECASE)
+#: "无" glued to the next word is a different word, not a negation of what
+#: follows: 无症状 (asymptomatic), 无痛 (painless), 无创 (non-invasive)…
+_NOT_A_NEGATION_FILLER_RE = re.compile(r"^(?:症状|痛|创|法|需)")
 
 
 def _is_negated(text: str, start: int) -> bool:
     """Is the phrase starting at ``start`` inside a negation?"""
-    return bool(_NEGATION_RE.search(text[max(0, start - 40):start]))
+    window = text[max(0, start - 40):start]
+    for cue in _NEG_CUES:
+        m = cue.search(window)
+        if not m:
+            continue
+        filler = m.group(1) if m.lastindex else ""
+        if _CONTRAST_RE.search(filler):
+            continue
+        if filler and _NOT_A_NEGATION_FILLER_RE.match(filler):
+            continue
+        return True
+    return False
 
 
 def _needle_re(needle: str) -> re.Pattern:
@@ -213,6 +263,12 @@ def _needle_re(needle: str) -> re.Pattern:
     CJK needles have no word boundaries and are matched as substrings.
     """
     if needle.isascii():
+        if needle.endswith("*"):
+            # Stem: "brain metastas*" covers metastasis / metastases. A plain
+            # trailing boundary silently matched neither, which made English
+            # metastatic sites undetectable.
+            return re.compile(r"\b" + re.escape(needle[:-1]) + r"[A-Za-z]*\b",
+                              re.IGNORECASE)
         return re.compile(r"\b" + re.escape(needle) + r"\b", re.IGNORECASE)
     return re.compile(re.escape(needle))
 
@@ -358,9 +414,10 @@ def extract_deterministic(text: str) -> tuple[dict[str, Any], list[str]]:
 
     m = _PDL1_RE.search(text)
     if m:
-        tps = int(m.group(1))
+        comparator, tps = m.group(1), int(m.group(2))
         if tps <= 100:
-            values["pd_l1"] = tps
+            values["pd_l1"] = (f"{_PDL1_COMPARATOR[comparator]}{tps}%"
+                               if comparator else tps)
     elif _PDL1_NEG_RE.search(text):
         values["pd_l1"] = "<1%"
 
@@ -510,12 +567,15 @@ def extract_with_model(
         # unusable "T2" here would make the consultation look complete and
         # then fail at staging time.
         vocab = _DESCRIPTOR_VOCAB.get(key)
-        if vocab is not None and not _canon(str(value), vocab):
-            notes.append(
-                f"MODEL_DESCRIPTOR_REJECTED[{key}]: {value!r} is not a "
-                f"9th-edition category — discarded, the question stands."
-            )
-            continue
+        if vocab is not None:
+            canon = _canon(str(value), vocab)
+            if not canon:
+                notes.append(
+                    f"MODEL_DESCRIPTOR_REJECTED[{key}]: {value!r} is not a "
+                    f"9th-edition category — discarded, the question stands."
+                )
+                continue
+            value = canon   # "t2b" and "T2b" must not read as a correction
         values[key] = value
     return values, notes
 

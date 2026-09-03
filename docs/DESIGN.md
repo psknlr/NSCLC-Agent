@@ -263,4 +263,4 @@ only the prompt loader, router, tests and examples.)
 - `test_cli.py` — the argparse front-end, in-process, including the
   consultation and the error exit codes.
 
-All 353 tests run fully offline.
+All 393 tests run fully offline.

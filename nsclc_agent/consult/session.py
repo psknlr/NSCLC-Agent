@@ -18,7 +18,12 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 from ..case import Case
-from .planner import next_questions, outstanding_gaps, staging_is_resolvable
+from .planner import (
+    next_questions,
+    outstanding_gaps,
+    staging_is_resolvable,
+    unresolvable_staging_slots,
+)
 from .slots import SLOTS_BY_KEY, STAGING_SLOTS
 
 #: Terminal and non-terminal session states.
@@ -165,7 +170,16 @@ class ConsultSession:
         return staging_is_resolvable(self.known)
 
     def missing_staging_descriptors(self) -> list[str]:
-        return [k for k in STAGING_SLOTS if not self.known.get(k)]
+        """Staging slots that are absent *or hold a value the engine refuses*.
+
+        A seeded "T2" is present but unusable; reporting only absent keys
+        printed "Cannot produce a recommendation:  still unknown" with an
+        empty list.
+        """
+        absent = [k for k in STAGING_SLOTS if not self.known.get(k)]
+        unusable = [k for k in unresolvable_staging_slots(self.known)
+                    if k not in absent]
+        return absent + unusable
 
     # -- conversion ----------------------------------------------------------
 

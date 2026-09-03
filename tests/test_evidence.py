@@ -191,3 +191,17 @@ def test_evidence_block_reaches_the_system_prompt():
                                   retrieval=retrieval)[0].content
     assert "RETRIEVED EVIDENCE" in system
     assert "PMID:12345678" in system
+
+
+
+def test_query_plan_reads_nested_driver_mutations():
+    """The shipped case files nest drivers; the flat lookup never saw them."""
+    nested = {"driver_mutations": {"egfr": "exon 19 deletion", "alk": "negative"}}
+    queries = query_plan("IIIB", nested, limit=5)
+    assert any("osimertinib" in q for q in queries)
+    assert not any("ALK" in q for q in queries)
+
+
+def test_query_plan_treats_chinese_negatives_as_negative():
+    assert not any("osimertinib" in q
+                   for q in query_plan("IV", {"egfr": "阴性"}, limit=5))
