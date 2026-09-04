@@ -98,6 +98,34 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     the source document and resuming is what re-opens it. The vision client
     auto-selects (Poe→Gemini on a bare `POE_API_KEY`) so attaching an image
     is the entire integration; auto-selection is recorded provenance.
+13. **Chat is not a generation channel.** (`ConsultationSession`, the ported
+    YaoBi conversation layer.) Every turn is a complete audited run over the
+    accumulated narrative and facts — same runner, broker, ledger, terminal
+    critic. Fact intake is allowlisted and engine-validated on every path
+    (free text, model extraction, the explicit facts parameter): sign-off
+    keys, release status and `_`-prefixed guard keys are unreachable from
+    chat, and a bare `N2` typed into chat is refused exactly as everywhere
+    else. Free text fills gaps only (`CHAT_FACT_CONFLICT` — the record beats
+    hearsay); explicit operator facts overwrite, and landing on a
+    `_report_proposed` path — even restating it verbatim — is the logged
+    confirmation (`PROPOSED_FACT_CONFIRMED`) that re-opens the dose channel.
+    The guard itself is re-applied by the session on every turn
+    (`run_case(internal_facts=…)` after the external-input strip), so it
+    survives the conversation, not just one run. The emergency screen runs
+    on the full narrative each turn and its script is never rephrased; the
+    outgoing reply is dose-scanned unconditionally, and a polish pass that
+    introduces a dose numeric is discarded wholesale.
+14. **Plan reuse is fingerprinted, re-anchored and re-audited.** A
+    pure-question turn (no changed decision facts, no new attachments) hands
+    the previous plan to the TreatmentAgent with a byte-stable fingerprint of
+    the facts that produced it; the agent reuses it only on an exact match,
+    re-adds the cached evidence rows to *this* run's ledger with their
+    original tool-declared grades (citation ids are ledger-local and never
+    travel), and the terminal critic re-audits the reused plan in full. The
+    cache is consumed before the decision, so a critic-requested repair pass
+    always re-plans for real. Session memory (one `InterviewLoop`, read
+    attachment refs, accumulated facts) is what makes later turns fast:
+    images are read once per session, closed axes are never re-asked.
 
 ## 3. LLM containment table
 
@@ -111,6 +139,7 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
 | Panel | reason in a speciality view; raise urgency; dissent | reach dose tools; lower another member's urgency; write release status |
 | Vision | propose descriptors within the engine vocabulary | assign a stage; propose refused descriptors (rejected at ingestion); stand in for the radiologist (`requires_confirmation` schema-pinned true) |
 | Critique | add issues | remove or downgrade any rule-engine finding |
+| Chat | extract allowlisted facts from a turn; polish a released reply | set sign-off/guard keys; overwrite the record from free text; rephrase the emergency script; introduce dose numerics (polish discarded); add clinical content |
 | Doses | nothing | anything |
 
 ## 4. The safety rule engine

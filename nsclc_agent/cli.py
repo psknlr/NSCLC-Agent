@@ -7,6 +7,7 @@ Subcommands:
   axes       List the enquiry axes (the VOI layer), by tier.
   screen     Run the oncologic-emergency screen on a narrative.
   run        Run one case through the full governed pipeline.
+  chat       Multi-turn consultation; each turn is a full audited run.
   batch      Run every ``*.json`` case in a directory.
   selftest   Validate the staging engine (stage table + refusal table).
   eval       Run the golden-case evaluation suite.
@@ -244,6 +245,121 @@ def cmd_run(args) -> int:
     return 0 if state.release_status not in ("failed_closed",) else 3
 
 
+def cmd_chat(args) -> int:
+    """Multi-turn consultation (the ported YaoBi conversation layer).
+
+    Scripted mode (repeatable ``--message``) drives the turns from the
+    command line and is what the tests use; with no ``--message`` an
+    interactive REPL starts. Every turn is a complete audited run; turns
+    that add no decision facts reuse the previous plan and are fast.
+    """
+    from .conversation import ConsultationSession
+
+    try:
+        llm = build_client(getattr(args, "llm_provider", None) or None,
+                           model=getattr(args, "llm_model", None) or None)
+        vision = build_vision_client(
+            provider=getattr(args, "vision_provider", None) or None)
+    except LLMError as exc:
+        print(f"LLM configuration error: {exc}", file=sys.stderr)
+        return 2
+    session = ConsultationSession(
+        llm=llm, vision_llm=vision, role=args.role,
+        parallel_tasks=not args.serial,
+        panel_concurrency=args.panel_concurrency,
+        allow_dose_planning=args.allow_dose_planning,
+        polish_replies=args.polish,
+        case_base_dir=Path.cwd(),
+    )
+    initial_facts = json.loads(args.facts) if args.facts else None
+
+    def one_turn(text: str, *, images=None, reports=None, facts=None) -> int:
+        result = session.turn(
+            text, images=_expand_image_args(images),
+            reports=_expand_image_args(reports),
+            facts=facts, enable_panel=args.panel,
+        )
+        if args.json:
+            print(json.dumps(result.to_dict(), ensure_ascii=False,
+                             default=str))
+        else:
+            tags = []
+            if result.plan_reused:
+                tags.append("plan-reused")
+            for note in result.notes:
+                print(f"  [note] {note}", file=sys.stderr)
+            print(f"--- [{result.state.release_status}"
+                  f"{' | ' + ', '.join(tags) if tags else ''} | "
+                  f"{result.duration_s:.1f}s | llm×{result.llm_calls}] ---")
+            print(result.reply)
+        return 3 if result.state.release_status == "failed_closed" else 0
+
+    if args.message:
+        rc = 0
+        for index, text in enumerate(args.message):
+            rc = one_turn(text, facts=initial_facts if index == 0 else None)
+        return rc
+
+    # ------------------------------------------------------------ interactive
+    print("NSCLC 多轮会诊。/image <path> 与 /report <path> 附加到下一条消息；"
+          "/facts {json} 提交结构化事实（确认报告读出的值）；/panel 与 "
+          "/dose on|off 切换；/state 查看；/quit 退出。", file=sys.stderr)
+    pending_images: list[str] = []
+    pending_reports: list[str] = []
+    pending_facts: Optional[dict] = initial_facts
+    while True:
+        try:
+            line = input("you> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print(file=sys.stderr)
+            return 0
+        if not line:
+            continue
+        if line in ("/quit", "/exit", "/q"):
+            return 0
+        if line.startswith("/image "):
+            pending_images.append(line[len("/image "):].strip())
+            print(f"  attached film ({len(pending_images)})", file=sys.stderr)
+            continue
+        if line.startswith("/report "):
+            pending_reports.append(line[len("/report "):].strip())
+            print(f"  attached report ({len(pending_reports)})", file=sys.stderr)
+            continue
+        if line.startswith("/facts "):
+            try:
+                payload = json.loads(line[len("/facts "):])
+            except json.JSONDecodeError as exc:
+                print(f"  bad JSON: {exc}", file=sys.stderr)
+                continue
+            pending_facts = {**(pending_facts or {}), **payload}
+            print("  facts staged for next turn", file=sys.stderr)
+            continue
+        if line == "/panel":
+            args.panel = not args.panel
+            print(f"  panel: {'on' if args.panel else 'off'}", file=sys.stderr)
+            continue
+        if line.startswith("/dose"):
+            args.allow_dose_planning = line.endswith("on")
+            print(f"  dose planning: "
+                  f"{'on' if args.allow_dose_planning else 'off'}",
+                  file=sys.stderr)
+            continue
+        if line == "/state":
+            state = session.last_state
+            print(json.dumps({
+                "turns": len(session.turns),
+                "release_status": state.release_status if state else None,
+                "stage_group": (state.staging or {}).get("stage_group")
+                if state else None,
+                "facts": session.facts,
+                "read_refs": sorted(session.read_refs),
+            }, ensure_ascii=False, indent=2, default=str), file=sys.stderr)
+            continue
+        one_turn(line, images=pending_images, reports=pending_reports,
+                 facts=pending_facts)
+        pending_images, pending_reports, pending_facts = [], [], None
+
+
 def cmd_batch(args) -> int:
     from concurrent.futures import ThreadPoolExecutor
 
@@ -408,6 +524,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--vision-provider",
                    help="Override the reader backend (default: auto-detect)")
     p.set_defaults(func=cmd_read)
+
+    p = sub.add_parser(
+        "chat",
+        help="Multi-turn consultation (every turn is a full audited run)")
+    p.add_argument("-m", "--message", action="append",
+                   help="Scripted turn(s); repeat for a whole conversation. "
+                        "Omit for the interactive REPL.")
+    p.add_argument("--facts", help="Structured facts JSON for the first turn "
+                                   "(the operator/confirmation channel)")
+    p.add_argument("--role", default="patient",
+                   choices=("patient", "oncologist", "researcher"))
+    p.add_argument("--allow-dose-planning", action="store_true")
+    p.add_argument("--panel", action="store_true",
+                   help="Convene the MDT panel each turn")
+    p.add_argument("--panel-concurrency", type=int, default=4)
+    p.add_argument("--serial", action="store_true")
+    p.add_argument("--polish", action="store_true",
+                   help="Model-polish replies (guarded: dose-scanned, "
+                        "never the emergency script)")
+    p.add_argument("--json", action="store_true",
+                   help="One JSON object per turn instead of prose")
+    _add_llm_flags(p)
+    p.set_defaults(func=cmd_chat)
 
     p = sub.add_parser("batch", help="Run all case files in a directory")
     p.add_argument("directory")

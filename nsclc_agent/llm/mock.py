@@ -57,6 +57,11 @@ class MockLLMClient:
                 ],
             }, ensure_ascii=False))
 
+        if "CHAT FACT EXTRACTION" in system_text:
+            # Honest empty: the deterministic regex pass already extracted the
+            # unambiguous facts; the mock must not invent any beyond them.
+            return self._reply(json.dumps({"facts": {}}, ensure_ascii=False))
+
         if "问诊充分性审核者" in system_text or "病史充分性审核者" in system_text:
             return self._reply(json.dumps({
                 "adequate": False, "missing_axes": [],

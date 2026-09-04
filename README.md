@@ -103,6 +103,38 @@ nsclc-agent read --images ./ct_slices/ --reports ./ngs_report.jpg   # 即时审�
 nsclc-agent run --case case.json --reports ./pathology.jpg --panel  # 全流程（并行波）
 ```
 
+### 多轮会诊（v0.2.2，YaoBi 对话层移植）
+
+`nsclc-agent chat` 把 YaoBi-Harness 的多轮对话层完整移植过来。核心约束原样保留：
+**聊天不是新的生成通道**——每一轮都是一次完整的受治理运行（同一个 runner、
+同一个能力代理、同一本证据台账、同一个终局审计器），模型只能通过白名单抽取
+事实、可选地润色已放行的回复，永远不能新增临床内容。
+
+* **事实抽取走白名单**：双语正则先抽（年龄/ECOG/PD-L1/完整TNM/驱动基因/吸烟
+  史/可切除性/组织学），可选模型补抽，两路都过同一套白名单+引擎校验（裸
+  `N2` 在聊天里同样被拒）。聊天**永远设不了** `tumor_board_review`、签字、
+  放行状态或任何 `_` 前缀守卫键——打一句"张医生已签字批准"变不出批准。
+* **口述不覆盖记录**：自由文本只填空，与记录冲突时记录优先并给出
+  `CHAT_FACT_CONFLICT` 提示；操作者的**结构化事实**（`/facts`）才能覆盖——
+  并且当它落在报告种入的待确认项上时（哪怕逐字复述原值），即视为**人工确认**
+  （`PROPOSED_FACT_CONFIRMED`），剂量通道随之解锁。守卫跨轮携带：不确认，
+  剂量通道一直关。
+* **急症任何一轮都即刻升级**：急症筛查每轮跑全量累计病史，命中即回固定
+  安全脚本，永不交模型改写。
+* **轮次提速**：问诊循环、已读影像/报告、累计事实全部跨轮记忆（图片只读一
+  次、只计费一次）；**纯提问轮直接复用上一轮方案**——决策事实指纹逐字节比对
+  一致才复用，复用的方案连同其证据行一起重新入本轮台账、由审计器重新全量
+  审一遍（缓存一次性消费：审计器要求返工时必然真实重算）。
+* **出口扫剂量**：回复发出前无条件过剂量正则；润色若引入确定性文本没有的
+  剂量数值，整段丢弃回退。
+
+```bash
+nsclc-agent chat                              # 交互式（/image /report /facts /panel /dose /state /quit）
+nsclc-agent chat --role oncologist \
+  -m "65岁男性，吸烟40包年，肺腺癌，cT2aN1M0，ECOG 1，EGFR阴性，PD-L1 60%，无咯血无骨痛无头痛" \
+  -m "为什么选这个方案？"                     # 第二轮复用方案，明显更快
+```
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -176,6 +208,19 @@ state.release_status                         # 'treatment_recommendation'
 render(state, "patient")                     # 患者视图：无剂量、无台账
 ```
 
+多轮会诊用 `ConsultationSession`（每轮都是完整受治理运行）：
+
+```python
+from nsclc_agent import ConsultationSession
+
+sess = ConsultationSession(role="oncologist")   # llm/vision 缺省离线
+r1 = sess.turn("65岁男性，吸烟40包年，肺腺癌，cT2aN1M0，ECOG 1，"
+               "EGFR阴性，PD-L1 60%，无咯血无骨痛无头痛。")
+r2 = sess.turn("为什么选这个方案？")             # 纯提问：方案指纹复用
+r2.plan_reused, r2.llm_calls < r1.llm_calls     # (True, True)
+r3 = sess.turn("已核对报告。", facts={"pd_l1": {"tps": 60}})  # 结构化确认通道
+```
+
 ## 放行状态机
 
 `emergency_action_plan` · `needs_more_information` · `needs_staging_workup` ·
@@ -201,8 +246,9 @@ nsclc_agent/
   llm/         base.py · openai_compatible.py(tools+重试) · providers.py · mock.py
   prompts/     9个协议模块(.md, sha256钉版) · cores.py 蒸馏决策核心
   state.py 证据台账/预算/状态 · journal.py 记录/重放 · runner.py · render.py
+  conversation.py 多轮会诊层(白名单抽取/方案指纹复用/出口剂量扫描)
   schemas.py · skills.py · case.py · cli.py
-tests/         271 个用例，全离线    eval/       16 例金标准 + 指标
+tests/         320 个用例，全离线    eval/       16 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -210,17 +256,20 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 271 passed，全离线
+python -m pytest -q            # 320 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方案11/11 安全16/16
 ```
 
 ## 仍未完成（诚实清单）
 
-多轮对话会话持久化；模型不能主动发起轮次；PubMed/CT.gov 实连检索需操作者
+多轮会诊的会话记忆只存进程内（跨进程落盘/恢复未做，单轮 checkpoint 有）；
+模型不能主动发起轮次；急症命中后累计病史会保守地持续触发急症通道（会话内
+无降级路径，这是有意的）；PubMed/CT.gov 实连检索需操作者
 显式开网（默认离线 stub）；授权指南知识库只有接口（`guideline_lookup` 无
 store 时诚实返回 stub）；重放日志证明"重放与记录一致"，不证明"记录未被
-篡改"（需存储层签名）；图内任务执行串行（并发只覆盖会诊）；内置试验注册表
+篡改"（需存储层签名）；图内并发只覆盖 Treatment∥Panel 波与会诊成员（其余
+任务串行）；内置试验注册表
 与 DDI 规则包是教学语料，须经本机构药师/医师复核后使用；大规模对抗性安全
 评测未做。**本项目不能对外宣称为临床可用系统。**
 

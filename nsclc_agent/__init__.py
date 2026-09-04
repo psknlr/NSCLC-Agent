@@ -20,6 +20,7 @@ Educational / research use only — not a medical device.
 """
 
 from .case import Case
+from .conversation import ConsultationSession, TurnResult
 from .render import audit, render
 from .runner import NSCLCRunner, resume_run
 from .staging import (
@@ -32,11 +33,13 @@ from .staging import (
 )
 from .state import CaseRunState, EvidenceLevel
 
-__version__ = "0.2.0"
+__version__ = "0.2.2"
 
 __all__ = [
     "Case",
     "CaseRunState",
+    "ConsultationSession",
+    "TurnResult",
     "EvidenceLevel",
     "NSCLCRunner",
     "resume_run",

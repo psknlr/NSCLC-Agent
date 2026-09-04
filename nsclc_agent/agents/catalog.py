@@ -19,7 +19,7 @@ from ..perception import ImagingError, ImagingReader, fold_into_case
 from ..prompts import load_module
 from ..safety import emergencies
 from ..staging import StagingError, route, normalize_stage_group, stage_from_strings
-from ..state import CaseRunState, EvidenceLevel
+from ..state import CaseRunState, EvidenceLevel, decision_fingerprint
 from .toolloop import ToolLoop
 
 #: Signal-id → the enquiry axis fact an explicit narrative answer closes.
@@ -544,6 +544,57 @@ class TreatmentAgent:
         module_key = state.routing.get("module_key")
         module = load_module(module_key) if module_key else None
 
+        # Conversation-layer fast path: a pure-question turn hands in the
+        # previous turn's plan with the fingerprint of the facts that produced
+        # it. Byte-identical decision facts → reuse the plan and skip the
+        # expensive tool-loop; the critic still re-audits it in full. The
+        # cache is consumed FIRST so a critic repair pass (which re-enters
+        # this method) always re-plans for real.
+        cache, state.plan_cache = state.plan_cache, None
+        if cache is not None and isinstance(cache.get("plan"), dict) \
+                and cache.get("fingerprint") == decision_fingerprint(state.facts):
+            import copy
+
+            plan = copy.deepcopy(cache["plan"])
+            plan["reused_from_previous_turn"] = True
+            # The cached citations point at the PREVIOUS run's ledger. The
+            # cache carries the evidence rows themselves — re-add them to
+            # THIS run's ledger with their original tool-declared grades and
+            # remap the citation ids; a citation whose row did not travel is
+            # dropped, never left dangling.
+            id_map: dict[str, str] = {}
+            for row in cache.get("evidence") or []:
+                if not isinstance(row, dict):
+                    continue
+                payload = dict(row.get("payload") or {})
+                new_id = state.add_evidence(
+                    str(row.get("level") or ""), str(row.get("source") or ""),
+                    str(row.get("summary") or ""), payload,
+                    ok=bool(payload.pop("tool_ok", True)),
+                    error=payload.pop("tool_error", None),
+                    source_version=row.get("source_version"))
+                old_id = row.get("evidence_id")
+                if old_id:
+                    id_map[str(old_id)] = new_id
+            plan["citations"] = [
+                id_map[c] for c in plan.get("citations") or []
+                if isinstance(c, str) and c in id_map
+            ]
+            if not plan["citations"] and plan.get("regimen_ids"):
+                # Old-style cache without evidence rows: anchor the regimens
+                # from the registry instead of releasing an unbacked plan.
+                plan["citations"] = self._anchor_regimens(
+                    state, tools, broker, plan)
+            state.outputs["treatment_plan"] = plan
+            self._claim_options(state)
+            state.trace(
+                "TreatmentAgent", "plan_reused",
+                input_summary=f"fingerprint {cache['fingerprint'][:12]}…",
+                output_summary="previous-turn plan reused (facts unchanged); "
+                               "tool-loop skipped, critic re-audits",
+            )
+            return
+
         staging_block = self._staging_block(state)
         spec = self.skill_registry.get(self.skill_id) if self.skill_registry else None
         loop_result = None
@@ -574,39 +625,51 @@ class TreatmentAgent:
             state.outputs["treatment_plan"] = plan
         else:
             plan = deterministic_plan(stage_group, state.facts)
-            # Anchor the rule plan's regimens in the ledger so its claims are
-            # citable evidence like any other.
-            evidence_ids: list[str] = []
-            for rid in plan.get("regimen_ids") or []:
-                result = tools.call(broker, "trial_lookup",
-                                    query=(regimen_lib.get(rid).trial_ids[0]
-                                           if regimen_lib.get(rid) and regimen_lib.get(rid).trial_ids
-                                           else rid))
-                if result.ok and result.data.get("match") == "exact":
-                    eid = state.add_evidence(
-                        result.resolved_level(), "trial_lookup",
-                        result.summary, result.data,
-                        source_version=result.source_version)
-                    evidence_ids.append(eid)
-                    trial_id = result.data["trial"]["trial_id"]
-                    if trial_id not in plan["trial_refs"]:
-                        plan["trial_refs"].append(trial_id)
-            plan["citations"] = evidence_ids
+            plan["citations"] = self._anchor_regimens(state, tools, broker, plan)
             state.outputs["treatment_plan"] = plan
 
-        for option in state.outputs["treatment_plan"].get("options") or []:
-            state.add_claim(
-                "treatment_option",
-                str(option.get("name") or "")[:200],
-                state.outputs["treatment_plan"].get("citations") or [],
-                origin=state.outputs["treatment_plan"].get("origin", "rule"),
-            )
+        self._claim_options(state)
         state.trace(
             "TreatmentAgent", "plan",
             output_summary=f"{len(state.outputs['treatment_plan'].get('options') or [])} "
                            f"option(s), origin="
                            f"{state.outputs['treatment_plan'].get('origin')}",
         )
+
+    @staticmethod
+    def _anchor_regimens(
+        state: CaseRunState, tools: Any, broker: Any, plan: dict[str, Any]
+    ) -> list[str]:
+        """Anchor the plan's regimens in THIS run's ledger so its claims are
+        citable evidence like any other. Cheap: registry lookups, no model."""
+        evidence_ids: list[str] = []
+        trial_refs = plan.setdefault("trial_refs", [])
+        for rid in plan.get("regimen_ids") or []:
+            result = tools.call(broker, "trial_lookup",
+                                query=(regimen_lib.get(rid).trial_ids[0]
+                                       if regimen_lib.get(rid) and regimen_lib.get(rid).trial_ids
+                                       else rid))
+            if result.ok and result.data.get("match") == "exact":
+                eid = state.add_evidence(
+                    result.resolved_level(), "trial_lookup",
+                    result.summary, result.data,
+                    source_version=result.source_version)
+                evidence_ids.append(eid)
+                trial_id = result.data["trial"]["trial_id"]
+                if trial_id not in trial_refs:
+                    trial_refs.append(trial_id)
+        return evidence_ids
+
+    @staticmethod
+    def _claim_options(state: CaseRunState) -> None:
+        plan = state.outputs.get("treatment_plan") or {}
+        for option in plan.get("options") or []:
+            state.add_claim(
+                "treatment_option",
+                str(option.get("name") or "")[:200],
+                plan.get("citations") or [],
+                origin=plan.get("origin", "rule"),
+            )
 
     @staticmethod
     def _staging_block(state: CaseRunState) -> str:

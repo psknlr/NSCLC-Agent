@@ -14,6 +14,8 @@ resumed later.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
 import time
 import uuid
@@ -69,6 +71,25 @@ NON_RELEASABLE_LEVELS = {
 
 def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+#: Keys that never drive the treatment decision: guard bookkeeping and the
+#: case label. Everything else in ``facts`` is part of the fingerprint.
+_FINGERPRINT_EXCLUDE = frozenset({"_report_proposed", "case_id"})
+
+
+def decision_fingerprint(facts: dict[str, Any]) -> str:
+    """Stable digest of the plan-driving facts.
+
+    Used by the conversation layer's plan cache: a cached plan may only be
+    reused when the facts that produced it are byte-identical (minus guard
+    bookkeeping — confirming a report-proposed value changes the guard, not
+    the decision inputs the plan was computed from).
+    """
+    payload = {k: v for k, v in facts.items() if k not in _FINGERPRINT_EXCLUDE}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                   default=str).encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -246,6 +267,12 @@ class CaseRunState:
     #: Whether this run may produce dose-bearing output (drafts for a tumor
     #: board). Off by default; requires role == "oncologist".
     allow_dose_planning: bool = False
+    #: Previous-turn plan cache handed in by a :class:`ConsultationSession`,
+    #: as ``{"fingerprint": ..., "plan": {...}}``. The TreatmentAgent consumes
+    #: it exactly once (sets it back to None before deciding), so a
+    #: critic-requested repair pass always re-plans for real instead of
+    #: re-serving the plan the critic just objected to.
+    plan_cache: dict[str, Any] | None = None
 
     # ---------------------------------------------------------------- evidence
     def add_evidence(

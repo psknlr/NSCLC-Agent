@@ -283,6 +283,8 @@ class NSCLCRunner:
         role: str = "oncologist",
         allow_dose_planning: bool = False,
         enable_panel: bool = False,
+        internal_facts: dict[str, Any] | None = None,
+        plan_cache: dict[str, Any] | None = None,
     ) -> CaseRunState:
         # Deep copy: the perception layer seeds nested dicts
         # (driver_mutations, pd_l1, tnm) in place, and a shallow copy would
@@ -298,6 +300,14 @@ class NSCLCRunner:
         # pre-seed) the guard machinery.
         for key in [k for k in facts if str(k).startswith("_")]:
             facts.pop(key, None)
+        # ...but the harness's own session layer is not external input: a
+        # ConsultationSession re-applies the `_report_proposed` guard here so
+        # the dose channel stays shut ACROSS turns until a human confirms the
+        # proposed facts. Applied after the strip on purpose — the strip
+        # defends against case files, this hands back what the previous
+        # audited run itself recorded.
+        for key, value in (internal_facts or {}).items():
+            facts[key] = copy.deepcopy(value)
         state = CaseRunState(
             complaint=case.narrative(),
             role=role,  # type: ignore[arg-type]
@@ -308,6 +318,7 @@ class NSCLCRunner:
             ),
             enable_panel=enable_panel,
             allow_dose_planning=allow_dose_planning,
+            plan_cache=copy.deepcopy(plan_cache) if plan_cache else None,
         )
         state.facts["tnm"] = {
             "t": case.t, "n": case.n, "m": case.m, "prefix": case.tnm_prefix,
