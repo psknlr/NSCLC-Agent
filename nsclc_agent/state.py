@@ -78,6 +78,21 @@ def now() -> str:
 _FINGERPRINT_EXCLUDE = frozenset({"_report_proposed", "case_id"})
 
 
+def _canonical(value: Any) -> Any:
+    """JSON-safe canonical form: every dict key coerced to str.
+
+    ``json.dumps(sort_keys=True)`` raises ``TypeError`` on mixed str/int
+    keys (``default=str`` never applies to keys), and that exception would
+    surface AFTER a fully audited run and poison the session — so the
+    digest canonicalizes first instead of trusting its input's key types.
+    """
+    if isinstance(value, dict):
+        return {str(k): _canonical(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_canonical(v) for v in value]
+    return value
+
+
 def decision_fingerprint(facts: dict[str, Any]) -> str:
     """Stable digest of the plan-driving facts.
 
@@ -86,7 +101,8 @@ def decision_fingerprint(facts: dict[str, Any]) -> str:
     bookkeeping — confirming a report-proposed value changes the guard, not
     the decision inputs the plan was computed from).
     """
-    payload = {k: v for k, v in facts.items() if k not in _FINGERPRINT_EXCLUDE}
+    payload = {str(k): _canonical(v) for k, v in facts.items()
+               if k not in _FINGERPRINT_EXCLUDE}
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False,
                    default=str).encode("utf-8")).hexdigest()

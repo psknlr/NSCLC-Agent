@@ -297,7 +297,11 @@ def cmd_chat(args) -> int:
     if args.message:
         rc = 0
         for index, text in enumerate(args.message):
-            rc = one_turn(text, facts=initial_facts if index == 0 else None)
+            # A failed-closed turn decides the exit code even when later
+            # turns recover — the caller must see that the transcript
+            # contains a discarded run.
+            rc = max(rc, one_turn(text,
+                                  facts=initial_facts if index == 0 else None))
         return rc
 
     # ------------------------------------------------------------ interactive

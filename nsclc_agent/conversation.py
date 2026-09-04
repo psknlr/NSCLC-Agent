@@ -36,6 +36,7 @@ What makes turns FAST here:
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import time
@@ -223,6 +224,11 @@ def sanitize_fact_payload(
         if key not in ALLOWED_FACT_KEYS:
             notes.append(f"CHAT_FACT_IGNORED: unknown key {key!r}")
             continue
+        if value is None:
+            # A null never enters the record — and can therefore never
+            # count as "restating" (confirming) a proposed value.
+            notes.append(f"CHAT_FACT_IGNORED: {key} is null")
+            continue
         if key == "ecog_ps":
             try:
                 value = int(value)
@@ -254,9 +260,45 @@ def sanitize_fact_payload(
                 validated["prefix"] = str(value["prefix"])
             value = validated
         if key in ("driver_mutations", "pd_l1", "comorbidities",
-                   "organ_function") and not isinstance(value, dict):
-            notes.append(f"CHAT_FACT_IGNORED: {key} must be an object")
-            continue
+                   "organ_function"):
+            if not isinstance(value, dict):
+                notes.append(f"CHAT_FACT_IGNORED: {key} must be an object")
+                continue
+            # Keys coerced to str (mixed key types break canonical JSON and
+            # every downstream consumer expects strings); nulls and junk
+            # dropped per entry so a "confirmation" carrying garbage cannot
+            # touch — and thereby clear — a proposed-fact guard entry.
+            sub_cleaned: dict[str, Any] = {}
+            for sub_key, sub_value in value.items():
+                sub_key = str(sub_key)
+                path = f"{key}.{sub_key}"
+                if sub_value is None:
+                    notes.append(f"CHAT_FACT_IGNORED: {path} is null")
+                    continue
+                if key == "pd_l1" and sub_key in ("tps", "tc", "ic", "cps"):
+                    try:
+                        sub_value = int(sub_value)
+                    except (TypeError, ValueError):
+                        notes.append(
+                            f"CHAT_FACT_IGNORED: {path} {sub_value!r} "
+                            f"is not a percentage")
+                        continue
+                    if not 0 <= sub_value <= 100:
+                        notes.append(
+                            f"CHAT_FACT_IGNORED: {path} {sub_value} "
+                            f"out of range 0-100")
+                        continue
+                if key == "driver_mutations" and (
+                        not isinstance(sub_value, str)
+                        or not sub_value.strip()):
+                    notes.append(
+                        f"CHAT_FACT_IGNORED: {path} must be a non-empty "
+                        f"result string")
+                    continue
+                sub_cleaned[sub_key] = sub_value
+            if not sub_cleaned:
+                continue
+            value = sub_cleaned
         if key == "medications" and not isinstance(value, list):
             value = [str(value)]
         cleaned[key] = value
@@ -288,6 +330,10 @@ def merge_facts(
     proposed: list[str] = target.get("_report_proposed") or []
 
     def settle(path: str, container: dict, key: str, value: Any) -> None:
+        if value is None:
+            # Nulls neither write nor "touch": sanitize already drops them,
+            # and a direct caller's null must not confirm a proposed fact.
+            return
         touched.append(path)
         current = container.get(key)
         if current is None or current == value:
@@ -566,10 +612,24 @@ class ConsultationSession:
             plan_cache=plan_cache,
         )
 
-        # 4. Session memory update from the audited run.
+        # 4. Session memory update from the audited run. Deep copy: each
+        #    TurnResult keeps the state it was audited with — a later turn's
+        #    merges must never retroactively rewrite turn N's record.
         self.last_state = state
-        self.facts = state.facts  # seeded values + guards carry forward
-        self.read_refs.update(str(r) for r in new_images + new_reports)
+        self.facts = copy.deepcopy(state.facts)
+        # Mark refs as read only when their reader actually consumed them —
+        # a failed or unavailable read stays retryable on the next turn
+        # instead of being silently skipped forever.
+        films_failed = any(
+            f.startswith(("IMAGING_READ_FAILED", "NO_VISION_PROVIDER"))
+            for f in state.flags)
+        reports_failed = any(
+            f.startswith(("REPORT_READ_FAILED", "NO_VISION_PROVIDER"))
+            for f in state.flags)
+        if new_images and not films_failed:
+            self.read_refs.update(str(r) for r in new_images)
+        if new_reports and not reports_failed:
+            self.read_refs.update(str(r) for r in new_reports)
         plan = state.outputs.get("treatment_plan") or {}
         plan_reused = bool(plan.get("reused_from_previous_turn"))
         if plan and state.release_status not in ("failed_closed",):
@@ -579,15 +639,21 @@ class ConsultationSession:
             # grades) and remaps — provenance travels, ids never do.
             from dataclasses import asdict
 
-            self._plan_cache = {
-                "fingerprint": decision_fingerprint(state.facts),
-                "plan": plan,
-                "evidence": [
-                    asdict(state.evidence[c])
-                    for c in plan.get("citations") or []
-                    if isinstance(c, str) and c in state.evidence
-                ],
-            }
+            try:
+                self._plan_cache = {
+                    "fingerprint": decision_fingerprint(state.facts),
+                    "plan": plan,
+                    "evidence": [
+                        asdict(state.evidence[c])
+                        for c in plan.get("citations") or []
+                        if isinstance(c, str) and c in state.evidence
+                    ],
+                }
+            except Exception as exc:  # noqa: BLE001
+                # The cache is an optimization; a cache-build fault after a
+                # fully audited run must never discard that run's result.
+                self._plan_cache = None
+                state.warn(f"plan cache not stored: {exc}")
 
         # 5. Compose the reply (deterministic), optionally polish (guarded),
         #    and dose-scan the outgoing text unconditionally.
@@ -595,10 +661,15 @@ class ConsultationSession:
         polished = False
         if polish if polish is not None else self.polish_replies:
             reply, polished = polish_reply(self.llm, reply, state=state)
-        if state.release_status != "draft_for_tumor_board" \
+        if state.release_status not in ("draft_for_tumor_board",
+                                        "emergency_action_plan") \
                 and DOSE_RE.search(reply):
             # Belt and braces: released prose is dose-free by construction;
-            # anything else is a bug surfaced, not shipped.
+            # anything else is a bug surfaced, not shipped. Two exemptions:
+            # the tumor-board draft carries its dose channel by design, and
+            # the emergency script is verbatim-fixed and never model-touched
+            # (polish refuses it) — if a future script revision carries a
+            # steroid dose, redaction here would mangle a safety script.
             state.warn("outgoing reply carried a dose numeric — redacted")
             reply = DOSE_RE.sub("[剂量见确定性通道]", reply)
 

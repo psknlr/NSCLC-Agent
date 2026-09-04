@@ -248,7 +248,7 @@ nsclc_agent/
   state.py 证据台账/预算/状态 · journal.py 记录/重放 · runner.py · render.py
   conversation.py 多轮会诊层(白名单抽取/方案指纹复用/出口剂量扫描)
   schemas.py · skills.py · case.py · cli.py
-tests/         320 个用例，全离线    eval/       16 例金标准 + 指标
+tests/         325 个用例，全离线    eval/       16 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -256,7 +256,7 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 320 passed，全离线
+python -m pytest -q            # 325 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方案11/11 安全16/16
 ```

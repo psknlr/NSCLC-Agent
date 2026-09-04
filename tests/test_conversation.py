@@ -313,6 +313,110 @@ def test_polish_unavailable_model_costs_nothing():
     assert state.budget.used_llm_calls == 0
 
 
+# ----------------------------------------- adversarial-review regressions
+
+def test_mixed_type_nested_keys_cannot_crash_or_poison_the_session():
+    """Review finding: int keys inside an allowed object crashed the
+    canonical-JSON fingerprint AFTER the audited run, discarding the
+    TurnResult and poisoning every later turn."""
+    sess = _session()
+    sess.turn(T1_MSG)
+    r2 = sess.turn("补充合并症。",
+                   facts={"comorbidities": {1: "renal", "hepatic": "mild"}})
+    assert r2.state.release_status != "failed_closed"
+    assert sess.facts["comorbidities"] == {"1": "renal", "hepatic": "mild"}
+    # The session keeps working afterwards.
+    r3 = sess.turn("然后呢？")
+    assert r3.state.release_status != "failed_closed"
+    # And the digest itself tolerates hostile key types directly.
+    assert decision_fingerprint({"comorbidities": {1: "renal"}})
+
+
+def test_failed_attachment_read_is_retried_next_turn(report_png):
+    """Review finding: a failed read landed in read_refs anyway and the
+    report was silently never read for the rest of the session."""
+
+    class FlakyVision(CountingVision):
+        def chat(self, messages, **kwargs):
+            if "CLINICAL DOCUMENT EXTRACTION" in messages[0]["content"]:
+                self.document_reads += 1
+                if self.document_reads == 1:
+                    from nsclc_agent.llm.base import LLMError
+
+                    raise LLMError("transient upstream failure")
+                return LLMResponse(text=json.dumps(self.payload))
+            from nsclc_agent.perception.imaging import mock_findings_payload
+
+            return LLMResponse(text=mock_findings_payload())
+
+    vision = FlakyVision(REPORT_PAYLOAD)
+    sess = _session(llm=None, vision_llm=vision)
+    r1 = sess.turn(f"肺腺癌，cT2aN2aM1b，ECOG 0。{SCREEN_NEG}",
+                   reports=[report_png])
+    assert any(f.startswith("REPORT_READ_FAILED") for f in r1.state.flags)
+    assert report_png not in sess.read_refs
+    # Re-attaching the same ref retries — and this time the facts land.
+    sess.turn("再试一次这份报告。", reports=[report_png])
+    assert vision.document_reads == 2
+    assert report_png in sess.read_refs
+    assert "egfr" in (sess.facts.get("driver_mutations") or {})
+
+
+def test_junk_values_cannot_confirm_proposed_facts(report_png):
+    """Review finding: nulls and out-of-range garbage counted as 'touching'
+    proposed paths and cleared the dose guard while nulling the record."""
+    vision = CountingVision(REPORT_PAYLOAD)
+    sess = _session(llm=None, vision_llm=vision)
+    sess.turn(f"肺腺癌，cT2aN2aM1b，ECOG 0。{SCREEN_NEG}",
+              reports=[report_png], allow_dose_planning=True)
+    proposed_before = list(sess.facts["_report_proposed"])
+    egfr_before = sess.facts["driver_mutations"]["egfr"]
+    r2 = sess.turn(
+        "都确认了。",
+        facts={"histologic_category": None,
+               "driver_mutations": {"egfr": None, "alk": ""},
+               "pd_l1": {"tps": "confirmed!!", "assay": None, "ic": 999}},
+        allow_dose_planning=True)
+    assert sess.facts["_report_proposed"] == proposed_before
+    assert sess.facts["driver_mutations"]["egfr"] == egfr_before
+    assert sess.facts["pd_l1"]["tps"] == 55  # untouched, still the report's
+    assert not any("PROPOSED_FACT_CONFIRMED" in n for n in r2.notes)
+    assert "dose_plan" not in r2.state.outputs
+
+
+def test_prior_turn_states_are_immutable():
+    """Review finding: later turns mutated earlier TurnResults' facts
+    in place, rewriting the in-memory audit record."""
+    sess = _session()
+    r1 = sess.turn(T1_MSG)
+    assert r1.state.facts["ecog_ps"] == 1
+    sess.turn("复核后修正。", facts={"ecog_ps": 3})
+    assert r1.state.facts["ecog_ps"] == 1
+
+
+def test_cli_chat_exit_code_not_masked_by_later_turns(monkeypatch, capsys):
+    """Review finding: only the LAST scripted turn decided the exit code."""
+    import nsclc_agent.conversation as conversation_mod
+    from nsclc_agent.cli import main
+    from nsclc_agent.conversation import TurnResult
+
+    statuses = iter(["failed_closed", "treatment_recommendation"])
+
+    class FakeSession:
+        def __init__(self, **kwargs):
+            pass
+
+        def turn(self, message, **kwargs):
+            state = CaseRunState(release_status=next(statuses))
+            return TurnResult(reply="x", state=state, view={})
+
+    monkeypatch.setattr(conversation_mod, "ConsultationSession", FakeSession)
+    rc = main(["chat", "--llm-provider", "mock", "--json",
+               "-m", "one", "-m", "two"])
+    capsys.readouterr()
+    assert rc == 3
+
+
 # ------------------------------------------------------------------- CLI
 
 def test_cli_chat_scripted(capsys):
