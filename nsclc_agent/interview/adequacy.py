@@ -95,6 +95,18 @@ class AdequacyVerdict:
             ],
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "AdequacyVerdict":
+        return cls(
+            verdict=str(payload.get("verdict") or NOT_ACHIEVED),
+            reason=str(payload.get("reason") or ""),
+            missing_axes=[str(a) for a in payload.get("missing_axes") or []],
+            blocking_axes=[str(a) for a in payload.get("blocking_axes") or []],
+            contradictions=[str(c) for c in payload.get("contradictions") or []],
+            rounds_used=int(payload.get("rounds_used") or 0),
+            judged_by=str(payload.get("judged_by") or "rule"),
+        )
+
 
 class AdequacyJudge:
     """Judges whether enquiry may stop; remembers gap sets for stall detection."""

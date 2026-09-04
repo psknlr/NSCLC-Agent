@@ -127,12 +127,18 @@ nsclc-agent run --case case.json --reports ./pathology.jpg --panel  # 全流程�
   审一遍（缓存一次性消费：审计器要求返工时必然真实重算）。
 * **出口扫剂量**：回复发出前无条件过剂量正则；润色若引入确定性文本没有的
   剂量数值，整段丢弃回退。
+* **会话可落盘续聊**：`--session 会诊.json` 每轮原子落盘、重启自动续——
+  累计事实（含待确认守卫）、已读附件、方案缓存、问诊记忆（含停滞检测历史）
+  全部跨进程存活，续聊第一轮就能复用上一次的方案。**会话文件只携带记忆、
+  不携带授权**（与 checkpoint 同一信任级）：续聊的每一轮仍走同一套经纪、
+  闸门与终审。
 
 ```bash
 nsclc-agent chat                              # 交互式（/image /report /facts /panel /dose /state /quit）
-nsclc-agent chat --role oncologist \
-  -m "65岁男性，吸烟40包年，肺腺癌，cT2aN1M0，ECOG 1，EGFR阴性，PD-L1 60%，无咯血无骨痛无头痛" \
-  -m "为什么选这个方案？"                     # 第二轮复用方案，明显更快
+nsclc-agent chat --role oncologist --session 会诊.json \
+  -m "65岁男性，吸烟40包年，肺腺癌，cT2aN1M0，ECOG 1，EGFR阴性，PD-L1 60%，无咯血无骨痛无头痛"
+nsclc-agent chat --session 会诊.json \
+  -m "为什么选这个方案？"                     # 另一进程续聊：复用方案，明显更快
 ```
 
 ## 快速开始（零依赖、离线）
@@ -248,7 +254,7 @@ nsclc_agent/
   state.py 证据台账/预算/状态 · journal.py 记录/重放 · runner.py · render.py
   conversation.py 多轮会诊层(白名单抽取/方案指纹复用/出口剂量扫描)
   schemas.py · skills.py · case.py · cli.py
-tests/         325 个用例，全离线    eval/       16 例金标准 + 指标
+tests/         330 个用例，全离线    eval/       16 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -256,14 +262,13 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 325 passed，全离线
+python -m pytest -q            # 330 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方案11/11 安全16/16
 ```
 
 ## 仍未完成（诚实清单）
 
-多轮会诊的会话记忆只存进程内（跨进程落盘/恢复未做，单轮 checkpoint 有）；
 模型不能主动发起轮次；急症命中后累计病史会保守地持续触发急症通道（会话内
 无降级路径，这是有意的）；PubMed/CT.gov 实连检索需操作者
 显式开网（默认离线 stub）；授权指南知识库只有接口（`guideline_lookup` 无

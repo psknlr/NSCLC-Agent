@@ -263,14 +263,36 @@ def cmd_chat(args) -> int:
     except LLMError as exc:
         print(f"LLM configuration error: {exc}", file=sys.stderr)
         return 2
-    session = ConsultationSession(
-        llm=llm, vision_llm=vision, role=args.role,
+    common = dict(
+        llm=llm, vision_llm=vision,
         parallel_tasks=not args.serial,
         panel_concurrency=args.panel_concurrency,
-        allow_dose_planning=args.allow_dose_planning,
-        polish_replies=args.polish,
         case_base_dir=Path.cwd(),
     )
+    session_path = Path(args.session) if args.session else None
+    if session_path and session_path.exists():
+        # Stored role/dose/polish win unless a flag was given explicitly.
+        overrides = {}
+        if args.role:
+            overrides["role"] = args.role
+        if args.allow_dose_planning:
+            overrides["allow_dose_planning"] = True
+        if args.polish:
+            overrides["polish_replies"] = True
+        try:
+            session = ConsultationSession.load(
+                session_path, **common, **overrides)
+        except (ValueError, json.JSONDecodeError) as exc:
+            print(f"cannot resume {session_path}: {exc}", file=sys.stderr)
+            return 2
+        print(f"resumed session: {len(session.transcript)} previous "
+              f"turn(s), role={session.role}", file=sys.stderr)
+    else:
+        session = ConsultationSession(
+            role=args.role or "patient",
+            allow_dose_planning=args.allow_dose_planning,
+            polish_replies=args.polish, **common,
+        )
     initial_facts = json.loads(args.facts) if args.facts else None
 
     def one_turn(text: str, *, images=None, reports=None, facts=None) -> int:
@@ -279,6 +301,8 @@ def cmd_chat(args) -> int:
             reports=_expand_image_args(reports),
             facts=facts, enable_panel=args.panel,
         )
+        if session_path:
+            session.save(session_path)
         if args.json:
             print(json.dumps(result.to_dict(), ensure_ascii=False,
                              default=str))
@@ -351,7 +375,7 @@ def cmd_chat(args) -> int:
         if line == "/state":
             state = session.last_state
             print(json.dumps({
-                "turns": len(session.turns),
+                "turns": len(session.transcript),
                 "release_status": state.release_status if state else None,
                 "stage_group": (state.staging or {}).get("stage_group")
                 if state else None,
@@ -537,8 +561,15 @@ def build_parser() -> argparse.ArgumentParser:
                         "Omit for the interactive REPL.")
     p.add_argument("--facts", help="Structured facts JSON for the first turn "
                                    "(the operator/confirmation channel)")
-    p.add_argument("--role", default="patient",
-                   choices=("patient", "oncologist", "researcher"))
+    p.add_argument("--session",
+                   help="Persist the consultation to this JSON file and "
+                        "resume from it if it exists — the conversation "
+                        "survives restarts (facts, read attachments, plan "
+                        "cache, interview memory)")
+    p.add_argument("--role", default=None,
+                   choices=("patient", "oncologist", "researcher"),
+                   help="Default patient; when resuming, the stored role "
+                        "wins unless this flag is given")
     p.add_argument("--allow-dose-planning", action="store_true")
     p.add_argument("--panel", action="store_true",
                    help="Convene the MDT panel each turn")

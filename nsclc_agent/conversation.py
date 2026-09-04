@@ -541,6 +541,9 @@ class ConsultationSession:
         self.facts: dict[str, Any] = {}
         self.read_refs: set[str] = set()
         self.turns: list[TurnResult] = []
+        #: JSON-able per-turn records — unlike :attr:`turns` this survives
+        #: save/load, so a resumed session keeps its whole transcript.
+        self.transcript: list[dict[str, Any]] = []
         self._plan_cache: dict[str, Any] | None = None
         self.last_state: CaseRunState | None = None
 
@@ -681,4 +684,82 @@ class ConsultationSession:
             llm_calls=state.budget.used_llm_calls,
         )
         self.turns.append(result)
+        self.transcript.append(result.to_dict())
         return result
+
+    # ------------------------------------------------------------- persistence
+    SESSION_FILE_VERSION = 1
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the session memory (not the models, not the runner).
+
+        A session file is harness-authored state, the same trust class as a
+        run checkpoint: it carries memory — narrative, validated facts
+        including the ``_report_proposed`` guard, read attachment refs, the
+        plan cache, the interview transcript — and NO authorization. On
+        resume every turn still runs through the same broker, gates and
+        terminal critic; a file cannot conjure a sign-off any more than a
+        chat message can.
+        """
+        return {
+            "session_file_version": self.SESSION_FILE_VERSION,
+            "saved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "role": self.role,
+            "allow_dose_planning": self.allow_dose_planning,
+            "polish_replies": self.polish_replies,
+            "narrative": list(self.narrative),
+            "facts": copy.deepcopy(self.facts),
+            "read_refs": sorted(self.read_refs),
+            "plan_cache": copy.deepcopy(self._plan_cache),
+            "transcript": list(self.transcript),
+            "interview": self.interview_loop.to_dict(),
+        }
+
+    def save(self, path: str | Path) -> Path:
+        """Write the session to ``path`` atomically (tmp file + replace)."""
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_text(
+            json.dumps(self.to_dict(), ensure_ascii=False, indent=2,
+                       default=str),
+            encoding="utf-8")
+        tmp.replace(target)
+        return target
+
+    @classmethod
+    def load(cls, path: str | Path, **kwargs: Any) -> "ConsultationSession":
+        """Rebuild a session from :meth:`save`.
+
+        Models and runner wiring are NOT stored — pass ``llm=``,
+        ``vision_llm=`` and any runner options exactly as for a fresh
+        session. ``role`` / ``allow_dose_planning`` / ``polish_replies``
+        default to the stored values; explicit kwargs override them.
+        """
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError(f"not a session file: {path}")
+        version = payload.get("session_file_version")
+        if version != cls.SESSION_FILE_VERSION:
+            raise ValueError(
+                f"session file version {version!r} not supported "
+                f"(this build reads version {cls.SESSION_FILE_VERSION}); "
+                f"start a new session")
+        kwargs.setdefault("role", str(payload.get("role") or "patient"))
+        kwargs.setdefault("allow_dose_planning",
+                          bool(payload.get("allow_dose_planning")))
+        kwargs.setdefault("polish_replies",
+                          bool(payload.get("polish_replies")))
+        session = cls(**kwargs)
+        session.narrative = [str(t) for t in payload.get("narrative") or []]
+        facts = payload.get("facts")
+        session.facts = facts if isinstance(facts, dict) else {}
+        session.read_refs = {str(r) for r in payload.get("read_refs") or []}
+        cache = payload.get("plan_cache")
+        session._plan_cache = cache if isinstance(cache, dict) else None
+        session.transcript = [
+            t for t in payload.get("transcript") or [] if isinstance(t, dict)]
+        interview = payload.get("interview")
+        if isinstance(interview, dict):
+            session.interview_loop.restore(interview)
+        return session

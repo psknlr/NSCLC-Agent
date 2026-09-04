@@ -135,6 +135,30 @@ class InterviewRound:
             "composer": self.composer,
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "InterviewRound":
+        verdict = payload.get("verdict")
+        return cls(
+            round_index=int(payload.get("round") or 0),
+            questions=[
+                InterviewQuestion(
+                    axis_id=str(q.get("axis_id") or ""),
+                    question=str(q.get("question") or ""),
+                    why=str(q.get("why") or ""),
+                    options=[str(o) for o in q.get("options") or []],
+                    origin=str(q.get("origin") or "probe_bank"),
+                )
+                for q in payload.get("questions") or []
+                if isinstance(q, dict)
+            ],
+            verdict=AdequacyVerdict.from_dict(verdict)
+            if isinstance(verdict, dict) else None,
+            model_claimed_complete=bool(payload.get("model_claimed_complete")),
+            reasoning=str(payload.get("reasoning") or ""),
+            rejected=[str(r) for r in payload.get("rejected") or []],
+            composer=str(payload.get("composer") or "probe_bank"),
+        )
+
 
 class InterviewLoop:
     """Drives one enquiry across turns, remembering what it has asked."""
@@ -156,6 +180,34 @@ class InterviewLoop:
     @property
     def rounds_used(self) -> int:
         return len(self.rounds)
+
+    # ------------------------------------------------------------- persistence
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the cross-turn memory: what was asked, what was judged,
+        and the judge's stall history — so a resumed conversation neither
+        re-asks closed questions nor forgets that it was stalling."""
+        return {
+            "rounds": [r.to_dict() for r in self.rounds],
+            "asked_axes": list(self.asked_axes),
+            "asked_questions": list(self.asked_questions),
+            "judge_history": [sorted(sig) for sig in self.judge.history],
+        }
+
+    def restore(self, payload: dict[str, Any]) -> None:
+        """Rebuild memory from :meth:`to_dict`. State only — the loop's llm,
+        judge and caps stay whatever this instance was constructed with."""
+        self.rounds = [
+            InterviewRound.from_dict(r)
+            for r in payload.get("rounds") or [] if isinstance(r, dict)
+        ]
+        self.asked_axes = [str(a) for a in payload.get("asked_axes") or []]
+        self.asked_questions = [
+            str(q) for q in payload.get("asked_questions") or []]
+        self.judge.history = [
+            frozenset(str(a) for a in sig)
+            for sig in payload.get("judge_history") or []
+            if isinstance(sig, (list, tuple))
+        ]
 
     # -------------------------------------------------------------------- next
     def next_round(

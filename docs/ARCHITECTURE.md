@@ -126,6 +126,12 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     always re-plans for real. Session memory (one `InterviewLoop`, read
     attachment refs, accumulated facts) is what makes later turns fast:
     images are read once per session, closed axes are never re-asked.
+    Sessions persist (`save`/`load`, CLI `chat --session`): the file is
+    harness-authored state in the same trust class as a checkpoint — it
+    carries memory (facts with the `_report_proposed` guard, read refs,
+    the plan cache with its evidence rows, the interview transcript and
+    stall history) and **never authorization**; every resumed turn still
+    passes the same broker, gates and terminal critic live.
 
 ## 3. LLM containment table
 
