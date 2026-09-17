@@ -17,7 +17,7 @@ The rules encode boundaries the protocol modules state in prose:
 * Thoracic RT is not dose-escalated past ~66 Gy (RTOG 0617: 74 Gy harmed OS).
 * A regimen is used inside its trial's stage boundaries, or the plan must
   declare the extrapolation explicitly with justification.
-* Stage 0 (AIS/MIA) receives no systemic therapy.
+* Stage 0 (AIS, Tis) receives no systemic therapy — MIA is T1mi → IA1.
 * Stage IV with an actionable driver gets driver-directed first-line therapy.
 """
 
@@ -203,6 +203,26 @@ def _rule_n3_no_surgery(ctx: PlanContext) -> list[Violation]:
 
 def _rule_driver_excludes_periop_io(ctx: PlanContext) -> list[Violation]:
     if not ctx.driver_positive("egfr", "alk"):
+        # The periop-IO registration trials named EGFR/ALK exclusions;
+        # other actionable drivers were unrepresented — warn, not block.
+        from ..knowledge.biomarkers import first_line_actionable_drivers
+
+        others = first_line_actionable_drivers(ctx.facts)
+        if others and any(
+            (regimen_lib.get(rid) or None) and regimen_lib.get(rid).contains_ici
+            and regimen_lib.get(rid).setting in
+            ("neoadjuvant", "perioperative", "adjuvant")
+            for rid in ctx.regimen_ids
+        ):
+            names = ", ".join(d["gene"] for d in others)
+            return [Violation(
+                "DRIVER_EXCLUDES_PERIOP_IO", "warn",
+                f"Perioperative/adjuvant immunotherapy with an actionable "
+                f"driver on record ({names}): these populations were "
+                f"absent/unrepresented in the periop-IO trials and ICI "
+                f"benefit in driver-positive disease is doubtful — MDT "
+                f"discussion required.",
+            )]
         return []
     out: list[Violation] = []
     for rid in ctx.regimen_ids:
@@ -303,6 +323,25 @@ def _rule_trial_stage_boundary(ctx: PlanContext) -> list[Violation]:
             continue
         if ctx.stage_group in trial.stage_groups:
             continue
+        # Edition-aware compatibility: most registry trials enrolled under
+        # AJCC 7/8. A case whose 8th-edition group falls inside the trial's
+        # stages is an EDITION MIGRATION (same descriptors, renamed group),
+        # not a biological extrapolation — note it, don't block it.
+        if trial.tnm_edition == 8:
+            from ..staging.legacy8 import eighth_edition_group
+
+            tnm = ctx.facts.get("tnm") or {}
+            legacy = eighth_edition_group(tnm.get("t"), tnm.get("n"),
+                                          tnm.get("m"))
+            if legacy and legacy in trial.stage_groups:
+                out.append(Violation(
+                    "TRIAL_EDITION_MIGRATION", "warn",
+                    f"{tid}: the case is 9th-edition {ctx.stage_group} but "
+                    f"its descriptors map to {legacy} under the trial's "
+                    f"8th-edition enrollment — a TNM edition migration, not "
+                    f"an extrapolation. Keep the edition note in the plan.",
+                ))
+                continue
         if tid in declared:
             out.append(Violation(
                 "TRIAL_STAGE_EXTRAPOLATION", "warn",
@@ -331,36 +370,111 @@ def _rule_stage0_no_systemic(ctx: PlanContext) -> list[Violation]:
     if systemic or re.search(r"adjuvant (?:chemo|immuno)|辅助化疗|辅助免疫", ctx.plan_text, re.IGNORECASE):
         return [Violation(
             "STAGE0_NO_SYSTEMIC", "block",
-            "Stage 0 (AIS/MIA): complete resection (often sublobar) is curative "
+            "Stage 0 (AIS, Tis): complete resection (often sublobar) is curative "
             "— adjuvant/systemic therapy has no role and adds only harm.",
         )]
     return []
 
 
+#: First-line driver-directed regimens — the full actionable plane, not
+#: just EGFR/ALK (red-team: ROS1+/RET+ with PD-L1 80% was released onto
+#: pembrolizumab monotherapy with zero violations).
+_TARGETED_FIRST_LINE = frozenset({
+    "osimertinib_first_line", "osimertinib_chemo_first_line",
+    "amivantamab_lazertinib", "amivantamab_chemo_first_line",
+    "afatinib_uncommon_first_line", "lorlatinib_first_line",
+    "repotrectinib_first_line", "selpercatinib_first_line",
+    "capmatinib_first_line", "dabrafenib_trametinib_first_line",
+    "larotrectinib_first_line",
+})
+
+
 def _rule_driver_first_line(ctx: PlanContext) -> list[Violation]:
     if ctx.stage_group not in ("IVA", "IVB"):
         return []
-    if not ctx.driver_positive("egfr", "alk"):
+    from ..knowledge.biomarkers import first_line_actionable_drivers
+
+    drivers = first_line_actionable_drivers(ctx.facts)
+    if not drivers:
         return []
-    targeted = any(
-        rid in ("osimertinib_first_line", "osimertinib_chemo_first_line",
-                "amivantamab_lazertinib", "lorlatinib_first_line")
-        for rid in ctx.regimen_ids
-    )
+    targeted = any(rid in _TARGETED_FIRST_LINE for rid in ctx.regimen_ids)
     ici_first = any(
         (regimen_lib.get(rid) or None) and regimen_lib.get(rid).contains_ici
         and regimen_lib.get(rid).setting == "first_line"
         for rid in ctx.regimen_ids
     )
     if ici_first and not targeted:
+        names = ", ".join(
+            d["gene"] + (f" ({'/'.join(d['classes'])})" if d["classes"] else "")
+            for d in drivers)
         return [Violation(
             "DRIVER_FIRST_LINE", "block",
-            "Stage IV with an actionable EGFR/ALK driver: first-line therapy "
-            "should be driver-directed (osimertinib / lorlatinib…), not "
-            "chemo-immunotherapy — ICI efficacy is poor in driver-positive "
-            "disease and sequencing ICI before a TKI raises toxicity.",
+            f"Stage IV with an actionable driver on record ({names}): "
+            f"first-line therapy should be driver-directed, not "
+            f"(chemo-)immunotherapy — ICI efficacy is poor in "
+            f"driver-positive disease regardless of PD-L1, and sequencing "
+            f"ICI before a TKI raises toxicity. This applies to "
+            f"EGFR/ALK/ROS1/RET/MET-ex14/BRAF-V600E/NTRK alike.",
         )]
     return []
+
+
+#: Osimertinib-family regimens whose evidence populations are
+#: ex19del/L858R (FLAURA/FLAURA2/MARIPOSA/ADAURA/LAURA).
+_CLASSICAL_EGFR_REGIMENS = frozenset({
+    "osimertinib_first_line", "osimertinib_chemo_first_line",
+    "amivantamab_lazertinib", "osimertinib_adjuvant",
+    "osimertinib_consolidation",
+})
+
+
+def _rule_egfr_variant_mismatch(ctx: PlanContext) -> list[Violation]:
+    """The ontology-level guard the red-team asked for: an osimertinib-
+    family regimen with an EGFR variant class outside its evidence
+    population. Independent of the planner's own gating — a planner bug
+    here must not survive the critic."""
+    from ..knowledge.biomarkers import (
+        EGFR_CLASSICAL_SENSITIZING, EGFR_UNCOMMON_SENSITIZING, egfr_classes,
+    )
+
+    used = [rid for rid in ctx.regimen_ids if rid in _CLASSICAL_EGFR_REGIMENS]
+    if not used:
+        return []
+    classes = egfr_classes(ctx.facts)
+    if not classes:
+        return []  # BIOMARKER/driver rules handle the negative/unknown case
+    label = "/".join(sorted(classes))
+    if "exon20ins" in classes:
+        return [Violation(
+            "EGFR_VARIANT_MISMATCH", "block",
+            f"EGFR {label} with {', '.join(used)}: exon 20 insertions are "
+            f"NOT the FLAURA/ADAURA/LAURA population — osimertinib is not "
+            f"standard for this variant class; first-line is amivantamab + "
+            f"chemotherapy (PAPILLON).",
+        )]
+    if "c797s" in classes and not (classes & EGFR_CLASSICAL_SENSITIZING):
+        return [Violation(
+            "EGFR_VARIANT_MISMATCH", "block",
+            f"EGFR {label}: C797S confers osimertinib resistance — "
+            f"{', '.join(used)} is not an evidence-based choice here.",
+        )]
+    if classes & EGFR_CLASSICAL_SENSITIZING:
+        return []
+    if classes <= (EGFR_UNCOMMON_SENSITIZING | {"t790m"}):
+        return [Violation(
+            "EGFR_VARIANT_MISMATCH", "warn",
+            f"EGFR {label} with {', '.join(used)}: outside the "
+            f"ex19del/L858R trial populations — uncommon-sensitizing "
+            f"alterations have a separate evidence base "
+            f"(afatinib/osimertinib per pooled analyses); document the "
+            f"variant-specific rationale.",
+        )]
+    return [Violation(
+        "EGFR_VARIANT_MISMATCH", "warn",
+        f"EGFR positive but variant unclassified ({label}) with "
+        f"{', '.join(used)}: confirm the exact alteration and its "
+        f"sensitizing status before committing to a classical-EGFR regimen.",
+    )]
 
 
 def _rule_ici_comorbidity(ctx: PlanContext) -> list[Violation]:
@@ -449,6 +563,7 @@ def _rule_dose_scan(ctx: PlanContext) -> list[Violation]:
 RULES = (
     _rule_n3_no_surgery,
     _rule_driver_excludes_periop_io,
+    _rule_egfr_variant_mismatch,
     _rule_egfr_iii_consolidation,
     _rule_no_concurrent_durvalumab,
     _rule_rt_dose,

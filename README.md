@@ -27,7 +27,7 @@
  ToolLoop       ReAct 取证 → CapabilityBroker（角色/技能/熔断/预算）  分期 → 协议模块路由
  InterviewLoop  组织追问   → AdequacyJudge（必答轴规则判定，blocked    试验注册表（分期边界机器可查）
                              永不可被模型/轮次上限豁免）              方案库（剂量只在确定性通道）
- PerceptionAgent 读片提议  → 描述符词表校验 + 归一化交叉核对          安全规则引擎（12条确定性规则）
+ PerceptionAgent 读片提议  → 描述符词表校验 + 归一化交叉核对          安全规则引擎（13条确定性规则）
  MDT Panel      专科子体   → 最保守合成（最高紧急度，非多数票）        肿瘤急症筛查（子句级否定）
  CriticAgent    终审追加   → finally 无条件执行 + 引用核验            证据台账（工具自declare等级）
 ```
@@ -42,7 +42,7 @@ critic 的 block 级违规触发有界修复循环。
 |---|---|---|
 | 提示词要求检索、代码无检索层 | 模型凭记忆表演检索 | 真实工具层：`trial_lookup`（内置注册表离线可验）、`pubmed_search`/`citation_verify`/`label_lookup`（`NSCLC_AGENT_ONLINE=1` 时实连 NCBI/CT.gov/openFDA，离线时诚实降级为 `stub_not_for_clinical_use`，**引用护栏拒绝以 stub 支撑放行**） |
 | `max_tokens=4096` 必然截断且无告警 | 残缺 JSON 当成功 | `finish_reason=length` → `output_truncated` 失败模式；每模块声明 `min_output_tokens`；77k 字符协议模块不再塞进 system prompt，改为 `protocol_lookup` 分节检索 + 蒸馏决策核心 |
-| 模型输出零校验 | `quality_control` 自评 | schema 校验 + 12 条确定性安全规则引擎 + 引用护栏，全部在 critic 中他评；block → 放行拦截 + 修复请求 |
+| 模型输出零校验 | `quality_control` 自评 | schema 校验 + 13 条确定性安全规则引擎 + 引用护栏，全部在 critic 中他评；block → 放行拦截 + 修复请求 |
 | 缺失 M 静默当 M0 | 未查转移的病人判 IB | M 必须显式声明；缺失/MX → 拒绝 + 指名解决检查（PET-CT+脑MRI）→ `needs_staging_workup` |
 | `staging_system` 死字段 | AJCC8 按第9版算 | 版本闸门：非 AJCC9 直接拒绝并要求重分期 |
 | 无 c/p/yp 前缀 | c/p 分期不分 | `TNM.prefix` 一等公民（c/p/yp/yc/r/a），ypTNM 附解释注记 |
@@ -161,7 +161,7 @@ CSCO 2025、CN 中西医结合 2023**——共 2,960 条推荐，带人群判据
   聚类摘要）经与规则引擎同一 `DOSE_RE` 的**深度递归清洗**——有全量测试
   逐条钉住。剂量仍只存在于确定性剂量通道。
 * **负面知识提示、不拦截**：`do_not_recommend`/`avoid`/`contraindicated`
-  条目按病例匹配为 cautions 提示人工权衡；拦截权仍只属于 12 条确定性安全
+  条目按病例匹配为 cautions 提示人工权衡；拦截权仍只属于 13 条确定性安全
   规则——未复核的抽取不获得否决权。引用的指南原文放在
   `outputs["guideline_context"]`（oncologist 视图），**不进入方案自述**：
   规则引擎扫描的是系统自己的话，一句被引用的 "durvalumab … after
@@ -243,6 +243,42 @@ nsclc-agent chat --role oncologist --session 会诊.json \
 # → 分期：IIIB → IIB；5年总生存队列：约26% → 约53%；方案对比；因素 1 → 2 项
 ```
 
+### 临床红队修复（v0.3.0，驱动基因本体重建）
+
+外部临床红队复核确认了三个可被正式放行的错误，同一根因：**planner 与
+critic 共享一个过粗的 gene→positive/negative 布尔表示，因此能共同确信一个
+错误答案**（EGFR exon20 插入被放行奥希替尼一线与 LAURA 巩固；ROS1/RET 阳性
++ PD-L1 80% 被放行帕博利珠单抗单药、零违规）。本版从数据结构层修复：
+
+* **EGFR 变体类本体**（`knowledge/biomarkers.py`）：ex19del / L858R /
+  非经典敏感（G719X/L861Q/S768I）/ exon20 插入 / T790M / C797S /
+  unclassified 成为一等公民。planner 按类分派（经典→FLAURA 系三选项；
+  exon20ins→**PAPILLON 阿米万他单抗+化疗**；非经典→阿法替尼路径；
+  unclassified→**分子肿瘤板，不猜药**）；规则引擎用同一本体**独立**实现
+  `EGFR_VARIANT_MISMATCH`（exon20ins/C797S 配奥希替尼系 → block；
+  非经典 → warn）——模拟 planner 犯错的方案全部被 critic 拦截，有测试钉住。
+* **驱动面扩展到治疗控制层**：ROS1（TRIDENT-1/瑞普替尼）、RET
+  （LIBRETTO-431/塞普替尼）、MET ex14（GEOMETRY/卡马替尼）、BRAF V600E
+  （dabrafenib+trametinib）、NTRK（拉罗替尼）进入 planner 一线分派与
+  `DRIVER_FIRST_LINE` 拦截名单（“驱动阳性 + ICI 一线”不分 PD-L1 一律
+  block）；HER2 与 KRAS G12C 按当前指南**提示不否决**（一线仍化疗±IO，
+  T-DXd/索托拉西布后线注记）。MET 扩增、BRAF 非 V600 等非适应证**不误拦**
+  （对照组测试）。IV 期非鳞仅 EGFR/ALK 阴性而无广谱 NGS → 面板不完整
+  提示 + 补检建议（标注不拦截）。
+* **TNM 版本感知的试验边界**（`staging/legacy8.py`）：注册表每个试验带
+  `tnm_edition`（现存全部为第8版时代），边界检查先把病例描述符**回映射到
+  试验入组版本**——T2bN2b（9版 IIIB / 8版 IIIA）用 ADAURA 是
+  `TRIAL_EDITION_MIGRATION`（注记），不再误判外推；T4N2a（两版都 IIIB）
+  仍如实声明外推。9 版分期引擎仍是病例分期唯一出口。
+* **AIS/MIA 语义漂移清零**（`staging/concepts.py` 单一出处）：AIS=Tis=0期；
+  MIA=T1mi=**IA1**——协议模块、路由注释、planner 理由、规则文案全部对齐
+  引擎，测试钉住。
+* **剂量门变体感知**：奥希替尼系换 `egfr_classical_sensitizing` 门
+  （exon20ins→fail，非经典→unverified 交 MDT）；新药剂量**不编造数字**
+  （"per label — not encoded"，由药师录入后启用）。
+* **金标准集 16→27 例**：三个红队 blocker + ROS1/RET/METex14/BRAF/NTRK/
+  非经典 EGFR/HER2/KRAS 对照/版本迁移全部固化为机器可检期望。
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -266,7 +302,7 @@ python -m nsclc_agent run --presentation "肺癌病史，突然大咯血不止"
 
 # 4. 批量 + 金标准评测
 python -m nsclc_agent batch examples/cases -o out/ --resume
-python -m nsclc_agent eval                    # 16 例金标准：分期/路由/方案/安全
+python -m nsclc_agent eval                    # 27 例金标准（含11例临床红队边界病例）
 
 # 5. 记录与离线复核
 python -m nsclc_agent run --case examples/cases/stage3b_unresectable_egfr.json \
@@ -360,7 +396,7 @@ nsclc_agent/
   knowledge/prognosis.py 分期队列生存表+方向性预后因素(试验锚定/不做个体预测)
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   schemas.py · skills.py · case.py · cli.py
-tests/         377 个用例，全离线    eval/       16 例金标准 + 指标
+tests/         394 个用例，全离线    eval/       16 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -368,7 +404,7 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 377 passed，全离线
+python -m pytest -q            # 394 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方案11/11 安全16/16
 ```
@@ -386,7 +422,12 @@ python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方�
 **近似**数字——靶向/免疫时代同分期生存已系统性改善、第9版重新分组使同名
 组不完全可比（均已逐格注明），且系统在任何层面都**不做个体生存预测**、
 不给预后因素配数字权重；重放日志证明"重放与记录一致"，不证明"记录未被
-篡改"（需存储层签名）；图内并发只覆盖 Treatment∥Panel 波与会诊成员（其余
+篡改"（需存储层签名）；引用护栏仍是 plan 级而非逐 claim 级蕴含校验
+（claim→evidence 支持关系未逐条验证）；schema 校验仍刻意保持浅层（形状
+校验，非临床语义完备性）；治疗库（30 方案/30 试验/14 规则）覆盖主干驱动
+通路但仍是教学规模，未覆盖后线序贯、CNS 转移分层、器官功能剂量调整与
+药物相互作用决策；金标准 27 例中红队边界病例仍远少于严肃临床验证所需的
+100–200 例双医师裁定集；图内并发只覆盖 Treatment∥Panel 波与会诊成员（其余
 任务串行）；内置试验注册表
 与 DDI 规则包是教学语料，须经本机构药师/医师复核后使用；大规模对抗性安全
 评测未做。**本项目不能对外宣称为临床可用系统。**

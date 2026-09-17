@@ -15,6 +15,13 @@ from typing import Any, Optional
 
 from ..interview import InterviewLoop, coverage, workup_plan
 from ..knowledge import regimens as regimen_lib
+from ..knowledge.biomarkers import (
+    EGFR_UNCOMMON_SENSITIZING,
+    egfr_classes,
+    egfr_classical,
+    first_line_actionable_drivers,
+    later_line_actionable_drivers,
+)
 from ..perception import ImagingError, ImagingReader, fold_into_case
 from ..prompts import load_module
 from ..safety import emergencies
@@ -351,6 +358,29 @@ def _resectability(facts: dict[str, Any]) -> str:
                or facts.get("resectability") or "").upper()
 
 
+def _consolidation_by_driver(plan: dict[str, Any], opt: Any,
+                             facts: dict[str, Any], egfr: bool) -> None:
+    """Post-cCRT consolidation, variant-aware.
+
+    LAURA enrolled EGFR ex19del/L858R — a non-classical EGFR alteration is
+    outside both LAURA and (per the subgroup signal) PACIFIC's benefit, so
+    the consolidation decision goes to the MDT instead of a guessed drug.
+    """
+    if egfr and egfr_classical(facts):
+        opt("Consolidation osimertinib", ["osimertinib_consolidation"],
+            "EGFR ex19del/L858R unresectable III → LAURA, not durvalumab")
+    elif egfr:
+        plan["mdt_referral"] = True
+        plan["uncertainties"].append(
+            f"EGFR {'/'.join(sorted(egfr_classes(facts)))} after cCRT: "
+            f"LAURA applies to ex19del/L858R only, and durvalumab benefit "
+            f"in EGFR+ disease is unclear — consolidation strategy is an "
+            f"individualized MDT decision, none is auto-proposed.")
+    else:
+        opt("Consolidation durvalumab", ["durva_consolidation"],
+            "PACIFIC; start ≤42 days post-CRT; never concurrent")
+
+
 def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any]:
     """The rule-mode treatment plan: conservative, library-anchored, dose-free.
 
@@ -394,7 +424,7 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
 
     if stage_group == "0":
         opt("Sublobar resection", [],
-            "AIS/MIA: complete (often sublobar) resection is typically curative")
+            "AIS (Tis, stage 0): complete (often sublobar) resection is typically curative — MIA is T1mi → IA1 and never reaches this branch")
         opt("Active surveillance", [],
             "Pure GGN, stable: surveillance per MDT is legitimate")
         plan["summary"] = "Stage 0: resection extent vs surveillance; no systemic therapy."
@@ -408,9 +438,15 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         else:
             opt("Anatomic resection + nodal evaluation", [],
                 "Operable stage I: surgery is the definitive modality")
-        if stage_group == "IB" and egfr:
+        if stage_group == "IB" and egfr and egfr_classical(facts):
             opt("Adjuvant osimertinib after resection", ["osimertinib_adjuvant"],
                 "ADAURA covers resected IB EGFR ex19del/L858R")
+        elif stage_group == "IB" and egfr:
+            plan["mdt_referral"] = True
+            plan["uncertainties"].append(
+                f"Resected IB with EGFR "
+                f"{'/'.join(sorted(egfr_classes(facts)))}: outside the "
+                f"ADAURA population — adjuvant TKI not standard; MDT.")
         plan["summary"] = "Stage I: operability decides surgery vs SBRT."
         return plan
 
@@ -420,17 +456,23 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         if unresectable:
             opt("Definitive concurrent chemoradiation", ["ccrt_60gy"],
                 "Unresectable locally advanced disease")
-            if egfr:
-                opt("Consolidation osimertinib", ["osimertinib_consolidation"],
-                    "EGFR-mutated unresectable III → LAURA, not durvalumab")
-            else:
-                opt("Consolidation durvalumab", ["durva_consolidation"],
-                    "PACIFIC consolidation after cCRT without progression")
+            _consolidation_by_driver(plan, opt, facts, egfr)
             plan["summary"] = f"Stage {stage_group} unresectable: cCRT + consolidation by driver."
             return plan
-        if egfr:
+        if egfr and egfr_classical(facts):
             opt("Surgery → adjuvant osimertinib (± chemo)", ["osimertinib_adjuvant"],
-                "EGFR+ resectable: targeted adjuvant standard; no perioperative IO")
+                "EGFR ex19del/L858R resectable: targeted adjuvant standard "
+                "(ADAURA); no perioperative IO")
+        elif egfr:
+            # Non-classical EGFR (exon20ins/uncommon/unclassified): ADAURA
+            # does not apply, and the perioperative-IO trials excluded
+            # EGFR+ disease — adjuvant chemo + MDT, not a guessed TKI.
+            opt("Surgery → adjuvant chemotherapy; targeted adjuvant "
+                "individualized", ["adjuvant_platinum_doublet"],
+                f"EGFR {'/'.join(sorted(egfr_classes(facts)))}: outside the "
+                f"ADAURA population — adjuvant TKI is not standard; "
+                f"chemo per LACE, molecular tumor board for the rest")
+            plan["mdt_referral"] = True
         elif alk:
             opt("Surgery → adjuvant alectinib", ["alectinib_adjuvant"],
                 "ALK+ resectable: ALINA")
@@ -460,17 +502,54 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
             stage_group == "IIIB" and resect == "RESECTABLE" and n_cat != "N3"
         )
         if surgical_candidate:
+            if egfr and not egfr_classical(facts):
+                opt("Surgery → adjuvant chemotherapy; targeted adjuvant "
+                    "individualized", ["adjuvant_platinum_doublet"],
+                    f"EGFR {'/'.join(sorted(egfr_classes(facts)))}: outside "
+                    f"the ADAURA population and periop-IO trials excluded "
+                    f"EGFR+ — chemo per LACE, molecular tumor board")
+                plan["mdt_referral"] = True
+                plan["summary"] = f"Resectable {stage_group}: non-classical " \
+                                  f"EGFR — chemo + MDT pathway."
+                return plan
             if egfr or alk:
                 rid = "osimertinib_adjuvant" if egfr else "alectinib_adjuvant"
                 trial = "ADAURA" if egfr else "ALINA"
-                opt(f"Surgery → adjuvant {'osimertinib' if egfr else 'alectinib'}",
-                    [rid], f"Driver-positive resectable IIIB — {trial} extrapolated beyond IIIA")
-                plan["extrapolations"].append({
-                    "trial_id": trial,
-                    "justification": f"{trial} enrolled up to IIIA; resectable "
-                                     f"IIIB use is a documented extrapolation "
-                                     f"per MDT decision",
-                })
+                # Edition-aware: many "IIIB" cases are 8th-edition IIIA that
+                # the 9th edition renamed (T2N2b etc.) — those are inside
+                # the trial's enrollment, not an extrapolation.
+                from ..knowledge.trials import TRIALS_BY_ID
+                from ..staging.legacy8 import eighth_edition_group
+
+                tnm = facts.get("tnm") or {}
+                legacy = eighth_edition_group(tnm.get("t"), tnm.get("n"),
+                                              tnm.get("m"))
+                entry = TRIALS_BY_ID.get(trial)
+                migrated = bool(legacy and entry
+                                and legacy in entry.stage_groups)
+                if migrated:
+                    opt(f"Surgery → adjuvant "
+                        f"{'osimertinib' if egfr else 'alectinib'}",
+                        [rid],
+                        f"Driver-positive resectable IIIB — 8th-edition "
+                        f"{legacy} under {trial}'s enrollment (TNM edition "
+                        f"migration, not an extrapolation)")
+                    plan["uncertainties"].append(
+                        f"{trial}: case is 9th-edition {stage_group} but "
+                        f"maps to {legacy} under the trial's 8th-edition "
+                        f"enrollment — edition migration noted.")
+                else:
+                    opt(f"Surgery → adjuvant "
+                        f"{'osimertinib' if egfr else 'alectinib'}",
+                        [rid], f"Driver-positive resectable IIIB — {trial} "
+                               f"extrapolated beyond IIIA")
+                    plan["extrapolations"].append({
+                        "trial_id": trial,
+                        "justification": f"{trial} enrolled up to IIIA; "
+                                         f"resectable IIIB use is a "
+                                         f"documented extrapolation per MDT "
+                                         f"decision",
+                    })
             else:
                 opt("Perioperative pembrolizumab + chemotherapy",
                     ["pembro_perioperative"],
@@ -481,23 +560,84 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         opt("Definitive concurrent chemoradiation", ["ccrt_60gy"],
             "N3 / unresectable locally advanced disease: cCRT is the "
             "curative-intent pathway")
-        if egfr:
-            opt("Consolidation osimertinib", ["osimertinib_consolidation"],
-                "EGFR+ unresectable III → LAURA, not durvalumab")
-        else:
-            opt("Consolidation durvalumab", ["durva_consolidation"],
-                "PACIFIC; start ≤42 days post-CRT; never concurrent")
+        _consolidation_by_driver(plan, opt, facts, egfr)
         plan["summary"] = f"Stage {stage_group}: definitive cCRT + consolidation by driver."
         return plan
 
     if stage_group in ("IVA", "IVB"):
         plan["intent"] = "palliative"
-        if egfr:
-            opt("First-line osimertinib", ["osimertinib_first_line"],
-                "EGFR ex19del/L858R: FLAURA")
-        elif alk:
+        # Driver-directed first: the actionable-driver plane is
+        # variant-aware — "EGFR positive" is not a treatment decision
+        # (red-team confirmed exon20ins was being released onto FLAURA).
+        drivers = first_line_actionable_drivers(facts)
+        lead = drivers[0] if drivers else None
+        if lead and lead["gene"] == "EGFR":
+            classes = set(lead["classes"])
+            if "exon20ins" in classes:
+                opt("Amivantamab + carboplatin-pemetrexed",
+                    ["amivantamab_chemo_first_line"],
+                    "EGFR exon 20 insertion: PAPILLON — osimertinib is NOT "
+                    "standard for this variant class")
+            elif egfr_classical(facts):
+                opt("First-line osimertinib", ["osimertinib_first_line"],
+                    "EGFR ex19del/L858R: FLAURA")
+                opt("Osimertinib + platinum-pemetrexed",
+                    ["osimertinib_chemo_first_line"],
+                    "FLAURA2 option — weigh for high disease burden / CNS "
+                    "disease against added chemo toxicity")
+                opt("Amivantamab + lazertinib", ["amivantamab_lazertinib"],
+                    "MARIPOSA option — PFS/OS benefit vs osimertinib at "
+                    "higher toxicity (VTE, infusion reactions); MDT/patient "
+                    "preference")
+            elif classes & EGFR_UNCOMMON_SENSITIZING \
+                    and not (classes & {"c797s"}):
+                opt("Afatinib (uncommon-sensitizing EGFR)",
+                    ["afatinib_uncommon_first_line"],
+                    "G719X/L861Q/S768I: LUX-Lung pooled data — a different "
+                    "population from FLAURA; osimertinib is a reasonable "
+                    "alternative on separate evidence")
+            elif classes == {"t790m"}:
+                opt("First-line osimertinib (de novo T790M)",
+                    ["osimertinib_first_line"],
+                    "De novo T790M: osimertinib retains activity; confirm "
+                    "no co-occurring resistance alteration")
+            else:
+                # Unclassified / resistance-pattern EGFR: fail toward the
+                # molecular tumor board, never toward a guessed TKI or ICI.
+                plan["mdt_referral"] = True
+                plan["workup_needed"].append(
+                    "EGFR variant classification (exact alteration + "
+                    "sensitizing status) — molecular tumor board review")
+                plan["uncertainties"].append(
+                    f"EGFR positive but variant class "
+                    f"{'/'.join(sorted(classes)) or 'unreported'} does not "
+                    f"map to a first-line indication — no systemic regimen "
+                    f"is proposed until the variant is classified.")
+        elif lead and lead["gene"] == "ALK":
             opt("First-line lorlatinib", ["lorlatinib_first_line"],
                 "ALK+: CROWN")
+        elif lead and lead["gene"] == "ROS1":
+            opt("First-line ROS1 TKI (repotrectinib)",
+                ["repotrectinib_first_line"],
+                "ROS1 fusion: TRIDENT-1; entrectinib/crizotinib/"
+                "taletrectinib are alternatives — ICI monotherapy is not a "
+                "substitute regardless of PD-L1")
+        elif lead and lead["gene"] == "RET":
+            opt("First-line selpercatinib", ["selpercatinib_first_line"],
+                "RET fusion: LIBRETTO-431 beat chemo±pembrolizumab "
+                "head-to-head — PD-L1 level does not redirect to ICI")
+        elif lead and lead["gene"] == "MET":
+            opt("First-line capmatinib", ["capmatinib_first_line"],
+                "MET exon 14 skipping: GEOMETRY (tepotinib per VISION is "
+                "the alternative)")
+        elif lead and lead["gene"] == "BRAF":
+            opt("First-line dabrafenib + trametinib",
+                ["dabrafenib_trametinib_first_line"],
+                "BRAF V600E: BRF113928")
+        elif lead and lead["gene"] == "NTRK":
+            opt("First-line larotrectinib", ["larotrectinib_first_line"],
+                "NTRK fusion: tumor-agnostic evidence (entrectinib is the "
+                "CNS-active alternative)")
         elif isinstance(tps, (int, float)) and tps >= 50:
             opt("Pembrolizumab monotherapy", ["pembro_monotherapy"],
                 "PD-L1 TPS≥50% driver-negative: KEYNOTE-024")
@@ -508,6 +648,24 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         else:
             opt("Pembrolizumab + carboplatin-taxane", ["pembro_carbo_taxane"],
                 "Driver-negative squamous: KEYNOTE-407")
+        for later in later_line_actionable_drivers(facts):
+            plan["uncertainties"].append(
+                f"{later['gene']} on record: {later['note']}.")
+        # Panel completeness per current guidelines: EGFR/ALK alone is no
+        # longer an adequate driver assessment for stage IV non-squamous.
+        if _nonsquamous(facts) and not drivers and not facts.get("ngs_done"):
+            extended = [g.upper() for g in ("ros1", "ret", "met", "braf",
+                                            "ntrk", "erbb2", "kras")
+                        if _driver_unknown(facts, g)]
+            if extended:
+                plan["workup_needed"].append(
+                    "Broad multigene panel (tissue/plasma NGS) covering "
+                    + "/".join(extended)
+                    + " — EGFR/ALK alone is not a complete driver assessment")
+                plan["uncertainties"].append(
+                    "Systemic options are provisional: the extended driver "
+                    "panel (" + "/".join(extended) + ") is not on record and "
+                    "a positive result would change first-line therapy.")
         if stage_group == "IVA" and str(
             facts.get("disease_extent") or ""
         ).upper() == "OLIGOMETASTATIC":

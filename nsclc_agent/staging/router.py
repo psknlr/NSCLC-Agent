@@ -3,7 +3,7 @@
 Every stage group the engine can produce routes somewhere — including the two
 states v0.1 left dead-ended:
 
-* Stage ``0`` (Tis/AIS-MIA) now has its own ``stage0`` module rather than being
+* Stage ``0`` (Tis = AIS; MIA is T1mi → IA1, stage I module) has its own ``stage0`` module rather than being
   sent to the Stage I module whose own scope gate excludes it.
 * ``Occult`` (TX N0 M0) routes to the ``workup`` module (localization protocol)
   instead of erroring out with no actionable output — the case that most needs

@@ -505,16 +505,89 @@ class ToolRegistry:
                     # the dose plan carries it forward for the tumor board.
                     status, note = "unverified", (
                         f"EGFR {egfr} / ALK {alk} — Tier-A testing incomplete")
-            elif gate == "egfr_positive":
-                status, note = (
-                    ("pass", "EGFR alteration on record")
-                    if gene_status(facts, "egfr") == "positive"
-                    else ("fail", "no EGFR alteration on record"))
-            elif gate == "alk_positive":
-                status, note = (
-                    ("pass", "ALK alteration on record")
-                    if gene_status(facts, "alk") == "positive"
-                    else ("fail", "no ALK alteration on record"))
+            elif gate == "egfr_classical_sensitizing":
+                # Variant-aware: FLAURA/ADAURA/LAURA regimens require
+                # ex19del/L858R — "EGFR positive" is not the question.
+                from ..knowledge.biomarkers import (
+                    EGFR_UNCOMMON_SENSITIZING, egfr_classes, egfr_classical,
+                )
+
+                classes = egfr_classes(facts)
+                if egfr_classical(facts):
+                    status, note = "pass", (
+                        f"classical sensitizing EGFR ({'/'.join(sorted(classes))})")
+                elif classes & {"exon20ins", "c797s"}:
+                    status, note = "fail", (
+                        f"EGFR {'/'.join(sorted(classes))} — outside the "
+                        f"classical-sensitizing population (exon20ins → "
+                        f"PAPILLON pathway)")
+                elif classes & EGFR_UNCOMMON_SENSITIZING:
+                    status, note = "unverified", (
+                        f"uncommon-sensitizing EGFR "
+                        f"({'/'.join(sorted(classes))}) — different evidence "
+                        f"base; MDT confirmation required")
+                elif classes:
+                    status, note = "unverified", (
+                        "EGFR positive but variant unclassified — confirm "
+                        "sensitizing status before dosing")
+                else:
+                    status, note = "fail", "no EGFR alteration on record"
+            elif gate == "egfr_exon20ins":
+                from ..knowledge.biomarkers import egfr_classes
+
+                classes = egfr_classes(facts)
+                if "exon20ins" in classes:
+                    status, note = "pass", "EGFR exon 20 insertion on record"
+                elif classes:
+                    status, note = "fail", (
+                        f"EGFR {'/'.join(sorted(classes))} is not an exon 20 "
+                        f"insertion")
+                else:
+                    status, note = "fail", "no EGFR alteration on record"
+            elif gate == "egfr_uncommon_sensitizing":
+                from ..knowledge.biomarkers import (
+                    EGFR_UNCOMMON_SENSITIZING, egfr_classes,
+                )
+
+                classes = egfr_classes(facts)
+                if classes & EGFR_UNCOMMON_SENSITIZING \
+                        and not (classes & {"exon20ins", "c797s"}):
+                    status, note = "pass", (
+                        f"uncommon sensitizing EGFR "
+                        f"({'/'.join(sorted(classes))})")
+                elif classes:
+                    status, note = "fail", (
+                        f"EGFR {'/'.join(sorted(classes))} not in "
+                        f"G719X/L861Q/S768I")
+                else:
+                    status, note = "fail", "no EGFR alteration on record"
+            elif gate == "met_ex14_confirmed":
+                from ..knowledge.biomarkers import _MET_EX14_RE
+
+                value = (facts.get("driver_mutations") or {}).get("met")
+                if value is not None and gene_status(facts, "met") == "positive":
+                    status, note = (
+                        ("pass", "MET exon 14 skipping on record")
+                        if _MET_EX14_RE.search(str(value))
+                        else ("fail", "MET positive but not exon 14 skipping"))
+            elif gate == "braf_v600e_confirmed":
+                from ..knowledge.biomarkers import _BRAF_V600_RE
+
+                value = (facts.get("driver_mutations") or {}).get("braf")
+                if value is not None and gene_status(facts, "braf") == "positive":
+                    status, note = (
+                        ("pass", "BRAF V600E on record")
+                        if _BRAF_V600_RE.search(str(value))
+                        else ("fail", "BRAF positive but not V600"))
+            elif gate.endswith("_positive") and gate[:-9] in (
+                    "alk", "ros1", "ret", "ntrk", "erbb2", "kras"):
+                gene = gate[:-9]
+                aliased = {"ntrk": ("ntrk", "ntrk1", "ntrk2", "ntrk3"),
+                           "erbb2": ("erbb2", "her2")}.get(gene, (gene,))
+                if any(gene_status(facts, g) == "positive" for g in aliased):
+                    status, note = "pass", f"{gene.upper()} alteration on record"
+                else:
+                    status, note = "fail", f"no {gene.upper()} alteration on record"
             elif gate == "pd_l1_tps_ge_50":
                 tps = pd_l1.get("tps")
                 if isinstance(tps, (int, float)):

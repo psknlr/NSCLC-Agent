@@ -191,6 +191,27 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     never opens in a scenario, and hypothetical emergency phrasing obeys
     the screen's hypothetical suppression while stated events escalate
     inside the scenario only.
+18. **"Positive" is not a treatment decision.** External clinical red-team
+    review proved the failure mode this invariant closes: planner and
+    critic shared a boolean gene model and jointly released osimertinib
+    for an EGFR exon20 insertion and pembrolizumab for ROS1+ disease.
+    The driver ontology (`knowledge/biomarkers.py`) makes variant classes
+    first-class — EGFR ex19del/L858R vs uncommon vs exon20ins vs
+    T790M/C797S; MET counts only as exon-14 skipping, BRAF only as V600 —
+    and the full first-line actionable plane
+    (EGFR/ALK/ROS1/RET/MET-ex14/BRAF-V600E/NTRK) is enforced twice from
+    the same vocabulary with independent logic: the planner routes each
+    class to its evidence population (unclassified fails toward the
+    molecular tumor board, never toward a guessed drug), and the rule
+    engine blocks variant-mismatched regimens (`EGFR_VARIANT_MISMATCH`)
+    and ICI-first plans over any actionable driver (`DRIVER_FIRST_LINE`)
+    even when the planner is the one that erred. Trial boundaries are
+    TNM-edition-aware (`staging/legacy8.py`): a case whose descriptors
+    fall inside the trial's 8th-edition enrollment is an edition
+    migration (note), not an extrapolation (block) — while the 9th-edition
+    engine remains the sole authority for the case's actual stage. And
+    prose never redefines disease concepts: AIS=Tis=stage 0,
+    MIA=T1mi=IA1, from one source of truth (`staging/concepts.py`).
 
 ## 3. LLM containment table
 

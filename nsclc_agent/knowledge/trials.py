@@ -41,6 +41,15 @@ class Trial:
     histology: str = "any"
     #: Driver alteration the population must carry ("EGFR", "ALK"), or None.
     driver_required: Optional[str] = None
+    #: Variant-class refinement of driver_required, where the enrollment was
+    #: variant-defined: "egfr_ex19del_l858r" (FLAURA/ADAURA/LAURA/MARIPOSA),
+    #: "egfr_exon20ins" (PAPILLON), "egfr_uncommon", "met_ex14",
+    #: "braf_v600e". None = any positive result of the gene qualifies.
+    driver_class_required: Optional[str] = None
+    #: TNM edition the trial enrolled under. Every registry entry to date
+    #: predates AJCC/UICC 9 — stage-boundary checks back-map the current
+    #: case to this edition before calling an application an extrapolation.
+    tnm_edition: int = 8
     #: True when known EGFR/ALK alterations were excluded — the perioperative
     #: immunotherapy trials. The rule engine reads this.
     egfr_alk_excluded: bool = False
@@ -60,6 +69,8 @@ class Trial:
             "stage_groups": sorted(self.stage_groups),
             "histology": self.histology,
             "driver_required": self.driver_required,
+            "driver_class_required": self.driver_class_required,
+            "tnm_edition": self.tnm_edition,
             "egfr_alk_excluded": self.egfr_alk_excluded,
             "regimen_ids": list(self.regimen_ids),
             "results": list(self.results),
@@ -82,7 +93,7 @@ TRIALS: tuple[Trial, ...] = (
     # ------------------------------------------------ adjuvant targeted therapy
     Trial(
         "ADAURA", "ADAURA (adjuvant osimertinib)", "NCT02511106", "adjuvant",
-        _s(*_EARLY), histology="nonsquamous", driver_required="EGFR",
+        _s(*_EARLY), histology="nonsquamous", driver_required="EGFR", driver_class_required="egfr_ex19del_l858r",
         regimen_ids=("osimertinib_adjuvant",),
         results=(
             "DFS HR 0.17 (99.06% CI 0.11–0.26) in stage II–IIIA (primary); "
@@ -221,7 +232,7 @@ TRIALS: tuple[Trial, ...] = (
     ),
     Trial(
         "LAURA", "LAURA (osimertinib after definitive CRT)", "NCT03521154", "consolidation",
-        _s(*_STAGE_III), driver_required="EGFR",
+        _s(*_STAGE_III), driver_required="EGFR", driver_class_required="egfr_ex19del_l858r",
         regimen_ids=("osimertinib_consolidation",),
         results=("PFS 39.1 vs 5.6 months, HR 0.16 (95% CI 0.10–0.24)",),
         source="NEJM 2024;391:585",
@@ -254,7 +265,7 @@ TRIALS: tuple[Trial, ...] = (
     # ------------------------------------------------ stage IV, driver-positive
     Trial(
         "FLAURA", "FLAURA (first-line osimertinib)", "NCT02296125", "first_line",
-        _s(*_STAGE_IV), driver_required="EGFR",
+        _s(*_STAGE_IV), driver_required="EGFR", driver_class_required="egfr_ex19del_l858r",
         regimen_ids=("osimertinib_first_line",),
         results=("PFS HR 0.46 (95% CI 0.37–0.57); OS HR 0.80 (95.05% CI 0.64–1.00)",),
         source="NEJM 2018;378:113 (PFS); NEJM 2020;382:41 (OS)",
@@ -266,7 +277,7 @@ TRIALS: tuple[Trial, ...] = (
     ),
     Trial(
         "FLAURA2", "FLAURA2 (osimertinib + platinum-pemetrexed)", "NCT04035486", "first_line",
-        _s(*_STAGE_IV), histology="nonsquamous", driver_required="EGFR",
+        _s(*_STAGE_IV), histology="nonsquamous", driver_required="EGFR", driver_class_required="egfr_ex19del_l858r",
         regimen_ids=("osimertinib_chemo_first_line",),
         results=("PFS HR 0.62 (95% CI 0.49–0.79) vs osimertinib alone; higher toxicity",),
         source="NEJM 2023;389:1935",
@@ -276,7 +287,7 @@ TRIALS: tuple[Trial, ...] = (
     ),
     Trial(
         "MARIPOSA", "MARIPOSA (amivantamab + lazertinib)", "NCT04487080", "first_line",
-        _s(*_STAGE_IV), driver_required="EGFR",
+        _s(*_STAGE_IV), driver_required="EGFR", driver_class_required="egfr_ex19del_l858r",
         regimen_ids=("amivantamab_lazertinib",),
         results=("PFS HR 0.70 (95% CI 0.58–0.85) vs osimertinib; OS benefit reported at later analysis",),
         source="NEJM 2024;391:1486; OS update 2025",
@@ -337,6 +348,121 @@ TRIALS: tuple[Trial, ...] = (
         source="Lancet Oncol 2021;22:198",
         approval="FDA 2020-05 first-line, metastatic NSCLC without EGFR/ALK",
         keywords=("nivolumab", "ipilimumab", "dual immunotherapy"),
+    ),
+    # -------------------------- stage IV, driver-directed beyond EGFR/ALK
+    Trial(
+        "PAPILLON", "PAPILLON (amivantamab + chemo, EGFR exon20 insertion)",
+        "NCT04538664", "first_line",
+        _s(*_STAGE_IV), histology="nonsquamous", driver_required="EGFR",
+        driver_class_required="egfr_exon20ins",
+        regimen_ids=("amivantamab_chemo_first_line",),
+        results=("PFS HR 0.40 (95% CI 0.30–0.53) vs chemotherapy alone",),
+        source="NEJM 2023;389:2039",
+        approval="FDA 2024-03 amivantamab-vmjw + carboplatin-pemetrexed, "
+                 "first-line metastatic EGFR exon 20 insertion NSCLC",
+        enrollment_note="EGFR exon 20 insertion ONLY — classical-sensitizing "
+                        "EGFR is a different population (FLAURA)",
+        caveats=("Osimertinib is NOT standard for exon 20 insertions",),
+        keywords=("amivantamab", "exon 20 insertion", "EGFR"),
+    ),
+    Trial(
+        "LUXLUNG_UNCOMMON", "LUX-Lung 2/3/6 pooled (afatinib, uncommon EGFR)",
+        "NCT00525148", "first_line",
+        _s(*_STAGE_IV), driver_required="EGFR",
+        driver_class_required="egfr_uncommon",
+        regimen_ids=("afatinib_uncommon_first_line",),
+        results=("Pooled ORR ~71% for G719X/L861Q/S768I; markedly lower "
+                 "activity in exon 20 insertions and de novo T790M",),
+        source="Lancet Oncol 2015;16:830 (pooled post-hoc)",
+        approval="FDA 2018-01 afatinib label broadened to "
+                 "G719X/L861Q/S768I (non-resistant uncommon mutations)",
+        enrollment_note="Uncommon-sensitizing subgroup analysis — "
+                        "prospective evidence is thinner than FLAURA",
+        caveats=("Osimertinib has separate uncommon-mutation data; either is "
+                 "reasonable — but neither equals the FLAURA population",),
+        keywords=("afatinib", "uncommon", "G719X", "L861Q", "S768I"),
+    ),
+    Trial(
+        "TRIDENT1", "TRIDENT-1 (repotrectinib, ROS1 fusion)",
+        "NCT03093116", "first_line",
+        _s(*_STAGE_IV), driver_required="ROS1",
+        regimen_ids=("repotrectinib_first_line",),
+        results=("ORR 79% TKI-naïve (durable, CNS-active); ORR 38% "
+                 "TKI-pretreated",),
+        source="NEJM 2024;390:118",
+        approval="FDA 2023-11 repotrectinib, locally advanced/metastatic "
+                 "ROS1+ NSCLC; taletrectinib approved 2025-06 "
+                 "(entrectinib/crizotinib remain options)",
+        enrollment_note="ROS1 fusion required; ICI monotherapy is not a "
+                        "substitute regardless of PD-L1",
+        keywords=("repotrectinib", "ROS1", "fusion", "taletrectinib"),
+    ),
+    Trial(
+        "LIBRETTO431", "LIBRETTO-431 (selpercatinib, RET fusion)",
+        "NCT04194944", "first_line",
+        _s(*_STAGE_IV), driver_required="RET",
+        regimen_ids=("selpercatinib_first_line",),
+        results=("PFS HR 0.46 (95% CI 0.31–0.70) vs chemo±pembrolizumab; "
+                 "CNS-active",),
+        source="NEJM 2024;390:1265 (LIBRETTO-431)",
+        approval="FDA regular approval 2022-09 selpercatinib, RET fusion+ "
+                 "NSCLC (accelerated 2020)",
+        enrollment_note="Randomized against chemo±IO — directly answers the "
+                        "'high PD-L1, RET+' question in favor of the TKI",
+        keywords=("selpercatinib", "RET", "fusion"),
+    ),
+    Trial(
+        "GEOMETRY", "GEOMETRY mono-1 (capmatinib, MET exon 14 skipping)",
+        "NCT02414139", "first_line",
+        _s(*_STAGE_IV), driver_required="MET",
+        driver_class_required="met_ex14",
+        regimen_ids=("capmatinib_first_line",),
+        results=("ORR 68% treatment-naïve, 41% pretreated (MET ex14)",),
+        source="NEJM 2020;383:944",
+        approval="FDA 2020-05 capmatinib, metastatic MET exon 14 skipping "
+                 "NSCLC (tepotinib per VISION is the alternative)",
+        enrollment_note="MET exon 14 skipping only — MET amplification is a "
+                        "different (unproven first-line) question",
+        keywords=("capmatinib", "MET", "exon 14", "tepotinib"),
+    ),
+    Trial(
+        "BRF113928", "BRF113928 (dabrafenib + trametinib, BRAF V600E)",
+        "NCT01336634", "first_line",
+        _s(*_STAGE_IV), driver_required="BRAF",
+        driver_class_required="braf_v600e",
+        regimen_ids=("dabrafenib_trametinib_first_line",),
+        results=("ORR 64% treatment-naïve; median PFS ~10.8 mo",),
+        source="Lancet Oncol 2017;18:1307",
+        approval="FDA 2017-06 dabrafenib + trametinib, metastatic BRAF "
+                 "V600E NSCLC (encorafenib + binimetinib is an alternative)",
+        enrollment_note="V600E only — non-V600 BRAF is not an indication",
+        keywords=("dabrafenib", "trametinib", "BRAF", "V600E"),
+    ),
+    Trial(
+        "NAVIGATE", "NAVIGATE/pooled (larotrectinib, NTRK fusion)",
+        "NCT02576431", "first_line",
+        _s(*_STAGE_IV), driver_required="NTRK",
+        regimen_ids=("larotrectinib_first_line",),
+        results=("Tumor-agnostic pooled ORR ~75%; durable, CNS-active "
+                 "(entrectinib per STARTRK is the alternative)",),
+        source="NEJM 2018;378:731; Lancet Oncol 2020;21:531",
+        approval="FDA 2018-11 larotrectinib, NTRK fusion+ solid tumors "
+                 "(tumor-agnostic)",
+        keywords=("larotrectinib", "NTRK", "fusion", "entrectinib"),
+    ),
+    Trial(
+        "DESTINY_LUNG02", "DESTINY-Lung02 (T-DXd, HER2-mutant, later line)",
+        "NCT04644237", "subsequent",
+        _s(*_STAGE_IV), driver_required="ERBB2",
+        regimen_ids=("tdxd_subsequent_line",),
+        results=("ORR ~49% at 5.4 mg/kg in previously treated "
+                 "HER2-mutant NSCLC; ILD is the key toxicity",),
+        source="JCO 2023;41:4852",
+        approval="FDA 2022-08 accelerated: trastuzumab deruxtecan, "
+                 "previously treated HER2-mutant NSCLC",
+        enrollment_note="LATER LINE — first-line for HER2-mutant disease "
+                        "remains chemo±IO; do not front-load T-DXd",
+        keywords=("trastuzumab deruxtecan", "T-DXd", "HER2", "ERBB2"),
     ),
     Trial(
         "GOMEZ_LCT", "Gomez et al. (local consolidative therapy, oligometastatic)",
