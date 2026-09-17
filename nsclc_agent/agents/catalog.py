@@ -593,6 +593,7 @@ class TreatmentAgent:
                     state, tools, broker, plan)
             state.outputs["treatment_plan"] = plan
             self._attach_kg_context(state, tools, broker, plan, stage_group)
+            self._attach_prognosis(state, tools, broker, stage_group)
             self._claim_options(state)
             state.trace(
                 "TreatmentAgent", "plan_reused",
@@ -639,6 +640,7 @@ class TreatmentAgent:
         # cache — the case-matched KG context is attached the same way.
         self._attach_kg_context(state, tools, broker,
                                 state.outputs["treatment_plan"], stage_group)
+        self._attach_prognosis(state, tools, broker, stage_group)
         self._claim_options(state)
         state.trace(
             "TreatmentAgent", "plan",
@@ -777,6 +779,68 @@ class TreatmentAgent:
                            f"KG rec(s) attached (kg_llm_extracted)",
             evidence_ids=evidence_ids,
         )
+
+    @staticmethod
+    def _attach_prognosis(
+        state: CaseRunState, tools: Any, broker: Any, stage_group: str,
+    ) -> None:
+        """Attach cohort prognosis context, evidence-anchored.
+
+        The figures are published stage-cohort statistics
+        (``published_cohort_statistics`` — releasable as cited population
+        context); modifier trials are anchored through ``trial_lookup`` so
+        their outcome numbers stay registry entries, cited not restated.
+        Prose and figures live in ``outputs["prognosis"]``, outside the
+        plan (the rule engine scans the plan as the system's own words),
+        and the patient view never receives the table (see render).
+        """
+        if not stage_group or "prognosis" in state.outputs:
+            return
+        from ..knowledge.prognosis import prognosis_for
+
+        context = prognosis_for(
+            stage_group, str(state.staging.get("prefix") or
+                             (state.facts.get("tnm") or {}).get("prefix")
+                             or "c"),
+            state.facts,
+            migration_notes=state.staging.get("migration_notes") or [],
+        )
+        if context is None:
+            return
+        evidence_ids = [state.add_evidence(
+            EvidenceLevel.COHORT, "prognosis_table",
+            f"stage {stage_group} 5-year OS cohort figure "
+            f"({context['classification_basis']} basis)",
+            {k: context[k] for k in ("stage_group", "classification_basis",
+                                     "five_year_os_percent_approx", "cohort")},
+            source_version=context["cohort"])]
+        for modifier in context["modifiers"]:
+            for trial_ref in modifier.get("anchor_trials") or []:
+                result = tools.call(broker, "trial_lookup", query=trial_ref)
+                if result.ok and result.data.get("match") == "exact":
+                    eid = state.add_evidence(
+                        result.resolved_level(), "trial_lookup",
+                        result.summary, result.data,
+                        source_version=result.source_version)
+                    evidence_ids.append(eid)
+                    modifier["evidence_id"] = eid
+        context["evidence_ids"] = evidence_ids
+        state.outputs["prognosis"] = context
+        state.add_claim(
+            "prognosis_context",
+            f"Stage {stage_group} cohort five-year OS "
+            f"~{context['five_year_os_percent_approx']}% "
+            f"({context['classification_basis']}; population statistic, "
+            f"not an individual prediction)"
+            if context["five_year_os_percent_approx"] is not None else
+            f"Stage {stage_group}: no per-group cohort survival figure "
+            f"published; not padded",
+            evidence_ids, origin="rule")
+        state.trace(
+            "TreatmentAgent", "prognosis_context",
+            output_summary=f"cohort figure + {len(context['modifiers'])} "
+                           f"directional modifier(s)",
+            evidence_ids=evidence_ids)
 
     @staticmethod
     def _anchor_regimens(

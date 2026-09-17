@@ -318,19 +318,54 @@ def cmd_chat(args) -> int:
             print(result.reply)
         return 3 if result.state.release_status == "failed_closed" else 0
 
+    def what_if_turn(text: str) -> int:
+        payload = text[len("/whatif"):].strip()
+        wf_facts = None
+        if payload.startswith("{"):
+            try:
+                wf_facts = json.loads(payload)
+                payload = ""
+            except json.JSONDecodeError as exc:
+                print(f"bad /whatif JSON: {exc}", file=sys.stderr)
+                return 2
+        try:
+            result = session.what_if(payload, facts=wf_facts,
+                                     enable_panel=args.panel)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        if session_path:
+            session.save(session_path)
+        if args.json:
+            print(json.dumps({"kind": "what_if", **result.to_dict()},
+                             ensure_ascii=False, default=str))
+        else:
+            print(f"--- [what-if | {result.state.release_status} | "
+                  f"{result.duration_s:.1f}s | llm×{result.llm_calls}] ---")
+            print(result.reply)
+        return 0
+
+    def dispatch(text: str) -> int:
+        if text.startswith("/whatif"):
+            return what_if_turn(text)
+        return one_turn(text, facts=None)
+
     if args.message:
         rc = 0
         for index, text in enumerate(args.message):
             # A failed-closed turn decides the exit code even when later
             # turns recover — the caller must see that the transcript
             # contains a discarded run.
-            rc = max(rc, one_turn(text,
-                                  facts=initial_facts if index == 0 else None))
+            if index == 0 and not text.startswith("/whatif"):
+                rc = max(rc, one_turn(text, facts=initial_facts))
+            else:
+                rc = max(rc, dispatch(text))
         return rc
 
     # ------------------------------------------------------------ interactive
     print("NSCLC 多轮会诊。/image <path> 与 /report <path> 附加到下一条消息；"
-          "/facts {json} 提交结构化事实（确认报告读出的值）；/panel 与 "
+          "/facts {json} 提交结构化事实（确认报告读出的值）；"
+          "/whatif <假设或{json}> 假设推演（不写入会诊记录）；/panel 与 "
           "/dose on|off 切换；/state 查看；/quit 退出。", file=sys.stderr)
     pending_images: list[str] = []
     pending_reports: list[str] = []
@@ -371,6 +406,9 @@ def cmd_chat(args) -> int:
             print(f"  dose planning: "
                   f"{'on' if args.allow_dose_planning else 'off'}",
                   file=sys.stderr)
+            continue
+        if line.startswith("/whatif"):
+            what_if_turn(line)
             continue
         if line == "/state":
             state = session.last_state

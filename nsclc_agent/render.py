@@ -76,6 +76,11 @@ def _oncologist_view(state: CaseRunState) -> dict[str, Any]:
     # Quoted KG context: machine-extracted, unverified — shown to clinicians
     # with its curation status, never to patients.
     view["guideline_context"] = state.outputs.get("guideline_context")
+    # Cohort survival statistics + directional modifiers: clinician-facing.
+    # Deliberately absent from the patient view — prognosis is a clinical
+    # conversation, not a table dump (the reply layer offers a supportive
+    # pointer when a patient asks).
+    view["prognosis"] = state.outputs.get("prognosis")
     view["dose_plan"] = state.outputs.get("dose_plan")
     view["panel"] = state.outputs.get("panel")
     view["workup_plan"] = state.outputs.get("workup_plan")
@@ -107,6 +112,8 @@ def _researcher_view(state: CaseRunState) -> dict[str, Any]:
         "planner_mode": state.planner_mode,
         "evidence_counts": _level_counts(state),
         "n_options": len((state.outputs.get("treatment_plan") or {}).get("options") or []),
+        "cohort_5y_os_percent": (state.outputs.get("prognosis") or {}).get(
+            "five_year_os_percent_approx"),
         "n_safety_issues": len(state.safety_issues),
         "n_flags": len(state.flags),
         "budget": state.budget.snapshot(),

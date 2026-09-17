@@ -54,6 +54,10 @@ class EvidenceLevel(str, Enum):
     STAGING_ENGINE = "deterministic_staging"  # computed by the symbolic TNM engine
     TRIAL = "registered_trial"            # entry from the curated trial registry
     GUIDELINE = "guideline_or_label"      # licensed guideline / regulatory label
+    #: Population survival statistics from published staging-project
+    #: cohorts — releasable as cited POPULATION context; the producing
+    #: module never derives an individual prediction from them.
+    COHORT = "published_cohort_statistics"
     RETRIEVAL = "live_retrieval"          # PubMed / CT.gov / openFDA lookup result
     TOOL = "tool_result"
     MODEL = "model_reasoning"             # LLM/vision output — never releasable alone

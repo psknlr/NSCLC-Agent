@@ -174,6 +174,23 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     raises a `KG_VERIFIED_CAUTION` flag. Both are advisory surfaces;
     blocking power still belongs exclusively to the rule engine, and the
     dose scrub applies to verified content unchanged.
+17. **Prognosis is population context; hypotheses change nothing real.**
+    "Survival prediction" is served honestly: published stage-cohort
+    figures (IASLC staging-project database, per-figure approximation and
+    edition-migration caveats, unreported groups left blank) at the
+    releasable `published_cohort_statistics` grade, plus DIRECTIONAL
+    prognostic modifiers whose effect sizes stay in the trial registry —
+    anchored via `trial_lookup`, cited, never restated or recombined into
+    a per-patient number. The figures are clinician-facing: the patient
+    view never carries them, and a patient asking about survival receives
+    a supportive, numberless pointer to their treating team. What-if
+    scenarios (`ConsultationSession.what_if`, chat `/whatif`) run the
+    full audited pipeline over a hypothetical copy: session memory,
+    the interview loop, the plan cache and the `_report_proposed` guard
+    are untouched (a hypothesis is not a confirmation), the dose channel
+    never opens in a scenario, and hypothetical emergency phrasing obeys
+    the screen's hypothetical suppression while stated events escalate
+    inside the scenario only.
 
 ## 3. LLM containment table
 

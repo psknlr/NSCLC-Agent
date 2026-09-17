@@ -64,6 +64,17 @@ __all__ = [
 #: Marker the offline mock keys on for the chat fact extractor.
 EXTRACTION_MARKER = "CHAT FACT EXTRACTION"
 
+#: A patient asking about survival gets a supportive, numberless pointer —
+#: the cohort table stays clinician-facing (see render/compose).
+_PROGNOSIS_ASK_RE = re.compile(
+    r"生存|预后|活多久|存活|治愈率|寿命|survival|prognosis|life expectancy",
+    re.IGNORECASE)
+
+_PATIENT_PROGNOSIS_NOTE = (
+    "关于生存与预后：统计数字来自大规模人群队列，对某一个人的参考非常有限——"
+    "分期、体能状态、分子分型和治疗反应都会显著改变个人的情况。这个话题值得"
+    "与您的主治团队当面讨论，他们了解您的完整病情。")
+
 #: Keys chat input may NEVER set, whatever the source (free text, model
 #: extraction, or the explicit facts parameter). Sign-off has its own signed
 #: pathway; guard keys belong to the machinery.
@@ -89,6 +100,11 @@ ALLOWED_FACT_KEYS = frozenset({
 _AGE_RE = re.compile(r"(\d{1,3})\s*岁|\b(?:aged?\s+)?(\d{1,3})\s*(?:years?\s+old|y/?o)\b",
                      re.IGNORECASE)
 _ECOG_RE = re.compile(r"ECOG(?:\s*PS)?\s*[:：]?\s*([0-4])\b", re.IGNORECASE)
+#: Narrated changes ("ECOG 恶化到 3") — requires a change verb right before
+#: the digit, so "从1升到3" style ambiguity abstains instead of grabbing 1.
+_ECOG_CHANGE_RE = re.compile(
+    r"ECOG(?:\s*PS)?\s*(?:恶化到|升到|降到|变为|变成|到|至|为|is now)"
+    r"\s*([0-4])\b", re.IGNORECASE)
 _PDL1_RE = re.compile(r"PD-?L1[^%\d]{0,12}(\d{1,3})\s*%", re.IGNORECASE)
 _TNM_RE = re.compile(
     r"\b([cpy]{0,2})\s*T\s*(is|1mi|1a|1b|1c|2a|2b|3|4|x)\s*"
@@ -112,7 +128,7 @@ def extract_facts_deterministic(message: str) -> dict[str, Any]:
     m = _AGE_RE.search(text)
     if m:
         facts["age"] = int(m.group(1) or m.group(2))
-    m = _ECOG_RE.search(text)
+    m = _ECOG_RE.search(text) or _ECOG_CHANGE_RE.search(text)
     if m:
         facts["ecog_ps"] = int(m.group(1))
     m = _PDL1_RE.search(text)
@@ -425,6 +441,17 @@ def compose_reply(state: CaseRunState, *, role: str,
                 f"※ 指南KG（机器抽取，未复核）：{supporting} 条相关推荐、"
                 f"{cautions} 条警示条目，详见 oncologist 视图 "
                 f"guideline_context")
+        prognosis = state.outputs.get("prognosis") or {}
+        figure = prognosis.get("five_year_os_percent_approx")
+        if figure is not None:
+            modifiers = prognosis.get("modifiers") or []
+            migration = "；分期版本迁移，跨版本队列可比性受限" \
+                if prognosis.get("edition_migration") else ""
+            parts.append(
+                f"※ 预后（人群队列，非个体预测）：{prognosis.get('stage_group')}"
+                f"期（{prognosis.get('classification_basis')}）5年总生存约 "
+                f"{figure}%（IASLC 分期项目队列）；本例方向性预后因素 "
+                f"{len(modifiers)} 项{migration}，详见 prognosis 输出")
     important = [f for f in state.flags
                  if f.startswith(("REPORT_", "IMAGING_", "STAGE_MISMATCH"))]
     for flag in important[:4]:
@@ -687,6 +714,10 @@ class ConsultationSession:
             state.warn("outgoing reply carried a dose numeric — redacted")
             reply = DOSE_RE.sub("[剂量见确定性通道]", reply)
 
+        if self.role == "patient" and message \
+                and _PROGNOSIS_ASK_RE.search(message):
+            reply = f"{reply}\n{_PATIENT_PROGNOSIS_NOTE}"
+
         result = TurnResult(
             reply=reply, state=state, view=render(state, self.role),
             plan_reused=plan_reused, polished=polished,
@@ -697,6 +728,155 @@ class ConsultationSession:
         self.turns.append(result)
         self.transcript.append(result.to_dict())
         return result
+
+    # ---------------------------------------------------------------- what-if
+    def what_if(
+        self,
+        description: str = "",
+        *,
+        facts: dict[str, Any] | None = None,
+        enable_panel: bool = False,
+    ) -> TurnResult:
+        """Counterfactual strategy exploration: "如果……会怎样".
+
+        Runs the FULL audited pipeline over a hypothetical variant of the
+        accumulated case and composes a baseline-vs-scenario comparison
+        (stage, plan, cohort prognosis). Contained by construction:
+
+        * session memory is untouched — narrative, facts, plan cache, read
+          refs and the interview loop's cross-turn memory all stay exactly
+          as they were (the scenario runs on deep copies and a throwaway
+          interview loop);
+        * a hypothesis is not a confirmation: the ``_report_proposed``
+          guard survives into the scenario even when the hypothetical
+          facts land on proposed paths;
+        * the dose channel NEVER opens in a scenario — counterfactuals
+          draft strategies, they do not dose them;
+        * hypothetical facts pass the same allowlist and engine validators
+          as every other chat input.
+        """
+        started = time.monotonic()
+        if self.last_state is None:
+            raise ValueError(
+                "no baseline yet — run at least one consultation turn "
+                "before exploring scenarios")
+        description = (description or "").strip()
+        notes: list[str] = []
+        scenario_facts = copy.deepcopy(self.facts)
+        guard = list(scenario_facts.get("_report_proposed") or [])
+
+        overrides, override_notes = sanitize_fact_payload(facts or {})
+        notes.extend(override_notes)
+        extracted, extraction_notes = self.extractor.extract(description)
+        notes.extend(extraction_notes)
+        merged = dict(extracted)
+        merged.update(overrides)  # explicit overrides beat extracted text
+        changed, conflicts = merge_facts(scenario_facts, merged,
+                                         overwrite=True)
+        notes.extend(conflicts)
+        if guard:
+            # merge_facts(overwrite=True) treats restatement as operator
+            # confirmation — but a HYPOTHESIS confirms nothing. Restore.
+            scenario_facts["_report_proposed"] = guard
+            notes = [n for n in notes
+                     if not n.startswith("PROPOSED_FACT_CONFIRMED")]
+            notes.append("WHAT_IF_GUARD_KEPT: 假设不构成确认——"
+                         "报告待确认守卫在推演中原样保留")
+        internal = {}
+        if scenario_facts.get("_report_proposed"):
+            internal["_report_proposed"] = list(
+                scenario_facts["_report_proposed"])
+
+        tnm = dict(scenario_facts.get("tnm") or {})
+        case = Case(
+            t=tnm.get("t"), n=tnm.get("n"), m=tnm.get("m"),
+            tnm_prefix=str(tnm.get("prefix") or "c"),
+            stage_group=scenario_facts.get("stage_group"),
+            staging_system=str(scenario_facts.get("staging_system")
+                               or "AJCC9"),
+            presentation="\n".join(
+                self.narrative + [f"【假设推演】{description}"
+                                  if description else "【假设推演】"]),
+            facts={k: v for k, v in scenario_facts.items()
+                   if k not in ("tnm", "stage_group", "staging_system")},
+        )
+        saved_loop = self.runner._interview_loop_override
+        self.runner._interview_loop_override = None  # throwaway loop
+        try:
+            state = self.runner.run_case(
+                case, role=self.role,
+                allow_dose_planning=False,       # never in a scenario
+                enable_panel=enable_panel,
+                internal_facts=internal or None,
+                plan_cache=None,                 # facts changed by intent
+            )
+        finally:
+            self.runner._interview_loop_override = saved_loop
+
+        reply = self._compare_reply(self.last_state, state, description,
+                                    changed)
+        if state.release_status != "emergency_action_plan" \
+                and DOSE_RE.search(reply):
+            state.warn("what-if reply carried a dose numeric — redacted")
+            reply = DOSE_RE.sub("[剂量见确定性通道]", reply)
+
+        result = TurnResult(
+            reply=reply, state=state, view=render(state, self.role),
+            plan_reused=False, polished=False,
+            extracted_facts=changed, notes=notes,
+            duration_s=time.monotonic() - started,
+            llm_calls=state.budget.used_llm_calls,
+        )
+        # The scenario is on the record but NOT in session memory: the
+        # transcript keeps it (kind-tagged), turns/facts/cache do not.
+        self.transcript.append({"kind": "what_if",
+                                "description": description,
+                                **result.to_dict()})
+        return result
+
+    @staticmethod
+    def _compare_reply(
+        baseline: CaseRunState, scenario: CaseRunState,
+        description: str, changed: list[str],
+    ) -> str:
+        """Deterministic baseline-vs-scenario comparison."""
+        def stage_of(state: CaseRunState) -> str:
+            return str((state.staging or {}).get("stage_group") or "未定分期")
+
+        def plan_line(state: CaseRunState) -> str:
+            plan = state.outputs.get("treatment_plan") or {}
+            options = [str(o.get("name")) for o in plan.get("options") or []
+                       if o.get("name")]
+            return "；".join(options[:3]) or str(
+                plan.get("summary") or "（无方案输出）")[:120]
+
+        def os5(state: CaseRunState) -> str:
+            prognosis = state.outputs.get("prognosis") or {}
+            figure = prognosis.get("five_year_os_percent_approx")
+            return f"约{figure}%" if figure is not None else "无单独队列数字"
+
+        lines = [f"【假设推演】{description or '（结构化假设）'}",
+                 f"改变的事实：{('、'.join(changed)) or '（无——与当前记录相同）'}"]
+        if scenario.release_status == "emergency_action_plan":
+            lines.append("⚠️ 该假设情形触发肿瘤急症路径——固定安全脚本："
+                         "见本次输出 emergency_plan；以下对比不适用。")
+            return "\n".join(lines)
+        def modifier_count(state: CaseRunState) -> int:
+            return len((state.outputs.get("prognosis") or {})
+                       .get("modifiers") or [])
+
+        lines += [
+            f"分期：{stage_of(baseline)} → {stage_of(scenario)}",
+            f"方案（当前）：{plan_line(baseline)}",
+            f"方案（假设）：{plan_line(scenario)}",
+            f"5年总生存队列（人群统计，非个体预测）：{os5(baseline)} → "
+            f"{os5(scenario)}",
+            f"方向性预后因素：{modifier_count(baseline)} → "
+            f"{modifier_count(scenario)} 项（详见 prognosis 输出）",
+            f"[{scenario.release_status}] 假设情形运行经过同一套完整审计；"
+            f"剂量通道在推演中始终关闭。本推演不写入会诊记录。",
+        ]
+        return "\n".join(lines)
 
     # ------------------------------------------------------------- persistence
     SESSION_FILE_VERSION = 1
