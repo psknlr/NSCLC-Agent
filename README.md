@@ -172,12 +172,41 @@ CSCO 2025、CN 中西医结合 2023**——共 2,960 条推荐，带人群判据
 的工具调用入台账）；模型在推理技能内也可自行调用 `guideline_lookup`
 （支持 query/stage/gene/topic/direction=negative/rec_id/cluster_id）。
 
+* **人群判据确定性求值（v0.2.4）**：8,727 条抽取判据中可恢复语义的七类
+  （分期/组织学/驱动基因/ECOG/PD-L1/可切除性/年龄）由
+  `kg_eligibility.py` 对病例确定性求值，每条命中带 `eligibility` 判定
+  （consistent / possible_mismatch / population_mismatch / …）。针对已
+  实测的抽取噪声（`val` 与源文 span 直接矛盾、"EGFR WT" 缩写、章节标题
+  推定的判据），三条铁律：**源文 span 优先**、**字段冲突即弃权**（不给
+  结论）、**机器推定（assumed）的判据永不产生"确信不符"**。对未复核条目，
+  判定只用于标注与排序（确信不符者沉底但不隐藏）；LAURA/PACIFIC 的人群
+  区分（EGFR 野生型限定的度伐利尤单抗巩固 vs EGFR 阳性病例 →
+  `population_mismatch`）由判据自动导出，有测试钉住。
+* **逐条临床复核，复核一条、升级一条（v0.2.4）**：`nsclc-agent kg-review`
+  ——追加式复核台账（默认 `knowledge/data/curation.jsonl`，随 git 审阅；
+  `NSCLC_KG_CURATION` 可指向机构自有台账），每条复核**内容寻址绑定**
+  （记录被复核内容的 sha256，内容一变复核即作废、要求重审——与重放日志
+  同一纪律）。`--verify` 后该条目即按 **guideline 等级（可放行）** 提供、
+  检索加权优先，且其判据获得信任：确信不符的已复核条目会从病例上下文中
+  **可见地排除**（`excluded_verified_mismatch`），命中病例的已复核警示
+  打 `KG_VERIFIED_CAUTION` 旗标（仍仅提示——拦截权只属于确定性规则）。
+  `--reject` 将错误抽取从服务中隐藏（`--show` 仍可审计），`--revoke`
+  撤销此前复核；台账只追加、后条覆盖前条，损坏即响亮失败。
+
 ```bash
 nsclc-agent kg --info                                  # 库与六部指南的出处
 nsclc-agent kg 奥希替尼 辅助治疗 --gene EGFR --stage IIB   # 过滤检索
 nsclc-agent kg --stage IIIB --direction negative       # 病例相关的负面知识
+nsclc-agent kg durvalumab --stage IIIB \
+  --facts '{"driver_mutations":{"egfr":"L858R"},"ecog_ps":1}'  # 带资格判定
 nsclc-agent kg --show REC_CN_000249                    # 单条 + 来源段落
 nsclc-agent kg --cluster RCL_5A751363A4                # 跨区域分歧对比
+
+nsclc-agent kg-review --queue --topic systemic_treatment   # 待复核队列（决策权重排序）
+nsclc-agent kg-review REC_EU_000435                        # 展示单条 + 来源段落供核对
+nsclc-agent kg-review REC_EU_000435 --verify \
+  --reviewer "张三 (胸部肿瘤内科主治医师)" --notes "对照ESMO原文核对一致"
+nsclc-agent kg-review --status                             # 复核进度统计
 ```
 
 ## 快速开始（零依赖、离线）
@@ -292,10 +321,11 @@ nsclc_agent/
   prompts/     9个协议模块(.md, sha256钉版) · cores.py 蒸馏决策核心
   state.py 证据台账/预算/状态 · journal.py 记录/重放 · runner.py · render.py
   conversation.py 多轮会诊层(白名单抽取/方案指纹复用/出口剂量扫描)
-  knowledge/guideline_kg.py 指南KG查询层(剂量深清洗/kg_llm_extracted定级)
+  knowledge/guideline_kg.py 指南KG查询层(剂量深清洗/kg_llm_extracted定级/复核台账)
+  knowledge/kg_eligibility.py 人群判据确定性求值(span优先/冲突弃权/推定不确信)
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   schemas.py · skills.py · case.py · cli.py
-tests/         347 个用例，全离线    eval/       16 例金标准 + 指标
+tests/         365 个用例，全离线    eval/       16 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -303,7 +333,7 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 347 passed，全离线
+python -m pytest -q            # 365 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方案11/11 安全16/16
 ```
@@ -312,10 +342,12 @@ python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方�
 
 模型不能主动发起轮次；急症命中后累计病史会保守地持续触发急症通道（会话内
 无降级路径，这是有意的）；PubMed/CT.gov 实连检索需操作者
-显式开网（默认离线 stub）；内置指南 KG 为**机器抽取、未经临床复核**——
-全部条目按不可放行等级入台账，逐条临床复核（升级为 guideline 等级）尚未
-开始；KG 的人群判据（`crit`）暂只用于检索排序，未用于确定性资格判定
-（抽取噪声下的硬匹配不安全）；重放日志证明"重放与记录一致"，不证明"记录未被
+显式开网（默认离线 stub）；内置指南 KG 为**机器抽取、默认未经临床复核**——
+逐条复核工作流已就绪（`kg-review`，内容寻址绑定、可撤销），但复核本身
+是人的工作，出厂台账为空、全部 2,960 条待复核；复核人身份**记录但不做
+认证**（依赖操作环境的访问控制与台账的 git 审阅）；人群判据求值只覆盖
+语义可恢复的七类（8,727 条判据中其余类型诚实弃权），且对未复核条目仅
+标注排序、不作裁决；重放日志证明"重放与记录一致"，不证明"记录未被
 篡改"（需存储层签名）；图内并发只覆盖 Treatment∥Panel 波与会诊成员（其余
 任务串行）；内置试验注册表
 与 DDI 规则包是教学语料，须经本机构药师/医师复核后使用；大规模对抗性安全

@@ -677,6 +677,8 @@ class TreatmentAgent:
             return  # unstaged runs are workup-mode; broad hits are noise
         from ..knowledge.biomarkers import driver_status
 
+        from ..state import EvidenceLevel as EL
+
         genes = sorted(
             str(g).upper()
             for g, v in (state.facts.get("driver_mutations") or {}).items()
@@ -685,6 +687,7 @@ class TreatmentAgent:
         histology = str(state.facts.get("histologic_category") or "") or None
         context: dict[str, Any] = {}
         evidence_ids: list[str] = []
+        excluded: list[str] = []
         calls = (
             ("supporting", {"stage": stage_group, "histology": histology,
                             "gene": genes[0] if genes else None,
@@ -695,36 +698,75 @@ class TreatmentAgent:
         for key, kwargs in calls:
             result = tools.call(
                 broker, "guideline_lookup",
+                case_facts=state.facts, case_stage=stage_group,
                 **{k: v for k, v in kwargs.items() if v})
             if not result.ok or result.is_stub:
                 continue
             hits = result.data.get("hits") or []
+            # Hard population exclusion is earned by human review: the KG
+            # drops clinician-verified entries whose trusted criteria
+            # confidently mismatch this case, and names them.
+            excluded.extend(
+                str(r) for r in
+                result.data.get("excluded_verified_mismatch") or [])
             if not hits:
                 continue
-            eid = state.add_evidence(
-                result.resolved_level(), "guideline_lookup",
-                result.summary, {"hits": hits},
-                source_version=result.source_version)
-            evidence_ids.append(eid)
-            context[key] = [
-                {"rec_id": h.get("rec_id"), "guideline": h.get("guideline"),
-                 "direction": h.get("direction"),
-                 "grade": (h.get("grade") or {}).get("strength_original"),
-                 "recommendation": h.get("recommendation"),
-                 "cross_region": (h.get("cross_region") or {}).get("agreement"),
-                 "evidence_id": eid}
-                for h in hits[:4]
-            ]
-        if not context:
+            # Evidence rows split by curation status: verified content is
+            # guideline-grade (releasable); machine-extracted content keeps
+            # its non-releasable grade. One result, two honest rows.
+            partitions = (
+                ("clinician_verified", EL.GUIDELINE.value,
+                 [h for h in hits
+                  if h.get("curation_status") == "clinician_verified"]),
+                ("llm_extracted", EL.KG_EXTRACTED.value,
+                 [h for h in hits
+                  if h.get("curation_status") != "clinician_verified"]),
+            )
+            entries: list[dict[str, Any]] = []
+            for label, level, part in partitions:
+                if not part:
+                    continue
+                eid = state.add_evidence(
+                    level, "guideline_lookup",
+                    f"{len(part)} {key} KG rec(s), {label}",
+                    {"hits": part}, source_version=result.source_version)
+                evidence_ids.append(eid)
+                entries += [
+                    {"rec_id": h.get("rec_id"),
+                     "guideline": h.get("guideline"),
+                     "direction": h.get("direction"),
+                     "grade": (h.get("grade") or {}).get("strength_original"),
+                     "recommendation": h.get("recommendation"),
+                     "cross_region": (h.get("cross_region") or {}).get("agreement"),
+                     "curation_status": h.get("curation_status"),
+                     "eligibility": (h.get("eligibility") or {}).get("verdict"),
+                     "evidence_id": eid}
+                    for h in part
+                ]
+                if key == "cautions" and label == "clinician_verified":
+                    # Verified negative knowledge that fits this case is
+                    # worth a visible flag. Advisory: flags never block —
+                    # veto power stays with the deterministic rule engine.
+                    for h in part:
+                        if (h.get("eligibility") or {}).get("verdict") \
+                                == "consistent":
+                            state.flag(
+                                f"KG_VERIFIED_CAUTION[{h.get('rec_id')}]: "
+                                f"{str(h.get('recommendation'))[:160]}")
+            context[key] = entries[:4]
+        if excluded:
+            context["excluded_verified_mismatch"] = sorted(set(excluded))
+        if not any(context.get(k) for k in ("supporting", "cautions")):
             return
         context["curation_status"] = "llm_extracted"
         context["note"] = ("KG 上下文为机器抽取、未经临床复核：仅供权衡，"
                            "不构成放行依据，也不触发拦截")
         state.outputs["guideline_context"] = context
         plan["guideline_refs"] = {
-            key: [h["rec_id"] for h in entries]
-            for key, entries in context.items()
-            if isinstance(entries, list)
+            key: [h["rec_id"] for h in context.get(key) or []
+                  if isinstance(h, dict)]
+            for key in ("supporting", "cautions")
+            if context.get(key)
         }
         plan.setdefault("citations", [])
         plan["citations"] = list(plan["citations"]) + evidence_ids

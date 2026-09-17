@@ -95,6 +95,13 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                           "description": "recommend/do_not_recommend/…"},
             "rec_id": {"type": "string"},
             "cluster_id": {"type": "string"},
+            "case_facts": {"type": "object",
+                           "description": "case facts to evaluate each "
+                                          "hit's population criteria "
+                                          "against (adds 'eligibility')"},
+            "case_stage": {"type": "string",
+                           "description": "computed stage group for the "
+                                          "eligibility evaluation"},
         }, []),
     ),
     ToolSpec(
@@ -313,6 +320,8 @@ class ToolRegistry:
         direction: str | None = None,
         rec_id: str | None = None,
         cluster_id: str | None = None,
+        case_facts: dict[str, Any] | None = None,
+        case_stage: str | None = None,
     ) -> ToolResult:
         from ..knowledge.guideline_kg import GuidelineKG, load_default
 
@@ -372,10 +381,27 @@ class ToolRegistry:
                           "(stage/gene/topic/…)",
                     recoverable=True,
                 )
+            excluded: list[str] = []
             hits = kg.search(
                 query or "", stage=stage, gene=gene, histology=histology,
                 line=line, topic=topic, jurisdiction=jurisdiction,
                 direction=direction,
+                case_facts=case_facts if isinstance(case_facts, dict) else None,
+                case_stage=case_stage,
+                excluded_verified_mismatch=excluded,
+            )
+            data: dict[str, Any] = {"hits": hits,
+                                    "curation_status": kg.default_status,
+                                    "note": kg.warning}
+            if excluded:
+                data["excluded_verified_mismatch"] = sorted(set(excluded))
+            return ToolResult(
+                "guideline_lookup", True,
+                f"{len(hits)} KG hit(s) — see per-hit curation_status "
+                f"(llm_extracted content is non-releasable context)",
+                data,
+                evidence_level=kg.level_for(hits),
+                source_version=kg.source,
             )
         return ToolResult(
             "guideline_lookup", True,

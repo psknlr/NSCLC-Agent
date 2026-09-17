@@ -31,14 +31,34 @@ doctrine:
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
+import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
 from ..state import EvidenceLevel
 
 _DATA_PATH = Path(__file__).parent / "data" / "guideline_kg.json.gz"
+
+#: The curation ledger: append-only JSONL, one review event per line, last
+#: entry per rec_id wins. Default lives next to the store so reviews are
+#: git-versioned alongside the content they attest to; deployments override
+#: with the environment variable.
+CURATION_ENV = "NSCLC_KG_CURATION"
+_CURATION_DEFAULT = Path(__file__).parent / "data" / "curation.jsonl"
+
+CURATION_STATUSES = ("clinician_verified", "rejected", "needs_correction",
+                     "llm_extracted")
+
+VERIFY_ATTESTATION = (
+    "本人已对照来源段落逐项核对：推荐文本、原始分级、人群判据、动作与"
+    "文献引用均与指南原文一致。/ I checked the recommendation text, "
+    "original grade, population criteria, actions and references against "
+    "the source passages."
+)
 
 _DOSE_PLACEHOLDER = "〔剂量已隐去，见确定性剂量通道〕"
 
@@ -105,6 +125,92 @@ def _stage_keys(stage_group: str | None) -> set[str]:
     return keys
 
 
+# --------------------------------------------------------------- curation
+
+def rec_content_hash(rec: dict[str, Any]) -> str:
+    """Content address of one recommendation as stored.
+
+    A review is pinned to exactly this content: rebuild the store, change
+    the entry, and every verification of it is void until re-reviewed —
+    a review never carries over to content its reviewer did not see.
+    """
+    return hashlib.sha256(
+        json.dumps(rec, sort_keys=True, ensure_ascii=False,
+                   separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def default_curation_path() -> Path:
+    override = os.environ.get(CURATION_ENV, "").strip()
+    return Path(override) if override else _CURATION_DEFAULT
+
+
+def load_curation(path: str | Path) -> dict[str, dict[str, Any]]:
+    """Read the ledger; last entry per rec_id wins (that is how a
+    verification is revoked: append a later entry). A malformed interior
+    line is corruption and raises; a torn final line (crash mid-append)
+    is tolerated."""
+    file_path = Path(path)
+    if not file_path.is_file():
+        return {}
+    entries: dict[str, dict[str, Any]] = {}
+    lines = file_path.read_text(encoding="utf-8").splitlines()
+    for line_no, line in enumerate(lines, start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            if line_no == len(lines):
+                break
+            raise ValueError(
+                f"corrupt curation ledger line {line_no}: {exc}") from exc
+        if not isinstance(payload, dict) or not payload.get("rec_id"):
+            raise ValueError(f"curation ledger line {line_no}: not a review "
+                             f"entry")
+        entries[str(payload["rec_id"])] = payload
+    return entries
+
+
+def append_curation(
+    path: str | Path,
+    *,
+    kg: "GuidelineKG",
+    rec_id: str,
+    status: str,
+    reviewer: str,
+    notes: str = "",
+) -> dict[str, Any]:
+    """Append one review event. ``status`` must be a known status,
+    ``reviewer`` must be non-empty, and the rec must exist — the entry is
+    hash-pinned to the content being reviewed."""
+    if status not in CURATION_STATUSES:
+        raise ValueError(f"unknown curation status {status!r}; "
+                         f"expected one of {CURATION_STATUSES}")
+    if not reviewer.strip():
+        raise ValueError("a review needs a named reviewer")
+    rec = kg.recs_by_id.get(str(rec_id))
+    if rec is None:
+        raise ValueError(f"no recommendation {rec_id!r} in the KG")
+    if status == "rejected" and not notes.strip():
+        raise ValueError("a rejection needs notes saying what is wrong")
+    entry: dict[str, Any] = {
+        "rec_id": str(rec_id),
+        "status": status,
+        "reviewer": reviewer.strip(),
+        "reviewed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "content_hash": rec_content_hash(rec),
+        "notes": notes.strip(),
+    }
+    if status == "clinician_verified":
+        entry["attestation"] = VERIFY_ATTESTATION
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return entry
+
+
 def _case_genes(facts: dict[str, Any]) -> set[str]:
     from .biomarkers import driver_status
 
@@ -118,7 +224,11 @@ def _case_genes(facts: dict[str, Any]) -> set[str]:
 class GuidelineKG:
     """Query layer over the shipped guideline knowledge graph."""
 
-    def __init__(self, payload: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        payload: dict[str, Any],
+        curation: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         self.meta = payload.get("meta") or {}
         self.source = str(payload.get("source") or "guideline_kg")
         self.warning = str(payload.get("warning") or "")
@@ -133,6 +243,39 @@ class GuidelineKG:
         self.recs_by_id: dict[str, dict[str, Any]] = {
             str(r.get("id")): r for r in self.recs
         }
+        self.curation: dict[str, dict[str, Any]] = dict(curation or {})
+
+    # -------------------------------------------------------------- curation
+    def curation_state(
+        self, rec: dict[str, Any]
+    ) -> tuple[str, dict[str, Any] | None, bool]:
+        """Resolve one rec's status: ``(status, entry, void)``.
+
+        ``void=True`` means a review exists but its content hash no longer
+        matches the stored rec — the content changed after review, so the
+        review does not apply and the status falls back to the default.
+        """
+        entry = self.curation.get(str(rec.get("id")))
+        if entry is None:
+            return self.default_status, None, False
+        if entry.get("content_hash") != rec_content_hash(rec):
+            return self.default_status, entry, True
+        status = str(entry.get("status") or self.default_status)
+        if status not in CURATION_STATUSES:
+            return self.default_status, entry, True
+        return status, entry, False
+
+    def curation_stats(self) -> dict[str, int]:
+        counts = {"clinician_verified": 0, "rejected": 0,
+                  "needs_correction": 0, "void": 0}
+        for rec in self.recs:
+            status, entry, void = self.curation_state(rec)
+            if void:
+                counts["void"] += 1
+            elif status in counts:
+                counts[status] += 1
+        counts["unreviewed"] = len(self.recs) - sum(counts.values())
+        return counts
 
     # ----------------------------------------------------------------- meta
     @property
@@ -149,6 +292,7 @@ class GuidelineKG:
             },
             "clusters": len(self.clusters_by_id),
             "curation_status": self.default_status,
+            "curation": self.curation_stats(),
             "warning": self.warning,
         }
 
@@ -156,7 +300,7 @@ class GuidelineKG:
     def _serve(self, rec: dict[str, Any]) -> dict[str, Any]:
         """One recommendation, provenance-complete and dose-scrubbed."""
         gv = self.gvs.get(str(rec.get("gv"))) or {}
-        status = str(rec.get("curation_status") or self.default_status)
+        status, entry, void = self.curation_state(rec)
         trials: list[str] = []
         pmids: list[str] = []
         for item in rec.get("ev") or []:
@@ -197,9 +341,24 @@ class GuidelineKG:
                 "extraction_confidence": rec.get("conf"),
             },
             "curation_status": status,
-            "note": ("机器抽取、未经临床复核 — 仅作上下文，不构成放行依据；"
-                     "可验证的支持请经 trial_lookup / citation_verify 落台账"),
+            "note": (
+                "临床医师已复核，与指南原文核对一致"
+                if status == "clinician_verified" else
+                "机器抽取、未经临床复核 — 仅作上下文，不构成放行依据；"
+                "可验证的支持请经 trial_lookup / citation_verify 落台账"),
         }
+        if entry is not None:
+            served["curation"] = {
+                "status": status,
+                "reviewer": entry.get("reviewer"),
+                "reviewed_at": entry.get("reviewed_at"),
+                "notes": entry.get("notes"),
+                "void": void,
+            }
+            if void:
+                served["curation"]["void_reason"] = (
+                    "content changed after review — the review does not "
+                    "apply; re-review required")
         if cluster is not None:
             served["cross_region"] = {
                 "cluster_id": cluster.get("id"),
@@ -234,6 +393,9 @@ class GuidelineKG:
         jurisdiction: str | None = None,
         direction: str | None = None,
         limit: int = 8,
+        case_facts: dict[str, Any] | None = None,
+        case_stage: str | None = None,
+        excluded_verified_mismatch: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Deterministic filtered search over the recommendations.
 
@@ -241,11 +403,26 @@ class GuidelineKG:
         are silent on a dimension is kept (extraction gaps must not hide
         recommendations), one that names a conflicting value is dropped.
         Results are score-ranked, ties broken by rec id for stability.
+
+        With ``case_facts`` (and optionally ``case_stage``), each hit gains
+        an ``eligibility`` block from the deterministic criteria evaluator
+        and hits are stably re-ranked by eligibility verdict — annotation
+        and ordering, never a hidden filter for machine-extracted entries:
+        a population-mismatched extraction still appears, labelled, when
+        the list is not full without it. Two exclusions are earned by
+        human review: rejected entries (a clinician said the extraction is
+        wrong; ``get()`` still shows them), and — in case-evaluated
+        queries only — clinician-verified entries whose trusted criteria
+        confidently mismatch the case, whose ids are reported through
+        ``excluded_verified_mismatch`` so the exclusion stays visible.
         """
         tokens = set(_TOKEN_RE.findall((query or "").lower()))
         stage_keys = _stage_keys(stage)
         scored: list[tuple[float, str, dict[str, Any]]] = []
         for rec in self.recs:
+            curation_status = self.curation_state(rec)[0]
+            if curation_status == "rejected":
+                continue
             rk = rec.get("rk") or {}
             if topic and rec.get("topic") != topic:
                 continue
@@ -269,7 +446,12 @@ class GuidelineKG:
                 if rec_stages and not (rec_stages & stage_keys):
                     continue
             if histology:
-                rec_hist = {str(h) for h in rk.get("histologies") or []}
+                # 'nsclc'/'all' are wildcard keys (the rec covers every
+                # NSCLC histology), not histologies to containment-match —
+                # treating them literally silently dropped pan-NSCLC recs
+                # from every histology-filtered search.
+                rec_hist = {str(h) for h in rk.get("histologies") or []} \
+                    - {"nsclc", "nsclc_nos", "all", "any"}
                 if rec_hist and not any(
                         histology.lower() in h.lower() or h.lower() in histology.lower()
                         for h in rec_hist):
@@ -294,10 +476,39 @@ class GuidelineKG:
                 score += 0.25
             if rec.get("gsrc") == "explicit":
                 score += 0.1
+            if curation_status == "clinician_verified":
+                # Reviewed knowledge outranks unreviewed extraction: what a
+                # clinician has checked is served first — which is also what
+                # lets a verified caution reach the case-context window.
+                score += 1.5
             scored.append((-score, str(rec.get("id")), rec))
         scored.sort()
-        return [self._serve(rec)
-                for _, _, rec in scored[:max(1, min(limit, 25))]]
+        limit = max(1, min(limit, 25))
+        if case_facts is None:
+            return [self._serve(rec) for _, _, rec in scored[:limit]]
+
+        from .kg_eligibility import evaluate_rec
+
+        window = [rec for _, _, rec in scored[:limit * 3]]
+        annotated = []
+        for rec in window:
+            served = self._serve(rec)
+            # Criterion source spans are raw guideline text — the same
+            # dose-boundary as every other served string applies.
+            served["eligibility"] = _scrub_deep(
+                evaluate_rec(rec, case_facts, case_stage))
+            annotated.append(served)
+        # Verified-mismatch exclusion happens BEFORE the cut, or a dropped
+        # entry that ranked below the cut would vanish without a trace.
+        annotated, dropped = self.drop_verified_mismatches(annotated)
+        if excluded_verified_mismatch is not None:
+            excluded_verified_mismatch.extend(dropped)
+        rank = {"consistent": 0, "insufficient_case_data": 1,
+                "not_evaluated": 1, "possible_mismatch": 2,
+                "population_mismatch": 3}
+        annotated.sort(key=lambda h: rank.get(
+            h["eligibility"]["verdict"], 1))  # stable: score order kept
+        return annotated[:limit]
 
     # -------------------------------------------------------------- get/show
     def get(self, rec_id: str) -> dict[str, Any] | None:
@@ -336,6 +547,29 @@ class GuidelineKG:
         })
 
     # -------------------------------------------------------------- for_case
+    @staticmethod
+    def drop_verified_mismatches(
+        hits: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Hard population exclusion — reserved for verified entries.
+
+        An ``llm_extracted`` mismatch is annotation and ranking only (the
+        criteria might be mis-extracted). Once a clinician has verified an
+        entry, its criteria are trusted, and serving it as case context
+        despite a confident population mismatch would be wrong — those are
+        dropped, and their ids returned so the exclusion stays visible.
+        """
+        kept: list[dict[str, Any]] = []
+        dropped: list[str] = []
+        for hit in hits:
+            verdict = (hit.get("eligibility") or {}).get("verdict")
+            if (hit.get("curation_status") == "clinician_verified"
+                    and verdict == "population_mismatch"):
+                dropped.append(str(hit.get("rec_id")))
+            else:
+                kept.append(hit)
+        return kept, dropped
+
     def for_case(
         self,
         facts: dict[str, Any],
@@ -345,14 +579,18 @@ class GuidelineKG:
     ) -> dict[str, Any]:
         """Case-matched context: supporting recommendations + cautions.
 
-        Purely deterministic (retrieval-key matching, stable ranking); used
-        by the rule-mode TreatmentAgent to attach guideline context — and
-        the case-relevant negative knowledge — to a drafted plan.
+        Purely deterministic (retrieval-key matching, criteria-evaluated
+        eligibility ranking, stable ordering); used by the TreatmentAgent
+        to attach guideline context — and the case-relevant negative
+        knowledge — to a drafted plan.
         """
         genes = _case_genes(facts)
         histology = str(facts.get("histologic_category") or "") or None
+        excluded: list[str] = []
         common = dict(stage=stage_group, histology=histology,
-                      topic="systemic_treatment")
+                      topic="systemic_treatment",
+                      case_facts=facts, case_stage=stage_group,
+                      excluded_verified_mismatch=excluded)
         supporting: list[dict[str, Any]] = []
         seen: set[str] = set()
         for g in sorted(genes) or [None]:  # type: ignore[list-item]
@@ -364,16 +602,20 @@ class GuidelineKG:
         cautions: list[dict[str, Any]] = []
         for dir_ in sorted(NEGATIVE_DIRECTIONS):
             for hit in self.search(stage=stage_group, histology=histology,
-                                   direction=dir_, limit=3):
+                                   direction=dir_, limit=3,
+                                   case_facts=facts, case_stage=stage_group,
+                                   excluded_verified_mismatch=excluded):
                 if hit["rec_id"] not in seen:
                     seen.add(hit["rec_id"])
                     cautions.append(hit)
         return {
             "supporting": supporting,
             "cautions": cautions[:limit],
+            "excluded_verified_mismatch": sorted(set(excluded)),
             "curation_status": self.default_status,
-            "note": ("KG 上下文为机器抽取、未经复核：不构成放行依据，"
-                     "cautions 仅提示人工权衡，不触发拦截"),
+            "note": ("KG 上下文为机器抽取、未经复核（逐条复核后升级）：不构成"
+                     "放行依据，cautions 仅提示人工权衡，不触发拦截；"
+                     "eligibility 为确定性判据标注"),
         }
 
 
@@ -383,7 +625,13 @@ _DEFAULT_TRIED = False
 
 def load_default() -> GuidelineKG | None:
     """Lazy singleton over the shipped store; None when the data file is
-    absent (the tool then stubs exactly as before the KG existed)."""
+    absent (the tool then stubs exactly as before the KG existed).
+
+    The curation ledger rides along. A corrupt ledger RAISES instead of
+    being silently ignored: dropping it would resurface human-rejected
+    entries and drop verifications without anyone noticing — a curation
+    fault must be fixed, not worked around.
+    """
     global _DEFAULT, _DEFAULT_TRIED
     if _DEFAULT_TRIED:
         return _DEFAULT
@@ -392,7 +640,18 @@ def load_default() -> GuidelineKG | None:
         return None
     try:
         with gzip.open(_DATA_PATH, "rt", encoding="utf-8") as fh:
-            _DEFAULT = GuidelineKG(json.load(fh))
+            payload = json.load(fh)
     except (OSError, json.JSONDecodeError, EOFError):
         _DEFAULT = None
+        return None
+    curation = load_curation(default_curation_path())
+    _DEFAULT = GuidelineKG(payload, curation=curation)
     return _DEFAULT
+
+
+def reload_default() -> GuidelineKG | None:
+    """Drop the singleton and load fresh — after a review is appended."""
+    global _DEFAULT, _DEFAULT_TRIED
+    _DEFAULT = None
+    _DEFAULT_TRIED = False
+    return load_default()

@@ -153,6 +153,27 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     `contraindicated`) is surfaced as case-matched cautions for humans to
     weigh; blocking power remains exclusively with the deterministic rule
     engine.
+16. **Criteria evaluate; humans adjudicate; hard use is earned by review.**
+    The KG's extracted population criteria are deterministically evaluated
+    against the case (`kg_eligibility`) under three noise rules derived
+    from observed extraction faults: the source span outranks the
+    normalized value, a conflict between them abstains rather than
+    guesses, and an assumed/negated/flipped criterion can never produce
+    the confident mismatch that selection acts on. For `llm_extracted`
+    entries the verdicts are annotation and ranking only — a confidently
+    mismatched extraction is de-ranked but stays visible, labelled. The
+    per-entry curation workflow (`kg-review`) is what unlocks hard use:
+    reviews live in an append-only ledger, content-hash-pinned to exactly
+    the entry reviewed (content change voids the review — the journal
+    discipline applied to knowledge), reversible by appending, loud on
+    corruption. A `clinician_verified` entry is served at guideline grade
+    (releasable), outranks unreviewed extraction, and its now-trusted
+    criteria gain two — and only two — hard effects: a confident
+    population mismatch excludes it from case context *visibly*
+    (`excluded_verified_mismatch`), and a case-matching verified caution
+    raises a `KG_VERIFIED_CAUTION` flag. Both are advisory surfaces;
+    blocking power still belongs exclusively to the rule engine, and the
+    dose scrub applies to verified content unchanged.
 
 ## 3. LLM containment table
 

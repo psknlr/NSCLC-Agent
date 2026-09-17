@@ -423,12 +423,122 @@ def cmd_kg(args) -> int:
                   "(--stage/--gene/--topic/…), or --info",
                   file=sys.stderr)
             return 2
+        case_facts = None
+        if args.facts:
+            case_facts = json.loads(args.facts)
+        elif args.facts_file:
+            case_facts = json.loads(
+                Path(args.facts_file).read_text(encoding="utf-8"))
         payload = kg.search(
             args.query or "", stage=args.stage, gene=args.gene,
             histology=args.histology, line=args.line, topic=args.topic,
             jurisdiction=args.jurisdiction, direction=args.direction,
-            limit=args.limit)
+            limit=args.limit, case_facts=case_facts,
+            case_stage=args.case_stage or args.stage)
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def cmd_kg_review(args) -> int:
+    """The per-entry curation workflow: review one, upgrade one.
+
+    A verification is appended to the curation ledger, pinned to the
+    content hash of exactly the entry reviewed; the entry is then served
+    at guideline grade until its content changes or the verification is
+    revoked. Rejection hides the entry from serving; both are reversible
+    by appending a later event — the ledger itself is never rewritten.
+    """
+    from .knowledge.guideline_kg import (
+        NEGATIVE_DIRECTIONS, append_curation, default_curation_path,
+        load_default, reload_default,
+    )
+
+    kg = load_default()
+    if kg is None or not kg.available:
+        print("guideline KG store not available", file=sys.stderr)
+        return 2
+    ledger = Path(args.curation_file) if args.curation_file \
+        else default_curation_path()
+
+    if args.status:
+        print(json.dumps({"ledger": str(ledger),
+                          "curation": kg.curation_stats()},
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    if args.queue:
+        # Unreviewed entries, highest decision weight first: explicit
+        # grades, preferred options, and negative knowledge (a verified
+        # caution earns a visible flag) are worth a clinician's time first.
+        rows = []
+        for rec in kg.recs:
+            status, entry, void = kg.curation_state(rec)
+            if entry is not None and not void:
+                continue
+            if args.topic and rec.get("topic") != args.topic:
+                continue
+            if args.stage and args.stage not in json.dumps(
+                    (rec.get("rk") or {}).get("stage_groups") or []):
+                continue
+            weight = ((rec.get("prio") == "preferred") * 2
+                      + (rec.get("gsrc") == "explicit")
+                      + (rec.get("dir") in NEGATIVE_DIRECTIONS) * 2
+                      + void)  # a voided review needs re-review first
+            rows.append((-weight, str(rec.get("id")), rec, void))
+        rows.sort()
+        for _, rec_id, rec, void in rows[:args.limit]:
+            gv = kg.gvs.get(str(rec.get("gv"))) or {}
+            marker = " [REVIEW VOID — content changed]" if void else ""
+            print(f"{rec_id}  {gv.get('label', '?'):28s} "
+                  f"{str(rec.get('dir')):18s} {str(rec.get('so'))[:14]:14s} "
+                  f"{str(rec.get('norm'))[:70]}{marker}")
+        print(f"\n({len(rows)} unreviewed; showing {min(args.limit, len(rows))}. "
+              f"Review one: nsclc-agent kg-review REC_ID, then --verify / "
+              f"--reject / --needs-correction with --reviewer)",
+              file=sys.stderr)
+        return 0
+
+    if not args.rec_id:
+        print("pass a REC_ID, --queue, or --status", file=sys.stderr)
+        return 2
+
+    action = next((a for a in ("verify", "reject", "needs_correction",
+                               "revoke")
+                   if getattr(args, a.replace("-", "_"))), None)
+    if action is None:
+        served = kg.get(args.rec_id)
+        if served is None:
+            print(f"no recommendation {args.rec_id!r}", file=sys.stderr)
+            return 1
+        print(json.dumps(served, ensure_ascii=False, indent=2, default=str))
+        print("\n复核请对照 source_passages 核对推荐文本/原始分级/人群判据/"
+              "动作/引用，然后：\n  --verify --reviewer '姓名 (执业信息)'   "
+              "确认一致，升级 guideline 级\n  --reject --reviewer ... --notes "
+              "'错在哪' 抽取错误，从服务中隐藏\n  --needs-correction / --revoke"
+              "  标记待修正 / 撤销此前复核", file=sys.stderr)
+        return 0
+
+    status = {"verify": "clinician_verified", "reject": "rejected",
+              "needs_correction": "needs_correction",
+              "revoke": "llm_extracted"}[action]
+    try:
+        entry = append_curation(
+            ledger, kg=kg, rec_id=args.rec_id, status=status,
+            reviewer=args.reviewer or "", notes=args.notes or "")
+    except ValueError as exc:
+        print(f"review not recorded: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(entry, ensure_ascii=False, indent=2))
+    if ledger == default_curation_path():
+        refreshed = reload_default()
+        served = refreshed.get(args.rec_id) if refreshed else None
+        grade = ("guideline_or_label (releasable)"
+                 if served and served["curation_status"] == "clinician_verified"
+                 else served["curation_status"] if served else "?")
+        print(f"→ 生效：{args.rec_id} 现按 {grade} 提供", file=sys.stderr)
+    else:
+        print(f"→ 已写入自定义台账 {ledger}；设置 NSCLC_KG_CURATION="
+              f"{ledger} 后生效", file=sys.stderr)
     return 0
 
 
@@ -662,7 +772,40 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--info", action="store_true",
                    help="store provenance and counts")
     p.add_argument("--limit", type=int, default=8)
+    p.add_argument("--facts", help="case facts JSON — adds a deterministic "
+                                   "'eligibility' evaluation to each hit")
+    p.add_argument("--facts-file", dest="facts_file")
+    p.add_argument("--case-stage", dest="case_stage",
+                   help="computed stage group for eligibility "
+                        "(defaults to --stage)")
     p.set_defaults(func=cmd_kg)
+
+    p = sub.add_parser(
+        "kg-review",
+        help="Clinical curation: review one KG entry, upgrade one "
+             "(append-only, content-hash-pinned ledger)")
+    p.add_argument("rec_id", nargs="?", help="recommendation to review")
+    p.add_argument("--queue", action="store_true",
+                   help="list unreviewed entries, decision-weight first")
+    p.add_argument("--status", action="store_true",
+                   help="curation ledger counts")
+    p.add_argument("--verify", action="store_true",
+                   help="attest the entry matches its source → served at "
+                        "guideline grade (releasable)")
+    p.add_argument("--reject", action="store_true",
+                   help="extraction is wrong → hidden from serving "
+                        "(--notes required)")
+    p.add_argument("--needs-correction", dest="needs_correction",
+                   action="store_true")
+    p.add_argument("--revoke", action="store_true",
+                   help="withdraw an earlier review → back to llm_extracted")
+    p.add_argument("--reviewer", help="name + licensure, recorded verbatim")
+    p.add_argument("--notes")
+    p.add_argument("--topic"); p.add_argument("--stage")
+    p.add_argument("--limit", type=int, default=15)
+    p.add_argument("--curation-file", dest="curation_file",
+                   help="write to this ledger instead of the default")
+    p.set_defaults(func=cmd_kg_review)
 
     p = sub.add_parser("selftest", help="Validate the staging engine")
     p.set_defaults(func=cmd_selftest)
