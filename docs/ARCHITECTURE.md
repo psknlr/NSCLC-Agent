@@ -132,6 +132,27 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     the plan cache with its evidence rows, the interview transcript and
     stall history) and **never authorization**; every resumed turn still
     passes the same broker, gates and terminal critic live.
+15. **The guideline KG informs; it never authorizes, doses, or vetoes.**
+    The shipped computable-guideline store (6 guidelines, 2,960
+    machine-extracted recommendations, 147 cross-region agreement
+    clusters) is served through `guideline_lookup` under three rules.
+    Its curation status IS its evidence grade: `llm_extracted` content
+    lands as `kg_llm_extracted`, a NON-RELEASABLE level — the KG points at
+    trial IDs and PMIDs whose verification (`trial_lookup` /
+    `citation_verify`) is what produces releasable support, and a
+    clinician-verified entry upgrades to GUIDELINE automatically. Every
+    served payload is deep-scrubbed with the rule engine's own `DOSE_RE`
+    (field-by-field scrubbing leaked through the retrieval keys once; the
+    boundary test now sweeps every served string of every entry). And the
+    quoted prose lives in `outputs["guideline_context"]`, never inside the
+    plan: the rule engine scans the plan as the system's own words, so a
+    quoted "durvalumab … after concurrent CRT" cannot false-trip
+    NO_CONCURRENT_DURVALUMAB — while everything inside the plan stays
+    scanned, so a model cannot smuggle prose past the critic under the
+    same key. Negative knowledge (`do_not_recommend`/`avoid`/
+    `contraindicated`) is surfaced as case-matched cautions for humans to
+    weigh; blocking power remains exclusively with the deterministic rule
+    engine.
 
 ## 3. LLM containment table
 

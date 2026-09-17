@@ -156,7 +156,26 @@ def test_protocol_lookup_sections(registry, skills):
     assert "durvalumab" in blob.lower()
 
 
-def test_guideline_lookup_stub_is_honest(registry, skills):
+def test_guideline_lookup_serves_kg_as_non_releasable(registry, skills):
+    """The shipped KG answers — graded kg_llm_extracted, never releasable."""
+    from nsclc_agent.state import NON_RELEASABLE_LEVELS
+
+    broker = _broker(skills_reg=skills)
+    result = registry.call(broker, "guideline_lookup", query="stage III NSCLC")
+    assert result.ok and not result.is_stub
+    assert result.data["hits"]
+    assert result.resolved_level() == EvidenceLevel.KG_EXTRACTED.value
+    assert result.resolved_level() in NON_RELEASABLE_LEVELS
+    for hit in result.data["hits"]:
+        assert hit["curation_status"] == "llm_extracted"
+
+
+def test_guideline_lookup_stub_is_honest_without_store(
+        registry, skills, monkeypatch):
+    """With no store at all, the old honest-stub contract still holds."""
+    import nsclc_agent.knowledge.guideline_kg as kg_mod
+
+    monkeypatch.setattr(kg_mod, "load_default", lambda: None)
     broker = _broker(skills_reg=skills)
     result = registry.call(broker, "guideline_lookup", query="stage III NSCLC")
     assert result.is_stub

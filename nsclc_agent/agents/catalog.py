@@ -557,6 +557,7 @@ class TreatmentAgent:
 
             plan = copy.deepcopy(cache["plan"])
             plan["reused_from_previous_turn"] = True
+            plan.pop("guideline_refs", None)  # re-attached fresh below
             # The cached citations point at the PREVIOUS run's ledger. The
             # cache carries the evidence rows themselves — re-add them to
             # THIS run's ledger with their original tool-declared grades and
@@ -565,6 +566,11 @@ class TreatmentAgent:
             id_map: dict[str, str] = {}
             for row in cache.get("evidence") or []:
                 if not isinstance(row, dict):
+                    continue
+                if row.get("source") == "guideline_lookup":
+                    # KG context rows are not carried over: the context is
+                    # re-attached fresh below, and carrying them too would
+                    # grow the citation list by two rows every reused turn.
                     continue
                 payload = dict(row.get("payload") or {})
                 new_id = state.add_evidence(
@@ -586,6 +592,7 @@ class TreatmentAgent:
                 plan["citations"] = self._anchor_regimens(
                     state, tools, broker, plan)
             state.outputs["treatment_plan"] = plan
+            self._attach_kg_context(state, tools, broker, plan, stage_group)
             self._claim_options(state)
             state.trace(
                 "TreatmentAgent", "plan_reused",
@@ -628,12 +635,105 @@ class TreatmentAgent:
             plan["citations"] = self._anchor_regimens(state, tools, broker, plan)
             state.outputs["treatment_plan"] = plan
 
+        # Whatever produced the plan — tool loop, rule fallback, or a reused
+        # cache — the case-matched KG context is attached the same way.
+        self._attach_kg_context(state, tools, broker,
+                                state.outputs["treatment_plan"], stage_group)
         self._claim_options(state)
         state.trace(
             "TreatmentAgent", "plan",
             output_summary=f"{len(state.outputs['treatment_plan'].get('options') or [])} "
                            f"option(s), origin="
                            f"{state.outputs['treatment_plan'].get('origin')}",
+        )
+
+    @staticmethod
+    def _attach_kg_context(
+        state: CaseRunState, tools: Any, broker: Any,
+        plan: dict[str, Any], stage_group: str,
+    ) -> None:
+        """Attach guideline-KG context to a rule-mode plan, contained.
+
+        Two brokered ``guideline_lookup`` calls (supporting + negative
+        knowledge) land in the ledger at their tool-declared grade —
+        ``kg_llm_extracted``, NON-RELEASABLE — so the context can inform the
+        reply and the tumor board without ever becoming release support.
+        Cautions are advisory by design: an unverified extraction must not
+        acquire veto power, so nothing here flags or blocks. Runs on every
+        plan path — tool loop, rule fallback, reused cache — so the
+        oncologist view always carries the same case-matched context; the
+        model additionally holds the same tool for its own queries.
+
+        The quoted prose lives in ``state.outputs["guideline_context"]``,
+        NOT inside the plan: the rule engine scans the plan as the system's
+        own words, and a quoted ESMO sentence like "durvalumab … after
+        concurrent CRT" must not read as the plan proposing concurrent
+        durvalumab (confirmed false-block in testing). The plan carries only
+        rec ids and ledger citations — and because everything inside the
+        plan stays scanned, a model cannot smuggle prose past the critic by
+        inventing a key of the same name.
+        """
+        if not stage_group:
+            return  # unstaged runs are workup-mode; broad hits are noise
+        from ..knowledge.biomarkers import driver_status
+
+        genes = sorted(
+            str(g).upper()
+            for g, v in (state.facts.get("driver_mutations") or {}).items()
+            if driver_status(str(v)) == "positive"
+        )
+        histology = str(state.facts.get("histologic_category") or "") or None
+        context: dict[str, Any] = {}
+        evidence_ids: list[str] = []
+        calls = (
+            ("supporting", {"stage": stage_group, "histology": histology,
+                            "gene": genes[0] if genes else None,
+                            "topic": "systemic_treatment"}),
+            ("cautions", {"stage": stage_group, "histology": histology,
+                          "direction": "negative"}),
+        )
+        for key, kwargs in calls:
+            result = tools.call(
+                broker, "guideline_lookup",
+                **{k: v for k, v in kwargs.items() if v})
+            if not result.ok or result.is_stub:
+                continue
+            hits = result.data.get("hits") or []
+            if not hits:
+                continue
+            eid = state.add_evidence(
+                result.resolved_level(), "guideline_lookup",
+                result.summary, {"hits": hits},
+                source_version=result.source_version)
+            evidence_ids.append(eid)
+            context[key] = [
+                {"rec_id": h.get("rec_id"), "guideline": h.get("guideline"),
+                 "direction": h.get("direction"),
+                 "grade": (h.get("grade") or {}).get("strength_original"),
+                 "recommendation": h.get("recommendation"),
+                 "cross_region": (h.get("cross_region") or {}).get("agreement"),
+                 "evidence_id": eid}
+                for h in hits[:4]
+            ]
+        if not context:
+            return
+        context["curation_status"] = "llm_extracted"
+        context["note"] = ("KG 上下文为机器抽取、未经临床复核：仅供权衡，"
+                           "不构成放行依据，也不触发拦截")
+        state.outputs["guideline_context"] = context
+        plan["guideline_refs"] = {
+            key: [h["rec_id"] for h in entries]
+            for key, entries in context.items()
+            if isinstance(entries, list)
+        }
+        plan.setdefault("citations", [])
+        plan["citations"] = list(plan["citations"]) + evidence_ids
+        state.trace(
+            "TreatmentAgent", "kg_context",
+            output_summary=f"{len(context.get('supporting') or [])} supporting"
+                           f" + {len(context.get('cautions') or [])} caution "
+                           f"KG rec(s) attached (kg_llm_extracted)",
+            evidence_ids=evidence_ids,
         )
 
     @staticmethod

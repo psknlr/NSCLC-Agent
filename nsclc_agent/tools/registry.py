@@ -73,10 +73,29 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ),
     ToolSpec(
         "guideline_lookup",
-        "Look up licensed guideline/pharmacopoeia content when a knowledge "
-        "store is configured. Without one, returns an honestly-graded stub "
-        "that cannot support a released claim.",
-        _obj({"query": {"type": "string"}}, ["query"]),
+        "Search the computable-guideline knowledge graph (NCCN 5.2026, "
+        "ESMO 2023/2025, CSCO 2025, CN TCM 2023 — 2,960 machine-extracted, "
+        "clinically UNVERIFIED recommendations). Results are dose-scrubbed, "
+        "carry original grades, provenance and cross-region agreement, and "
+        "are graded kg_llm_extracted — NON-RELEASABLE context. To support a "
+        "released claim, verify each hit's verifiable_refs via trial_lookup "
+        "/ citation_verify. rec_id shows one entry with source passages; "
+        "cluster_id shows a cross-region comparison.",
+        _obj({
+            "query": {"type": "string", "description": "keywords (EN/中文)"},
+            "stage": {"type": "string", "description": "stage group, e.g. IIIB"},
+            "gene": {"type": "string", "description": "driver gene, e.g. EGFR"},
+            "histology": {"type": "string"},
+            "line": {"type": "string", "description": "first_line/adjuvant/…"},
+            "topic": {"type": "string",
+                      "description": "systemic_treatment/radiotherapy/"
+                                     "molecular_testing/surgery/staging/…"},
+            "jurisdiction": {"type": "string", "description": "CN|US|EU"},
+            "direction": {"type": "string",
+                          "description": "recommend/do_not_recommend/…"},
+            "rec_id": {"type": "string"},
+            "cluster_id": {"type": "string"},
+        }, []),
     ),
     ToolSpec(
         "pubmed_search",
@@ -282,19 +301,90 @@ class ToolRegistry:
             {"module": module_key, "sections": sections},
         )
 
-    def guideline_lookup(self, query: str) -> ToolResult:
-        if self.knowledge_store is not None:
-            hits = self.knowledge_store.search(query)
+    def guideline_lookup(
+        self,
+        query: str = "",
+        stage: str | None = None,
+        gene: str | None = None,
+        histology: str | None = None,
+        line: str | None = None,
+        topic: str | None = None,
+        jurisdiction: str | None = None,
+        direction: str | None = None,
+        rec_id: str | None = None,
+        cluster_id: str | None = None,
+    ) -> ToolResult:
+        from ..knowledge.guideline_kg import GuidelineKG, load_default
+
+        store = self.knowledge_store
+        if store is not None and not isinstance(store, GuidelineKG):
+            # An injected licensed store keeps its original contract: the
+            # operator vouches for it, so hits are guideline-grade.
+            hits = store.search(query)
             return ToolResult(
                 "guideline_lookup", True, f"{len(hits)} guideline hit(s)",
                 {"hits": hits},
                 evidence_level=EvidenceLevel.GUIDELINE.value,
             )
+        kg = store or load_default()
+        if kg is None or not kg.available:
+            return ToolResult(
+                "guideline_lookup", True,
+                "no guideline knowledge store available — placeholder returned",
+                {"hits": [], "note": "ship or configure a knowledge store "
+                                     "for guideline evidence"},
+                is_stub=True,
+            )
+        if rec_id:
+            rec = kg.get(rec_id)
+            if rec is None:
+                return ToolResult(
+                    "guideline_lookup", False, f"unknown rec_id {rec_id!r}",
+                    error=f"no recommendation {rec_id!r} in the KG",
+                    recoverable=True,
+                )
+            hits = [rec]
+        elif cluster_id:
+            cluster = kg.cluster(cluster_id)
+            if cluster is None:
+                return ToolResult(
+                    "guideline_lookup", False,
+                    f"unknown cluster_id {cluster_id!r}",
+                    error=f"no cluster {cluster_id!r} in the KG",
+                    recoverable=True,
+                )
+            return ToolResult(
+                "guideline_lookup", True,
+                f"cross-region cluster {cluster_id}: "
+                f"{cluster.get('agreement')} across "
+                f"{len(cluster.get('members') or [])} recommendation(s) — "
+                f"machine comparison, unverified",
+                {"cluster": cluster},
+                evidence_level=kg.level_for(cluster.get("members") or []),
+                source_version=kg.source,
+            )
+        else:
+            if not any((query, stage, gene, histology, line, topic,
+                        jurisdiction, direction)):
+                return ToolResult(
+                    "guideline_lookup", False, "empty guideline query",
+                    error="pass a query or at least one filter "
+                          "(stage/gene/topic/…)",
+                    recoverable=True,
+                )
+            hits = kg.search(
+                query or "", stage=stage, gene=gene, histology=histology,
+                line=line, topic=topic, jurisdiction=jurisdiction,
+                direction=direction,
+            )
         return ToolResult(
             "guideline_lookup", True,
-            "no licensed knowledge store configured — placeholder returned",
-            {"hits": [], "note": "configure a knowledge store for guideline-grade evidence"},
-            is_stub=True,
+            f"{len(hits)} KG hit(s) — machine-extracted, clinically "
+            f"unverified (non-releasable context)",
+            {"hits": hits, "curation_status": kg.default_status,
+             "note": kg.warning},
+            evidence_level=kg.level_for(hits),
+            source_version=kg.source,
         )
 
     # --------------------------------------------------------------- retrieval

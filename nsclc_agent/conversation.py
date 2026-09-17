@@ -414,6 +414,17 @@ def compose_reply(state: CaseRunState, *, role: str,
     workup = state.outputs.get("workup_plan") or {}
     for step in (workup.get("steps") or [])[:4]:
         parts.append(f"→ 待完善：{step.get('gap')}（{step.get('test')}）")
+    if role != "patient":
+        # Counts only — the quoted KG prose stays in the oncologist view
+        # with its curation status; the reply never rephrases it.
+        kg_context = state.outputs.get("guideline_context") or {}
+        supporting = len(kg_context.get("supporting") or [])
+        cautions = len(kg_context.get("cautions") or [])
+        if supporting or cautions:
+            parts.append(
+                f"※ 指南KG（机器抽取，未复核）：{supporting} 条相关推荐、"
+                f"{cautions} 条警示条目，详见 oncologist 视图 "
+                f"guideline_context")
     important = [f for f in state.flags
                  if f.startswith(("REPORT_", "IMAGING_", "STAGE_MISMATCH"))]
     for flag in important[:4]:

@@ -141,6 +141,45 @@ nsclc-agent chat --session 会诊.json \
   -m "为什么选这个方案？"                     # 另一进程续聊：复用方案，明显更快
 ```
 
+### 指南知识图谱（v0.2.3，内置计算化指南 KG）
+
+内置六部指南的计算化知识图谱（`nsclc_agent/knowledge/data/guideline_kg.json.gz`，
+~880KB）：**NCCN 5.2026、ESMO 2025 早期/局部晚期、ESMO 2023 驱动基因阳性/阴性、
+CSCO 2025、CN 中西医结合 2023**——共 2,960 条推荐，带人群判据、动作、原始
+分级（I级推荐/Category 2A/ESMO A…）、来源页码/段落，以及 147 个跨区域
+（CN/US/EU）一致性聚类（full/partial/disagreement）。
+
+接入方式延续本框架的证据纪律，三条硬规则：
+
+* **抽取状态即证据等级**：图谱全部条目为 `curation_status = llm_extracted`
+  （机器抽取、未经临床复核），入台账即定级 `kg_llm_extracted` ——
+  **不可放行等级**。KG 只提供上下文与线索；每条命中带 `verifiable_refs`
+  （试验号/PMID），经 `trial_lookup`/`citation_verify` 核验后才产生可放行
+  证据。未来某条目被临床医师复核（`clinician_verified`）即自动升级
+  guideline 等级。
+* **剂量不出库**：88 条推荐原文携带剂量数值；所有出参（含检索键、来源段落、
+  聚类摘要）经与规则引擎同一 `DOSE_RE` 的**深度递归清洗**——有全量测试
+  逐条钉住。剂量仍只存在于确定性剂量通道。
+* **负面知识提示、不拦截**：`do_not_recommend`/`avoid`/`contraindicated`
+  条目按病例匹配为 cautions 提示人工权衡；拦截权仍只属于 12 条确定性安全
+  规则——未复核的抽取不获得否决权。引用的指南原文放在
+  `outputs["guideline_context"]`（oncologist 视图），**不进入方案自述**：
+  规则引擎扫描的是系统自己的话，一句被引用的 "durvalumab … after
+  concurrent CRT" 不会被误判为方案提议同步用药（集成时实测过的误拦截，
+  已钉回归测试）。
+
+每次运行自动挂载病例匹配的 KG 上下文（支持 + 警示，各 ≤4 条，经 broker
+的工具调用入台账）；模型在推理技能内也可自行调用 `guideline_lookup`
+（支持 query/stage/gene/topic/direction=negative/rec_id/cluster_id）。
+
+```bash
+nsclc-agent kg --info                                  # 库与六部指南的出处
+nsclc-agent kg 奥希替尼 辅助治疗 --gene EGFR --stage IIB   # 过滤检索
+nsclc-agent kg --stage IIIB --direction negative       # 病例相关的负面知识
+nsclc-agent kg --show REC_CN_000249                    # 单条 + 来源段落
+nsclc-agent kg --cluster RCL_5A751363A4                # 跨区域分歧对比
+```
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -253,8 +292,10 @@ nsclc_agent/
   prompts/     9个协议模块(.md, sha256钉版) · cores.py 蒸馏决策核心
   state.py 证据台账/预算/状态 · journal.py 记录/重放 · runner.py · render.py
   conversation.py 多轮会诊层(白名单抽取/方案指纹复用/出口剂量扫描)
+  knowledge/guideline_kg.py 指南KG查询层(剂量深清洗/kg_llm_extracted定级)
+  knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   schemas.py · skills.py · case.py · cli.py
-tests/         330 个用例，全离线    eval/       16 例金标准 + 指标
+tests/         347 个用例，全离线    eval/       16 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -262,7 +303,7 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 330 passed，全离线
+python -m pytest -q            # 347 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方案11/11 安全16/16
 ```
@@ -271,8 +312,10 @@ python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方�
 
 模型不能主动发起轮次；急症命中后累计病史会保守地持续触发急症通道（会话内
 无降级路径，这是有意的）；PubMed/CT.gov 实连检索需操作者
-显式开网（默认离线 stub）；授权指南知识库只有接口（`guideline_lookup` 无
-store 时诚实返回 stub）；重放日志证明"重放与记录一致"，不证明"记录未被
+显式开网（默认离线 stub）；内置指南 KG 为**机器抽取、未经临床复核**——
+全部条目按不可放行等级入台账，逐条临床复核（升级为 guideline 等级）尚未
+开始；KG 的人群判据（`crit`）暂只用于检索排序，未用于确定性资格判定
+（抽取噪声下的硬匹配不安全）；重放日志证明"重放与记录一致"，不证明"记录未被
 篡改"（需存储层签名）；图内并发只覆盖 Treatment∥Panel 波与会诊成员（其余
 任务串行）；内置试验注册表
 与 DDI 规则包是教学语料，须经本机构药师/医师复核后使用；大规模对抗性安全

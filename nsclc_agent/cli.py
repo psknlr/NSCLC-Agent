@@ -388,6 +388,50 @@ def cmd_chat(args) -> int:
         pending_images, pending_reports, pending_facts = [], [], None
 
 
+def cmd_kg(args) -> int:
+    """Query the guideline knowledge graph directly (operator view).
+
+    Served exactly as the model sees it: dose-scrubbed, provenance-complete,
+    and stamped machine-extracted/unverified.
+    """
+    from .knowledge.guideline_kg import load_default
+
+    kg = load_default()
+    if kg is None or not kg.available:
+        print("guideline KG store not available "
+              "(nsclc_agent/knowledge/data/guideline_kg.json.gz missing?)",
+              file=sys.stderr)
+        return 2
+    args.query = " ".join(args.query or [])
+    print(f"⚠ {kg.warning}", file=sys.stderr)
+    if args.info:
+        payload: object = kg.describe()
+    elif args.show:
+        payload = kg.get(args.show)
+        if payload is None:
+            print(f"no recommendation {args.show!r}", file=sys.stderr)
+            return 1
+    elif args.cluster:
+        payload = kg.cluster(args.cluster)
+        if payload is None:
+            print(f"no cluster {args.cluster!r}", file=sys.stderr)
+            return 1
+    else:
+        if not any((args.query, args.stage, args.gene, args.histology,
+                    args.line, args.topic, args.jurisdiction, args.direction)):
+            print("pass a query or at least one filter "
+                  "(--stage/--gene/--topic/…), or --info",
+                  file=sys.stderr)
+            return 2
+        payload = kg.search(
+            args.query or "", stage=args.stage, gene=args.gene,
+            histology=args.histology, line=args.line, topic=args.topic,
+            jurisdiction=args.jurisdiction, direction=args.direction,
+            limit=args.limit)
+    print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
 def cmd_batch(args) -> int:
     from concurrent.futures import ThreadPoolExecutor
 
@@ -600,6 +644,25 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Disable the Treatment∥Panel parallel wave per case")
     _add_llm_flags(p)
     p.set_defaults(func=cmd_batch)
+
+    p = sub.add_parser(
+        "kg", help="Query the guideline knowledge graph (machine-extracted, "
+                   "unverified — non-releasable context)")
+    p.add_argument("query", nargs="*", default=[],
+                   help="keywords (EN/中文)")
+    p.add_argument("--stage"); p.add_argument("--gene")
+    p.add_argument("--histology"); p.add_argument("--line")
+    p.add_argument("--topic"); p.add_argument("--jurisdiction")
+    p.add_argument("--direction",
+                   help="recommend/consider/do_not_recommend/…, "
+                        "or 'negative' for all cautions")
+    p.add_argument("--show", help="print one recommendation with its "
+                                  "source passages")
+    p.add_argument("--cluster", help="print a cross-region comparison cluster")
+    p.add_argument("--info", action="store_true",
+                   help="store provenance and counts")
+    p.add_argument("--limit", type=int, default=8)
+    p.set_defaults(func=cmd_kg)
 
     p = sub.add_parser("selftest", help="Validate the staging engine")
     p.set_defaults(func=cmd_selftest)

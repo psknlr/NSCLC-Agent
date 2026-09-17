@@ -57,6 +57,11 @@ class EvidenceLevel(str, Enum):
     RETRIEVAL = "live_retrieval"          # PubMed / CT.gov / openFDA lookup result
     TOOL = "tool_result"
     MODEL = "model_reasoning"             # LLM/vision output — never releasable alone
+    #: Machine-extracted guideline-KG content that no clinician has verified.
+    #: It may inform, contextualize and point at verifiable trials/PMIDs —
+    #: it may never on its own support a released claim. A KG entry whose
+    #: curation_status becomes clinician_verified is served as GUIDELINE.
+    KG_EXTRACTED = "kg_llm_extracted"
     STUB = "stub_not_for_clinical_use"
     FAILED = "failed_tool_event"
 
@@ -66,6 +71,7 @@ NON_RELEASABLE_LEVELS = {
     EvidenceLevel.STUB.value,
     EvidenceLevel.FAILED.value,
     EvidenceLevel.MODEL.value,
+    EvidenceLevel.KG_EXTRACTED.value,
 }
 
 

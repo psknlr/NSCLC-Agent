@@ -73,6 +73,9 @@ def _oncologist_view(state: CaseRunState) -> dict[str, Any]:
     view["staging"] = state.staging
     view["routing"] = state.routing
     view["treatment_plan"] = state.outputs.get("treatment_plan")
+    # Quoted KG context: machine-extracted, unverified — shown to clinicians
+    # with its curation status, never to patients.
+    view["guideline_context"] = state.outputs.get("guideline_context")
     view["dose_plan"] = state.outputs.get("dose_plan")
     view["panel"] = state.outputs.get("panel")
     view["workup_plan"] = state.outputs.get("workup_plan")
