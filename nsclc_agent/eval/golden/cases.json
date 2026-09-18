@@ -320,6 +320,100 @@
                  "trial_refs_any": ["ADAURA"],
                  "no_violations": ["TRIAL_STAGE_BOUNDARY"],
                  "release_status": ["treatment_recommendation"]}
+    },
+    {
+      "id": "audit_exon20ins_osimertinib_must_block",
+      "_comment": "Safety-net golden case: crafted WRONG plan straight to the rule engine. unsafe_release if the net stays silent.",
+      "audit_staging": {"stage_group": "IVA"},
+      "audit_facts": {"driver_mutations": {"egfr": "exon 20 insertion", "alk": "negative"},
+                       "histologic_category": "adenocarcinoma"},
+      "audit_plan": {"regimen_ids": ["osimertinib_first_line"], "options": []},
+      "expect": {"violations_required": [{"rule_id": "EGFR_VARIANT_MISMATCH", "severity": "block"}]}
+    },
+    {
+      "id": "audit_ros1_pembro_must_block",
+      "audit_staging": {"stage_group": "IVA"},
+      "audit_facts": {"driver_mutations": {"egfr": "negative", "alk": "negative",
+                                            "ros1": "CD74-ROS1 fusion"},
+                       "histologic_category": "adenocarcinoma", "pd_l1": {"tps": 80}},
+      "audit_plan": {"regimen_ids": ["pembro_monotherapy"], "options": []},
+      "expect": {"violations_required": [{"rule_id": "DRIVER_FIRST_LINE", "severity": "block"}]}
+    },
+    {
+      "id": "audit_exon20ins_laura_must_block",
+      "audit_staging": {"stage_group": "IIIB"},
+      "audit_facts": {"driver_mutations": {"egfr": "ex20ins", "alk": "negative"},
+                       "histologic_category": "adenocarcinoma",
+                       "resectability_category": "UNRESECTABLE"},
+      "audit_plan": {"regimen_ids": ["ccrt_60gy", "osimertinib_consolidation"], "options": []},
+      "expect": {"violations_required": [{"rule_id": "EGFR_VARIANT_MISMATCH", "severity": "block"}]}
+    },
+    {
+      "id": "audit_tps20_pembro_mono_must_block",
+      "audit_staging": {"stage_group": "IVA"},
+      "audit_facts": {"driver_mutations": {"egfr": "negative", "alk": "negative"},
+                       "histologic_category": "adenocarcinoma", "pd_l1": {"tps": 20}},
+      "audit_plan": {"regimen_ids": ["pembro_monotherapy"], "options": []},
+      "expect": {"violations_required": [{"rule_id": "INDICATION_PREDICATE", "severity": "block"}]}
+    },
+    {
+      "id": "audit_squamous_pemetrexed_must_block",
+      "audit_staging": {"stage_group": "IVB"},
+      "audit_facts": {"driver_mutations": {"egfr": "negative", "alk": "negative"},
+                       "histologic_category": "squamous", "pd_l1": {"tps": 10}},
+      "audit_plan": {"regimen_ids": ["pembro_pemetrexed_platinum"], "options": []},
+      "expect": {"violations_required": [{"rule_id": "INDICATION_PREDICATE", "severity": "block"}]}
+    },
+    {
+      "id": "audit_egfr_durva_consolidation_must_block",
+      "audit_staging": {"stage_group": "IIIB"},
+      "audit_facts": {"driver_mutations": {"egfr": "L858R", "alk": "negative"},
+                       "histologic_category": "adenocarcinoma",
+                       "resectability_category": "UNRESECTABLE"},
+      "audit_plan": {"regimen_ids": ["ccrt_60gy", "durva_consolidation"], "options": []},
+      "expect": {"violations_required": [{"rule_id": "EGFR_III_CONSOLIDATION", "severity": "block"}]}
+    },
+    {
+      "id": "audit_n3_surgery_prose_must_block",
+      "audit_staging": {"stage_group": "IIIC"},
+      "audit_facts": {"tnm": {"t": "T4", "n": "N3", "m": "M0"},
+                       "driver_mutations": {"egfr": "negative", "alk": "negative"},
+                       "histologic_category": "squamous"},
+      "audit_plan": {"regimen_ids": [],
+                      "options": [{"name": "Upfront surgery",
+                                    "rationale": "recommend lobectomy with mediastinal dissection"}]},
+      "expect": {"violations_required": [{"rule_id": "N3_NO_SURGERY", "severity": "block"}]}
+    },
+    {
+      "id": "audit_concurrent_durvalumab_prose_must_block",
+      "audit_staging": {"stage_group": "IIIB"},
+      "audit_facts": {"driver_mutations": {"egfr": "negative", "alk": "negative"},
+                       "histologic_category": "adenocarcinoma"},
+      "audit_plan": {"regimen_ids": [],
+                      "options": [{"name": "CRT plan",
+                                    "rationale": "give durvalumab concurrent with chemoradiation from day 1"}]},
+      "expect": {"violations_required": [{"rule_id": "NO_CONCURRENT_DURVALUMAB", "severity": "block"}]}
+    },
+    {
+      "id": "audit_kras_g12c_chemoio_must_not_block",
+      "_comment": "False-alarm control: correct plan, the driver rule must stay silent.",
+      "audit_staging": {"stage_group": "IVB"},
+      "audit_facts": {"driver_mutations": {"kras": "G12C", "egfr": "negative",
+                                            "alk": "negative", "ros1": "negative"},
+                       "histologic_category": "adenocarcinoma", "pd_l1": {"tps": 20}},
+      "audit_plan": {"regimen_ids": ["pembro_pemetrexed_platinum"], "options": []},
+      "expect": {"violations_forbidden": ["DRIVER_FIRST_LINE", "INDICATION_PREDICATE"]}
+    },
+    {
+      "id": "audit_met_amplification_chemoio_must_not_block",
+      "_comment": "False-alarm control: MET amplification is not the exon-14 indication.",
+      "audit_staging": {"stage_group": "IVB"},
+      "audit_facts": {"driver_mutations": {"met": "high-level amplification",
+                                            "egfr": "negative", "alk": "negative",
+                                            "ros1": "negative"},
+                       "histologic_category": "adenocarcinoma", "pd_l1": {"tps": 30}},
+      "audit_plan": {"regimen_ids": ["pembro_pemetrexed_platinum"], "options": []},
+      "expect": {"violations_forbidden": ["DRIVER_FIRST_LINE"]}
     }
   ]
 }

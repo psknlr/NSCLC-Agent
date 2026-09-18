@@ -87,6 +87,8 @@ def test_golden_sweep_has_no_claim_issues():
     payload = json.loads(Path("nsclc_agent/eval/golden/cases.json")
                          .read_text(encoding="utf-8"))
     for entry in payload["cases"]:
+        if "audit_plan" in entry:
+            continue  # safety-net probes carry no runnable case
         state = NSCLCRunner().run_case(Case.from_dict(dict(entry["case"])))
         claim_issues = [i for i in
                         (state.outputs.get("safety_audit") or {})

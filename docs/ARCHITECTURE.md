@@ -246,6 +246,24 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     baseline at zero claim issues. Entailment is structural, not
     semantic — the honest list says so.
 
+21. **The eval grades the safety net itself, and failures are classified
+    clinical events.** Golden entries with `audit_plan` bypass the
+    planner and feed a deliberately wrong (or deliberately fine) crafted
+    plan straight to the rule engine, with `violations_required` /
+    `violations_forbidden` expectations — a required block that does not
+    fire is counted as `unsafe_release` and reported as its own rate,
+    the single number a safety harness must keep at zero. Every eval
+    failure carries one of nine taxonomy classes (major_harmful,
+    unsafe_release, overblocking, false_alarm, omission, missing_workup,
+    incorrect_release, staging_error, routing_error), so "the suite is
+    red" always says which kind of clinical event happened. Human
+    adjudication of golden cases lives in an append-only ledger that is
+    the deliberate inverse of the KG curation ledger: verdicts are
+    content-hash-pinned to the case (edits void them) and NEVER
+    last-wins — every adjudicator's verdict coexists, disagreements are
+    named in the eval report, and disagree/needs_revision require notes.
+    Knowledge upgrades converge; clinical judgment preserves dissent.
+
 ## 3. LLM containment table
 
 | Capability | Model may | Model may not |

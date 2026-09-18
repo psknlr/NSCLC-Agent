@@ -322,6 +322,43 @@ LAURA 的行在给 cCRT 背书、RTOG-0617 的行在给奥希替尼背书。
   就会被逐条点名。
 * 27 例金标准大扫描：规则模式方案零 CLAIM_* 问题（诚实基线入测试）。
 
+### 临床错误分类学评测 + 双医师裁定台账（v0.3.3，红队建议 #5/#6）
+
+评测从「数对/数错」升级为**临床错误分类学仪表**——失败不再只是计数，
+而是说清**发生了哪一类临床事件**：
+
+* **九类错误分类学**：`major_harmful`（推荐里出现被禁方案/被禁措辞——
+  方向性伤害）· `unsafe_release`（该拦没拦——安全护栏的核心指标，单独
+  成率）· `overblocking`（该放没放——以可用性为代价的"安全"同样是错误）
+  · `false_alarm` · `omission` · `missing_workup` · `incorrect_release` ·
+  `staging_error` / `routing_error`（确定性内核出错，本架构下最严重的
+  bug 类别）。每条失败带分类落报告，`error_taxonomy` 全零是金标准通过
+  的必要条件。
+* **审计型金标准病例：给安全网本身做金标准**。带 `audit_plan` 的条目
+  跳过 planner，把**蓄意构造的错误方案**（或蓄意正确的对照）直接喂给
+  规则引擎，以 `violations_required` / `violations_forbidden` 声明期望。
+  红队的三枚探针——exon20ins 强推奥希替尼、ROS1+ 推帕博利珠单抗、
+  TPS 20% 单药——从「埋在 pytest 里的断言」升格为一等指标：
+  **`unsafe_release_rate` = 该拦未拦的比例，当前 0/10**（8 枚必拦探针
+  + 2 枚不许误报的对照）。首次运行即抓到真实缺口：N3 手术探针因
+  staging 缺 `n_category` 键而漏网——规则引擎已补 facts 描述符回退，
+  该缺口现被金标准钉住。
+* **双医师裁定台账**（`adjudicate` 子命令 + `eval/adjudication.py`）：
+  面向 100–200 例边界病例集的人工裁定脚手架。追加式 JSONL，**永不
+  last-wins**——每位裁定人的判定并存，分歧被点名而非覆盖（与 KG 复核
+  台账的升级语义刻意相反：知识升级取最新，临床裁定保留分歧）。判定
+  内容寻址绑定病例（病例一改，旧判定自动作废并列入 `void_after_case_change`）；
+  `disagree` / `needs_revision` 必须给理由；`eval` 报告随附覆盖度
+  （几例有双人裁定、分歧在哪几例）。裁定本身是人的工作——**出厂台账
+  为空**，脚手架保证的是裁定过程的可审计与分歧的不可磨灭。
+
+```bash
+python -m nsclc_agent adjudicate --list          # 待裁定队列
+python -m nsclc_agent adjudicate iv_egfr_first_line \
+  --disagree --adjudicator "Dr. B (放疗科)" --notes "应并列 FLAURA2 选项"
+python -m nsclc_agent adjudicate --status        # 覆盖度 + 分歧清单
+```
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -345,7 +382,7 @@ python -m nsclc_agent run --presentation "肺癌病史，突然大咯血不止"
 
 # 4. 批量 + 金标准评测
 python -m nsclc_agent batch examples/cases -o out/ --resume
-python -m nsclc_agent eval                    # 27 例金标准（含11例临床红队边界病例）
+python -m nsclc_agent eval                    # 37 例金标准（27 流水线 + 10 审计型安全网探针）
 
 # 5. 记录与离线复核
 python -m nsclc_agent run --case examples/cases/stage3b_unresectable_egfr.json \
@@ -425,7 +462,7 @@ nsclc_agent/
   staging/     tnm.py 分期引擎(9版表+拒绝表) · router.py · selftest.py
   knowledge/   trials.py 20项试验注册表(分期边界/驱动限制机器可查)
                regimens.py 方案库(摘要无剂量/详情即剂量通道) · interactions.py
-  safety/      emergencies.py 急症筛查(子句级否定) · rules.py 12条规则引擎
+  safety/      emergencies.py 急症筛查(子句级否定) · rules.py 14条规则引擎
   interview/   axes.py 17条NSCLC问诊轴(VOI层) · adequacy.py · loop.py
   perception/  imaging.py 读片(词表校验/归一化交叉核对/拒绝文本模型)
   tools/       base.py Broker+熔断 · registry.py 11个工具 · retrieval.py 实连检索
@@ -438,8 +475,9 @@ nsclc_agent/
   knowledge/kg_eligibility.py 人群判据确定性求值(span优先/冲突弃权/推定不确信)
   knowledge/prognosis.py 分期队列生存表+方向性预后因素(试验锚定/不做个体预测)
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
+  eval/run_eval.py 错误分类学评测 · eval/adjudication.py 双医师裁定台账
   schemas.py · skills.py · case.py · cli.py
-tests/         413 个用例，全离线    eval/       16 例金标准 + 指标
+tests/         422 个用例，全离线    eval/       37 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -447,9 +485,10 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 413 passed，全离线
+python -m pytest -q            # 422 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
-python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方案11/11 安全16/16
+python -m nsclc_agent eval     # 金标准 37/37：分期25/25 路由11/11 方案22/22
+                               # 安全27/27 · unsafe_release_rate 0/10 · 分类学全零
 ```
 
 ## 仍未完成（诚实清单）
@@ -470,8 +509,12 @@ python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方�
 语义核对）；schema 校验仍刻意保持浅层（形状
 校验，非临床语义完备性）；治疗库（30 方案/30 试验/14 规则+30 适应证声明）覆盖主干驱动
 通路但仍是教学规模，未覆盖后线序贯、CNS 转移分层、器官功能剂量调整与
-药物相互作用决策；金标准 27 例中红队边界病例仍远少于严肃临床验证所需的
-100–200 例双医师裁定集；图内并发只覆盖 Treatment∥Panel 波与会诊成员（其余
+药物相互作用决策；金标准 37 例（27 流水线 + 10 审计型探针）仍远少于严肃
+临床验证所需的 100–200 例边界病例集——双医师裁定台账已就绪（分歧并存、
+内容寻址作废、覆盖度入 eval 报告），但**裁定本身是人的工作，出厂台账为
+空**，且裁定人身份**记录而不认证**（依赖操作环境访问控制与台账 git 审阅）；
+审计型探针只审规则引擎这一层（planner 的独立防线由流水线病例与单元测试
+覆盖）；图内并发只覆盖 Treatment∥Panel 波与会诊成员（其余
 任务串行）；内置试验注册表
 与 DDI 规则包是教学语料，须经本机构药师/医师复核后使用；大规模对抗性安全
 评测未做。**本项目不能对外宣称为临床可用系统。**

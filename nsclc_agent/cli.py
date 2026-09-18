@@ -580,6 +580,87 @@ def cmd_kg_review(args) -> int:
     return 0
 
 
+def cmd_adjudicate(args) -> int:
+    """Clinician adjudication of golden cases — dual verdicts, kept apart.
+
+    Unlike KG curation, adjudication events never overwrite each other:
+    two clinicians' verdicts on one case coexist, and a disagreement is
+    surfaced, not resolved by the machine.
+    """
+    from .eval.adjudication import (
+        append_adjudication, adjudication_summary, case_content_hash,
+        default_ledger_path, load_adjudications,
+    )
+    from .eval.run_eval import GOLDEN_DIR
+
+    golden = Path(args.golden) if args.golden else GOLDEN_DIR
+    cases = json.loads(
+        golden.joinpath("cases.json").read_text(encoding="utf-8"))["cases"]
+    ledger = Path(args.ledger) if args.ledger else default_ledger_path()
+
+    if args.status:
+        print(json.dumps({"ledger": str(ledger),
+                          **adjudication_summary(cases, ledger)},
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    if args.list:
+        summary = adjudication_summary(cases, ledger)["per_case"]
+        for entry in cases:
+            case_id = str(entry["id"])
+            record = summary[case_id]
+            if record["adjudicators"] >= 2 and not record["stale_events"]:
+                continue  # dual-adjudicated and current
+            marker = " [REVIEW VOID — case changed]" if record["stale_events"] \
+                else f" [{record['adjudicators']}/2 verdicts]"
+            kind = "audit " if "audit_plan" in entry else ""
+            print(f"{case_id:48s} {kind}{marker}")
+        print(f"\n(裁定一例：nsclc-agent adjudicate CASE_ID --agree|"
+              f"--disagree|--needs-revision --adjudicator '姓名 (资质)' "
+              f"[--notes ...]；分歧会被保留并在 eval 报告中点名)",
+              file=sys.stderr)
+        return 0
+
+    if not args.case_id:
+        print("pass a CASE_ID, --list, or --status", file=sys.stderr)
+        return 2
+    entry = next((c for c in cases if str(c.get("id")) == args.case_id), None)
+    if entry is None:
+        print(f"no golden case {args.case_id!r}", file=sys.stderr)
+        return 1
+
+    verdict = ("agree" if args.agree else
+               "disagree" if args.disagree else
+               "needs_revision" if args.needs_revision else None)
+    if verdict is None:
+        print(json.dumps(entry, ensure_ascii=False, indent=2))
+        existing = load_adjudications(ledger).get(args.case_id, [])
+        current = case_content_hash(entry)
+        for event in existing:
+            void = "" if event.get("content_hash") == current \
+                else "  [VOID — case changed since]"
+            print(f"· {event['adjudicated_at']} {event['adjudicator']}: "
+                  f"{event['verdict']}{void}"
+                  + (f" — {event['notes']}" if event.get("notes") else ""),
+                  file=sys.stderr)
+        print("\n裁定：--agree（病例与机器可检期望临床上成立）/ --disagree "
+              "--notes '错在哪' / --needs-revision --notes '改什么'",
+              file=sys.stderr)
+        return 0
+    try:
+        event = append_adjudication(
+            ledger, cases=cases, case_id=args.case_id, verdict=verdict,
+            adjudicator=args.adjudicator or "", notes=args.notes or "")
+    except ValueError as exc:
+        print(f"adjudication not recorded: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(event, ensure_ascii=False, indent=2))
+    summary = adjudication_summary(cases, ledger)["per_case"][args.case_id]
+    print(f"→ {args.case_id}: {summary['adjudicators']} adjudicator(s), "
+          f"verdicts {summary['verdicts']}", file=sys.stderr)
+    return 0
+
+
 def cmd_batch(args) -> int:
     from concurrent.futures import ThreadPoolExecutor
 
@@ -844,6 +925,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--curation-file", dest="curation_file",
                    help="write to this ledger instead of the default")
     p.set_defaults(func=cmd_kg_review)
+
+    p = sub.add_parser(
+        "adjudicate",
+        help="Clinician adjudication of golden cases (dual verdicts, "
+             "disagreements preserved)")
+    p.add_argument("case_id", nargs="?")
+    p.add_argument("--list", action="store_true",
+                   help="cases still needing verdicts (target: 2 each)")
+    p.add_argument("--status", action="store_true",
+                   help="coverage + agreement summary")
+    p.add_argument("--agree", action="store_true")
+    p.add_argument("--disagree", action="store_true")
+    p.add_argument("--needs-revision", dest="needs_revision",
+                   action="store_true")
+    p.add_argument("--adjudicator", help="name + licensure, recorded verbatim")
+    p.add_argument("--notes")
+    p.add_argument("--ledger", help="write to this ledger instead of the "
+                                    "default")
+    p.add_argument("--golden", help="golden case directory")
+    p.set_defaults(func=cmd_adjudicate)
 
     p = sub.add_parser("selftest", help="Validate the staging engine")
     p.set_defaults(func=cmd_selftest)

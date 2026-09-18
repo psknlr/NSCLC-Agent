@@ -630,7 +630,12 @@ def check_plan(
     """Run every rule; returns violations, blockers first."""
     ctx = PlanContext(
         stage_group=str(staging.get("stage_group") or ""),
-        n_category=str(staging.get("n_category") or ""),
+        # Staging is authoritative, but a missing n_category must not
+        # silently disarm the N3 rule when the descriptor sits right there
+        # in the facts — found by the audit-type eval cases (the N3-surgery
+        # probe passed the net because staging lacked the key).
+        n_category=str(staging.get("n_category")
+                       or ((facts or {}).get("tnm") or {}).get("n") or ""),
         facts=facts or {},
         plan=plan or {},
     )

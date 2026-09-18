@@ -115,6 +115,8 @@ def test_decision_table_never_diverges_from_declarations():
     its own proposals at the predicate gate."""
     payload = json.loads(GOLDEN.read_text(encoding="utf-8"))
     for entry in payload["cases"]:
+        if "audit_plan" in entry:
+            continue  # safety-net probes carry no runnable case
         state = NSCLCRunner().run_case(Case.from_dict(dict(entry["case"])))
         plan = state.outputs.get("treatment_plan") or {}
         divergences = [u for u in plan.get("uncertainties") or []
