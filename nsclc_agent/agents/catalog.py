@@ -1073,7 +1073,10 @@ class TreatmentAgent:
             if context["five_year_os_percent_approx"] is not None else
             f"Stage {stage_group}: no per-group cohort survival figure "
             f"published; not padded",
-            evidence_ids, origin="rule")
+            evidence_ids, origin="rule",
+            subject={"population_stage": stage_group,
+                     "classification_basis": context["classification_basis"]},
+            support_relation="population_statistic")
         state.trace(
             "TreatmentAgent", "prognosis_context",
             output_summary=f"cohort figure + {len(context['modifiers'])} "
@@ -1106,13 +1109,63 @@ class TreatmentAgent:
 
     @staticmethod
     def _claim_options(state: CaseRunState) -> None:
+        """One claim per treatment option, bound to ITS evidence.
+
+        Claim-level, not plan-level (red-team review §11): the cCRT claim
+        must not carry the LAURA row and the osimertinib claim must not
+        carry the RTOG-0617 row just because both landed in one citation
+        pool. Each option's claim cites only the trial-anchor rows whose
+        trial covers one of the option's own regimens; a regimen-free
+        option (surgery, surveillance, palliative-care integration) is
+        ``protocol_grounded`` — its authority is the routed protocol
+        module, and it does not borrow trial rows it is not entitled to.
+        """
         plan = state.outputs.get("treatment_plan") or {}
+        stage_group = str(state.staging.get("stage_group") or "")
+
+        # evidence_id → the trial its row certifies (registry lookups only).
+        # In a parallel wave this agent's own rows still sit in the wave
+        # buffer under temp ids — scan both; the merge remaps temp ids in
+        # claim evidence lists and subjects alike.
+        trial_rows: dict[str, dict[str, Any]] = {}
+        for eid, evidence in state.evidence.items():
+            if evidence.source != "trial_lookup":
+                continue
+            trial = (evidence.payload or {}).get("trial") or {}
+            if trial.get("trial_id"):
+                trial_rows[eid] = trial
+        scope = getattr(state, "_scope", None)
+        for temp_id, record in getattr(scope, "evidence", None) or []:
+            if record.get("source") != "trial_lookup":
+                continue
+            trial = (record.get("payload") or {}).get("trial") or {}
+            if trial.get("trial_id"):
+                trial_rows[temp_id] = trial
+
         for option in plan.get("options") or []:
+            regimen_ids = [str(r) for r in option.get("regimen_ids") or []]
+            trial_ids = {
+                tid for rid in regimen_ids
+                for tid in (regimen_lib.get(rid).trial_ids
+                            if regimen_lib.get(rid) else ())
+            }
+            entailed = [
+                eid for eid, trial in trial_rows.items()
+                if set(trial.get("regimen_ids") or []) & set(regimen_ids)
+                or trial.get("trial_id") in trial_ids
+            ]
             state.add_claim(
                 "treatment_option",
                 str(option.get("name") or "")[:200],
-                plan.get("citations") or [],
+                entailed,
                 origin=plan.get("origin", "rule"),
+                subject={
+                    "intervention_regimen_ids": regimen_ids,
+                    "population_stage": stage_group,
+                    "intent": plan.get("intent"),
+                },
+                support_relation="trial_anchor" if regimen_ids
+                else "protocol_grounded",
             )
 
     @staticmethod

@@ -101,11 +101,14 @@ class _WaveScope:
         return temp_id
 
     def add_claim(self, kind, text, evidence_ids=None, *,
-                  confidence=0.5, origin="rule") -> str:
+                  confidence=0.5, origin="rule", subject=None,
+                  support_relation="cites") -> str:
         self.claims.append({
             "kind": kind, "text": text,
             "evidence_ids": list(evidence_ids or []),
             "confidence": confidence, "origin": origin,
+            "subject": dict(subject or {}),
+            "support_relation": support_relation,
         })
         return f"__{self.tag}C{len(self.claims):03d}__"
 
@@ -563,7 +566,9 @@ class NSCLCRunner:
                 state.add_claim(
                     claim["kind"], _deep_remap(claim["text"], mapping),
                     [mapping.get(e, e) for e in claim["evidence_ids"]],
-                    confidence=claim["confidence"], origin=claim["origin"])
+                    confidence=claim["confidence"], origin=claim["origin"],
+                    subject=_deep_remap(claim.get("subject") or {}, mapping),
+                    support_relation=claim.get("support_relation", "cites"))
             for message in scope.flags:
                 state.flag(_deep_remap(message, mapping))
             for message in scope.warnings:

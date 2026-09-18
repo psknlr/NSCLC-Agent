@@ -230,6 +230,21 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     proposal, so table and declarations cannot drift apart silently.
     This closed audit gaps no prior rule saw: pembrolizumab monotherapy
     at TPS 20%, squamous disease on a pemetrexed backbone.
+20. **A citation supports one claim, not the whole plan.** Claims carry a
+    structured subject (intervention regimen ids, population stage,
+    intent) and a support relation; each treatment-option claim cites
+    only the trial-registry rows whose trial covers its own regimens
+    (structural entailment, deterministic), regimen-free options are
+    protocol-grounded and borrow nothing, and prognosis claims are
+    population statistics. The critic's claim guard verifies the
+    relation per claim: dangling evidence ids, regimen-bearing claims
+    with no releasable entailed support, and citations borrowed from a
+    different claim are each named (`CLAIM_DANGLING_EVIDENCE` /
+    `CLAIM_UNSUPPORTED` / `CLAIM_SUPPORT_MISMATCH`). The narrowing holds
+    across the parallel wave's temp-id remap and the conversation
+    layer's plan reuse; a golden-set sweep pins the honest rule-mode
+    baseline at zero claim issues. Entailment is structural, not
+    semantic — the honest list says so.
 
 ## 3. LLM containment table
 

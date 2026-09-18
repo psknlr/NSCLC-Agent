@@ -53,6 +53,10 @@ class CriticAgent:
         checks_run.append("citation_guard")
         issues.extend(self._citation_guard(state, tools, broker, plan))
 
+        # -- 2b. claim guard: per-claim entailment, not a shared pool ------
+        checks_run.append("claim_guard")
+        issues.extend(self._claim_guard(state))
+
         # -- 3. report-proposed fact check ----------------------------------
         checks_run.append("proposed_fact_check")
         proposed = state.facts.get("_report_proposed") or []
@@ -94,6 +98,71 @@ class CriticAgent:
         state.trace("CriticAgent", "audit",
                     output_summary=f"{len(issues)} issue(s), "
                                    f"{len(repair_requests)} repair request(s)")
+
+    # ------------------------------------------------------------ claim guard
+    @staticmethod
+    def _claim_guard(state: CaseRunState) -> list[str]:
+        """Per-claim support verification (red-team review §11).
+
+        The plan-level guard asks "does the citation pool contain something
+        releasable"; this asks, for every high-stakes claim, "does THIS
+        claim's evidence actually support THIS subject". Entailment is
+        structural and deterministic: a treatment-option claim is supported
+        by a releasable trial-registry row whose trial covers one of the
+        claimed intervention's regimens — a LAURA row cannot endorse the
+        cCRT claim, and a claim citing ids the ledger does not hold is a
+        broken audit trail, said out loud.
+        """
+        from ..knowledge import regimens as regimen_lib
+
+        issues: list[str] = []
+        for claim in state.claims:
+            if claim.kind not in ("treatment_option", "prognosis_context"):
+                continue
+            dangling = [c for c in claim.evidence_ids
+                        if c not in state.evidence]
+            if dangling:
+                issues.append(
+                    f"CLAIM_DANGLING_EVIDENCE[{claim.claim_id}]: cites "
+                    f"{', '.join(dangling)} — not in this run's ledger")
+            rows = [state.evidence[c] for c in claim.evidence_ids
+                    if c in state.evidence]
+            releasable = [e for e in rows
+                          if e.level not in NON_RELEASABLE_LEVELS]
+            regimens = {str(r) for r in
+                        claim.subject.get("intervention_regimen_ids") or []}
+            if claim.kind == "treatment_option" and regimens:
+                trial_ids = {
+                    tid for rid in regimens
+                    for tid in (regimen_lib.get(rid).trial_ids
+                                if regimen_lib.get(rid) else ())
+                }
+                entailed = []
+                for evidence in releasable:
+                    trial = (evidence.payload or {}).get("trial") or {}
+                    if set(trial.get("regimen_ids") or []) & regimens \
+                            or trial.get("trial_id") in trial_ids:
+                        entailed.append(evidence)
+                if not entailed:
+                    if releasable:
+                        issues.append(
+                            f"CLAIM_SUPPORT_MISMATCH[{claim.claim_id}]: "
+                            f"'{claim.text[:60]}' cites releasable evidence, "
+                            f"but none of it covers the claimed intervention "
+                            f"({'/'.join(sorted(regimens))}) — a citation "
+                            f"borrowed from a different claim is not support")
+                    else:
+                        issues.append(
+                            f"CLAIM_UNSUPPORTED[{claim.claim_id}]: "
+                            f"regimen-bearing claim '{claim.text[:60]}' has "
+                            f"no releasable evidence entailing "
+                            f"{'/'.join(sorted(regimens))}")
+            elif claim.kind == "prognosis_context":
+                if rows and not releasable:
+                    issues.append(
+                        f"CLAIM_UNSUPPORTED[{claim.claim_id}]: prognosis "
+                        f"claim rests only on non-releasable evidence")
+        return issues
 
     # ------------------------------------------------------------------ guard
     def _citation_guard(

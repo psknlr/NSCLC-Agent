@@ -302,6 +302,26 @@ critic 共享一个过粗的 gene→positive/negative 布尔表示，因此能�
 * **表↔声明一致性大扫描**入测试：27 例金标准全跑，planner 永不需要在
   自己的闸门上剔除自己的提案——决策表与声明同步生长、分歧即测试失败。
 
+### Claim 级证据蕴含（v0.3.2，红队 §11）
+
+引用护栏从「方案级 citation pool」升级为**逐主张的支持关系验证**——修复
+红队指出的过宽背书：此前 cCRT 主张与奥希替尼巩固主张引用同一整袋证据，
+LAURA 的行在给 cCRT 背书、RTOG-0617 的行在给奥希替尼背书。
+
+* **Claim 带结构化 subject**：`{intervention_regimen_ids, population_stage,
+  intent}` + `support_relation`（trial_anchor / protocol_grounded /
+  population_statistic）。每个治疗选项的主张只引用**其自身方案的试验锚点
+  行**（regimen↔trial 结构性蕴含，确定性判定）；无方案选项（手术/随访/
+  缓和整合）标 `protocol_grounded`，不借用不属于它的试验行；预后主张标
+  人群统计关系。跨并行波 temp-id 重映射与会话方案复用路径同样成立。
+* **Critic 逐条验证**（`claim_guard`，与 plan 级护栏并行）：引用台账中
+  不存在的证据 id → `CLAIM_DANGLING_EVIDENCE`；带方案的主张无可放行蕴含
+  证据 → `CLAIM_UNSUPPORTED`；引了可放行证据但没有一条覆盖所声称的干预
+  → `CLAIM_SUPPORT_MISMATCH`（「从别的主张借来的引用不是支持」）。
+  模型路径的方案主张走同一验证——模型没为自己的选项调 `trial_lookup`
+  就会被逐条点名。
+* 27 例金标准大扫描：规则模式方案零 CLAIM_* 问题（诚实基线入测试）。
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -419,7 +439,7 @@ nsclc_agent/
   knowledge/prognosis.py 分期队列生存表+方向性预后因素(试验锚定/不做个体预测)
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   schemas.py · skills.py · case.py · cli.py
-tests/         406 个用例，全离线    eval/       16 例金标准 + 指标
+tests/         413 个用例，全离线    eval/       16 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -427,7 +447,7 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 406 passed，全离线
+python -m pytest -q            # 413 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方案11/11 安全16/16
 ```

@@ -130,11 +130,14 @@ class Evidence:
 
 @dataclass
 class Claim:
-    """A released assertion bound to the evidence that supports it.
+    """A released assertion bound to the evidence that supports IT.
 
-    ``CitationGuard`` (see :mod:`nsclc_agent.agents.critic`) rejects any
-    high-stakes claim whose evidence list is empty or backed only by
-    non-releasable evidence.
+    Claim-level, not plan-level (red-team review §11): each claim carries a
+    structured ``subject`` — what population, what intervention, what
+    setting — and cites only evidence that *entails* that subject. The
+    critic's claim guard verifies the relation per claim; a shared citation
+    pool that lets one trial endorse every option in the plan is exactly
+    the failure this shape closes.
     """
 
     claim_id: str
@@ -143,6 +146,14 @@ class Claim:
     evidence_ids: list[str] = field(default_factory=list)
     confidence: float = 0.5
     origin: str = "rule"
+    #: Structured subject: e.g. {"intervention_regimen_ids": [...],
+    #: "population_stage": "IIIB", "setting": "consolidation"}.
+    subject: dict[str, Any] = field(default_factory=dict)
+    #: How the cited evidence supports the subject: "trial_anchor"
+    #: (registry rows whose trial covers the intervention),
+    #: "protocol_grounded" (regimen-free option from the routed protocol
+    #: module), "population_statistic", "rule", "model_cited".
+    support_relation: str = "cites"
 
 
 @dataclass
@@ -339,10 +350,13 @@ class CaseRunState:
         *,
         confidence: float = 0.5,
         origin: str = "rule",
+        subject: dict[str, Any] | None = None,
+        support_relation: str = "cites",
     ) -> str:
         claim_id = f"C{len(self.claims) + 1:04d}"
         self.claims.append(
-            Claim(claim_id, kind, text, list(evidence_ids or []), confidence, origin)
+            Claim(claim_id, kind, text, list(evidence_ids or []), confidence,
+                  origin, dict(subject or {}), support_relation)
         )
         return claim_id
 
