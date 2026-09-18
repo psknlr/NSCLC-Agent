@@ -212,6 +212,24 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     engine remains the sole authority for the case's actual stage. And
     prose never redefines disease concepts: AIS=Tis=stage 0,
     MIA=T1mi=IA1, from one source of truth (`staging/concepts.py`).
+19. **A regimen's population is declared once, machine-executably.** Every
+    library regimen carries an indication predicate
+    (`knowledge/indications.py`: stage with 8th-edition back-mapping,
+    histology, driver class, no-actionable-driver, PD-L1 thresholds,
+    resectability, operability, oligometastatic status, prior therapy)
+    evaluated in three-valued logic. **Unknown routes to workup, never to
+    a guess**: the planner keeps such an option only as provisional with
+    the missing facts pushed into the workup list; the critic warns with
+    the facts named. The single declaration is evaluated at three points —
+    the planner's `opt()` gate (ineligible dropped loudly as a
+    table↔declaration divergence; a declared extrapolation is honored),
+    the published `outputs["indication_report"]`, and the critic rule
+    `INDICATION_PREDICATE` (ineligible → block; an undeclared — including
+    hallucinated — regimen id → warn). A sweep test runs every golden
+    case and asserts the decision table never has to drop its own
+    proposal, so table and declarations cannot drift apart silently.
+    This closed audit gaps no prior rule saw: pembrolizumab monotherapy
+    at TPS 20%, squamous disease on a pemetrexed backbone.
 
 ## 3. LLM containment table
 

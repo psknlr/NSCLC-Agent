@@ -398,9 +398,62 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
     }
 
     def opt(name: str, regimen_ids: list[str], rationale: str) -> None:
-        plan["options"].append({"name": name, "regimen_ids": regimen_ids,
-                                "rationale": rationale})
+        """Add an option — through the indication-predicate gate.
+
+        The decision table SELECTS candidates; the declared predicates
+        decide whether each may actually be proposed: ``ineligible`` is
+        dropped loudly (a table/declaration divergence to fix, never a
+        silent recommendation), ``unknown`` stays provisional with the
+        missing facts routed to workup, and a stage mismatch that the plan
+        has explicitly declared as an extrapolation is honored as such.
+        """
+        from ..knowledge.indications import (
+            INELIGIBLE, UNKNOWN as IND_UNKNOWN, evaluate_indication,
+        )
+
+        kept: list[str] = []
         for rid in regimen_ids:
+            verdict = evaluate_indication(rid, stage_group, facts)
+            if verdict["verdict"] == INELIGIBLE:
+                failed = verdict["failed_conditions"]
+                stage_only = all(f.startswith("stage:") for f in failed)
+                declared = {
+                    str(e.get("trial_id")) for e in plan["extrapolations"]
+                    if isinstance(e, dict)
+                }
+                regimen = regimen_lib.get(rid)
+                if stage_only and regimen and declared & set(regimen.trial_ids):
+                    kept.append(rid)  # declared extrapolation: allowed, audited
+                    continue
+                plan["uncertainties"].append(
+                    f"决策表提案 {rid} 被适应证谓词判定不适用（"
+                    + "; ".join(failed)
+                    + "）——已剔除；请修正决策表或声明。")
+                continue
+            kept.append(rid)
+            if verdict["verdict"] == IND_UNKNOWN:
+                provisional = plan.setdefault("provisional_regimens", [])
+                provisional.append({
+                    "regimen_id": rid,
+                    "pending": verdict["unknown_conditions"],
+                })
+                for missing in verdict["unknown_conditions"]:
+                    line = f"Resolve for {rid}: {missing}"
+                    if line not in plan["workup_needed"]:
+                        plan["workup_needed"].append(line)
+                plan["uncertainties"].append(
+                    f"{rid} 为暂定推荐：待补齐 "
+                    + "；".join(verdict["unknown_conditions"]))
+            if verdict["edition_migration"]:
+                note = (f"{rid}: applied via 8th-edition descriptor mapping "
+                        f"(TNM edition migration, not an extrapolation)")
+                if note not in plan["uncertainties"]:
+                    plan["uncertainties"].append(note)
+        if regimen_ids and not kept:
+            return  # every regimen failed its predicate — no option
+        plan["options"].append({"name": name, "regimen_ids": kept,
+                                "rationale": rationale})
+        for rid in kept:
             if rid not in plan["regimen_ids"]:
                 plan["regimen_ids"].append(rid)
 
@@ -539,10 +592,8 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
                         f"maps to {legacy} under the trial's 8th-edition "
                         f"enrollment — edition migration noted.")
                 else:
-                    opt(f"Surgery → adjuvant "
-                        f"{'osimertinib' if egfr else 'alectinib'}",
-                        [rid], f"Driver-positive resectable IIIB — {trial} "
-                               f"extrapolated beyond IIIA")
+                    # Declare BEFORE opt(): the predicate gate honors a
+                    # declared extrapolation; an undeclared one is dropped.
                     plan["extrapolations"].append({
                         "trial_id": trial,
                         "justification": f"{trial} enrolled up to IIIA; "
@@ -550,6 +601,10 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
                                          f"documented extrapolation per MDT "
                                          f"decision",
                     })
+                    opt(f"Surgery → adjuvant "
+                        f"{'osimertinib' if egfr else 'alectinib'}",
+                        [rid], f"Driver-positive resectable IIIB — {trial} "
+                               f"extrapolated beyond IIIA")
             else:
                 opt("Perioperative pembrolizumab + chemotherapy",
                     ["pembro_perioperative"],
@@ -752,6 +807,7 @@ class TreatmentAgent:
             state.outputs["treatment_plan"] = plan
             self._attach_kg_context(state, tools, broker, plan, stage_group)
             self._attach_prognosis(state, tools, broker, stage_group)
+            self._attach_indications(state, stage_group)
             self._claim_options(state)
             state.trace(
                 "TreatmentAgent", "plan_reused",
@@ -799,6 +855,7 @@ class TreatmentAgent:
         self._attach_kg_context(state, tools, broker,
                                 state.outputs["treatment_plan"], stage_group)
         self._attach_prognosis(state, tools, broker, stage_group)
+        self._attach_indications(state, stage_group)
         self._claim_options(state)
         state.trace(
             "TreatmentAgent", "plan",
@@ -937,6 +994,29 @@ class TreatmentAgent:
                            f"KG rec(s) attached (kg_llm_extracted)",
             evidence_ids=evidence_ids,
         )
+
+    @staticmethod
+    def _attach_indications(state: CaseRunState, stage_group: str) -> None:
+        """Per-regimen indication verdicts for the plan on record.
+
+        The same declarations the planner gated on and the critic will
+        audit against, evaluated once more over the FINAL plan (which may
+        be model-authored) and published for the oncologist view — the
+        clinician sees why each regimen is in population, provisional, or
+        (for a model plan the critic is about to block) out of it.
+        """
+        from ..knowledge.indications import evaluate_indication
+
+        plan = state.outputs.get("treatment_plan") or {}
+        rids = [str(r) for r in plan.get("regimen_ids") or []]
+        if not rids:
+            return
+        state.outputs["indication_report"] = {
+            "regimens": [evaluate_indication(rid, stage_group, state.facts)
+                         for rid in rids],
+            "note": "声明式适应证判定（eligible/ineligible/unknown）——"
+                    "unknown 表示病例缺少判定所需事实，已列入补检建议",
+        }
 
     @staticmethod
     def _attach_prognosis(

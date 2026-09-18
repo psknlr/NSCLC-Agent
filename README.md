@@ -27,7 +27,7 @@
  ToolLoop       ReAct 取证 → CapabilityBroker（角色/技能/熔断/预算）  分期 → 协议模块路由
  InterviewLoop  组织追问   → AdequacyJudge（必答轴规则判定，blocked    试验注册表（分期边界机器可查）
                              永不可被模型/轮次上限豁免）              方案库（剂量只在确定性通道）
- PerceptionAgent 读片提议  → 描述符词表校验 + 归一化交叉核对          安全规则引擎（13条确定性规则）
+ PerceptionAgent 读片提议  → 描述符词表校验 + 归一化交叉核对          安全规则引擎（14条确定性规则）
  MDT Panel      专科子体   → 最保守合成（最高紧急度，非多数票）        肿瘤急症筛查（子句级否定）
  CriticAgent    终审追加   → finally 无条件执行 + 引用核验            证据台账（工具自declare等级）
 ```
@@ -42,7 +42,7 @@ critic 的 block 级违规触发有界修复循环。
 |---|---|---|
 | 提示词要求检索、代码无检索层 | 模型凭记忆表演检索 | 真实工具层：`trial_lookup`（内置注册表离线可验）、`pubmed_search`/`citation_verify`/`label_lookup`（`NSCLC_AGENT_ONLINE=1` 时实连 NCBI/CT.gov/openFDA，离线时诚实降级为 `stub_not_for_clinical_use`，**引用护栏拒绝以 stub 支撑放行**） |
 | `max_tokens=4096` 必然截断且无告警 | 残缺 JSON 当成功 | `finish_reason=length` → `output_truncated` 失败模式；每模块声明 `min_output_tokens`；77k 字符协议模块不再塞进 system prompt，改为 `protocol_lookup` 分节检索 + 蒸馏决策核心 |
-| 模型输出零校验 | `quality_control` 自评 | schema 校验 + 13 条确定性安全规则引擎 + 引用护栏，全部在 critic 中他评；block → 放行拦截 + 修复请求 |
+| 模型输出零校验 | `quality_control` 自评 | schema 校验 + 14 条确定性安全规则引擎 + 引用护栏，全部在 critic 中他评；block → 放行拦截 + 修复请求 |
 | 缺失 M 静默当 M0 | 未查转移的病人判 IB | M 必须显式声明；缺失/MX → 拒绝 + 指名解决检查（PET-CT+脑MRI）→ `needs_staging_workup` |
 | `staging_system` 死字段 | AJCC8 按第9版算 | 版本闸门：非 AJCC9 直接拒绝并要求重分期 |
 | 无 c/p/yp 前缀 | c/p 分期不分 | `TNM.prefix` 一等公民（c/p/yp/yc/r/a），ypTNM 附解释注记 |
@@ -161,7 +161,7 @@ CSCO 2025、CN 中西医结合 2023**——共 2,960 条推荐，带人群判据
   聚类摘要）经与规则引擎同一 `DOSE_RE` 的**深度递归清洗**——有全量测试
   逐条钉住。剂量仍只存在于确定性剂量通道。
 * **负面知识提示、不拦截**：`do_not_recommend`/`avoid`/`contraindicated`
-  条目按病例匹配为 cautions 提示人工权衡；拦截权仍只属于 13 条确定性安全
+  条目按病例匹配为 cautions 提示人工权衡；拦截权仍只属于 14 条确定性安全
   规则——未复核的抽取不获得否决权。引用的指南原文放在
   `outputs["guideline_context"]`（oncologist 视图），**不进入方案自述**：
   规则引擎扫描的是系统自己的话，一句被引用的 "durvalumab … after
@@ -278,6 +278,29 @@ critic 共享一个过粗的 gene→positive/negative 布尔表示，因此能�
   （"per label — not encoded"，由药师录入后启用）。
 * **金标准集 16→27 例**：三个红队 blocker + ROS1/RET/METex14/BRAF/NTRK/
   非经典 EGFR/HER2/KRAS 对照/版本迁移全部固化为机器可检期望。
+
+### 声明式适应证谓词（v0.3.1，红队建议 #2）
+
+方案适应证从 if/else 升级为**每个方案一份机器可执行的人群声明**
+（`knowledge/indications.py`，30/30 全库覆盖，`undeclared_regimens()==[]`
+入测试）：分期（含第8版回映射）、组织学、驱动基因类（复用变体本体）、
+无可行动驱动（ICI 类方案）、PD-L1 TPS/TC 阈值、可切除性、可手术性、
+寡转移、既往治疗线——**三值判定**：
+
+* `eligible` 全部条件满足；`ineligible` 至少一条确信不满足；
+  `unknown` 无失败但缺事实——**unknown 回补检，永不回猜测**。
+* **一份声明、三处求值**：planner 的 `opt()` 闸门（ineligible 响亮剔除并
+  标注表↔声明分歧；unknown 保留为暂定推荐 + 缺失事实进补检清单；已声明
+  外推按外推放行）；attach 层对最终方案发布
+  `outputs["indication_report"]`（oncologist 可见每个方案为何在/不在
+  人群内）；critic 规则 `INDICATION_PREDICATE` 独立审计（ineligible →
+  block，unknown → warn 且点名缺失事实，无声明的方案 id ——包括模型幻觉
+  的 id——→ `INDICATION_UNDECLARED` warn）。
+* 立刻抓到了此前任何规则都看不见的错误：**PD-L1 TPS 20% 配帕博利珠单抗
+  单药（KEYNOTE-024 要求 ≥50%）→ block**；鳞癌配培美曲塞骨架 → block；
+  T-DXd 无既往治疗史 → unknown warn。
+* **表↔声明一致性大扫描**入测试：27 例金标准全跑，planner 永不需要在
+  自己的闸门上剔除自己的提案——决策表与声明同步生长、分歧即测试失败。
 
 ## 快速开始（零依赖、离线）
 
@@ -396,7 +419,7 @@ nsclc_agent/
   knowledge/prognosis.py 分期队列生存表+方向性预后因素(试验锚定/不做个体预测)
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   schemas.py · skills.py · case.py · cli.py
-tests/         394 个用例，全离线    eval/       16 例金标准 + 指标
+tests/         406 个用例，全离线    eval/       16 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -404,7 +427,7 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 394 passed，全离线
+python -m pytest -q            # 406 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方案11/11 安全16/16
 ```
@@ -424,7 +447,7 @@ python -m nsclc_agent eval     # 金标准 16/16：分期14/14 路由11/11 方�
 不给预后因素配数字权重；重放日志证明"重放与记录一致"，不证明"记录未被
 篡改"（需存储层签名）；引用护栏仍是 plan 级而非逐 claim 级蕴含校验
 （claim→evidence 支持关系未逐条验证）；schema 校验仍刻意保持浅层（形状
-校验，非临床语义完备性）；治疗库（30 方案/30 试验/14 规则）覆盖主干驱动
+校验，非临床语义完备性）；治疗库（30 方案/30 试验/14 规则+30 适应证声明）覆盖主干驱动
 通路但仍是教学规模，未覆盖后线序贯、CNS 转移分层、器官功能剂量调整与
 药物相互作用决策；金标准 27 例中红队边界病例仍远少于严肃临床验证所需的
 100–200 例双医师裁定集；图内并发只覆盖 Treatment∥Panel 波与会诊成员（其余

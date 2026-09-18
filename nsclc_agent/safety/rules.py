@@ -477,6 +477,50 @@ def _rule_egfr_variant_mismatch(ctx: PlanContext) -> list[Violation]:
     )]
 
 
+def _rule_indication_predicate(ctx: PlanContext) -> list[Violation]:
+    """Every regimen in the plan is audited against its DECLARED
+    population — the single set of declarations the planner also gated on,
+    re-evaluated here so a model-authored (or buggy table) plan cannot
+    carry an out-of-population regimen to release. Unknown facts warn with
+    the missing item named; a stage-only failure covered by a declared
+    extrapolation is left to the boundary rule's warn."""
+    from ..knowledge.indications import (
+        INELIGIBLE, UNKNOWN as IND_UNKNOWN, evaluate_indication,
+    )
+
+    out: list[Violation] = []
+    declared_trials = ctx.declared_extrapolations
+    for rid in ctx.regimen_ids:
+        verdict = evaluate_indication(rid, ctx.stage_group, ctx.facts)
+        if not verdict["declared"]:
+            out.append(Violation(
+                "INDICATION_UNDECLARED", "warn",
+                f"{rid} carries no indication declaration — every library "
+                f"regimen must declare its population machine-executably.",
+            ))
+            continue
+        if verdict["verdict"] == INELIGIBLE:
+            failed = verdict["failed_conditions"]
+            stage_only = all(f.startswith("stage:") for f in failed)
+            regimen = regimen_lib.get(rid)
+            if stage_only and regimen \
+                    and declared_trials & set(regimen.trial_ids):
+                continue  # TRIAL_STAGE_EXTRAPOLATION already warns
+            out.append(Violation(
+                "INDICATION_PREDICATE", "block",
+                f"{rid} fails its declared indication: "
+                + "; ".join(failed),
+            ))
+        elif verdict["verdict"] == IND_UNKNOWN:
+            out.append(Violation(
+                "INDICATION_PREDICATE", "warn",
+                f"{rid}: indication unresolved — missing facts: "
+                + "; ".join(verdict["unknown_conditions"])
+                + ". Unknown routes to workup, not to a guess.",
+            ))
+    return out
+
+
 def _rule_ici_comorbidity(ctx: PlanContext) -> list[Violation]:
     comorbid = ctx.facts.get("comorbidities") or {}
     risky = comorbid.get("ild") or comorbid.get("active_autoimmune") \
@@ -569,6 +613,7 @@ RULES = (
     _rule_rt_dose,
     _rule_trial_stage_boundary,
     _rule_stage0_no_systemic,
+    _rule_indication_predicate,
     _rule_driver_first_line,
     _rule_ici_comorbidity,
     _rule_ps_gate,
