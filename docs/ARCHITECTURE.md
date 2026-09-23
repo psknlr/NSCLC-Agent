@@ -240,11 +240,27 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     relation per claim: dangling evidence ids, regimen-bearing claims
     with no releasable entailed support, and citations borrowed from a
     different claim are each named (`CLAIM_DANGLING_EVIDENCE` /
-    `CLAIM_UNSUPPORTED` / `CLAIM_SUPPORT_MISMATCH`). The narrowing holds
-    across the parallel wave's temp-id remap and the conversation
-    layer's plan reuse; a golden-set sweep pins the honest rule-mode
-    baseline at zero claim issues. Entailment is structural, not
-    semantic — the honest list says so.
+    `CLAIM_UNSUPPORTED` / `CLAIM_SUPPORT_MISMATCH`). Entailment is
+    two-layered: the structural layer proves a citation covers the
+    claimed REGIMEN; the population-semantic layer (v0.3.4) proves it
+    covers the claimed POPULATION. Claim subjects carry the population's
+    facts (stage + TNM descriptors, histology, a driver signature of
+    positive genes with variant-class tags), and every entailed trial
+    row is checked against them: stage within enrollment (edition-aware
+    via the same 8th-edition back-mapping the plan rule uses, honoring
+    plan-declared extrapolations for stage ONLY — a stage declaration
+    never excuses a driver or histology mismatch), driver class
+    (including co-occurring resistance classes that remove the case
+    from a classical enrollment), gene-level driver requirements,
+    EGFR/ALK-excluded trials, and histology restrictions
+    (`CLAIM_POPULATION_MISMATCH`). Population-statistic prognosis
+    claims must rest on cohort-grade evidence — a trial row is not a
+    survival statistic's source (`CLAIM_STATISTIC_SOURCE`). The
+    narrowing holds across the parallel wave's temp-id remap and the
+    conversation layer's plan reuse; a golden-set sweep pins the honest
+    rule-mode baseline at zero claim issues. Evidence TEXT is still not
+    semantically verified against claim wording — the honest list says
+    so.
 
 21. **The eval grades the safety net itself, and failures are classified
     clinical events.** Golden entries with `audit_plan` bypass the

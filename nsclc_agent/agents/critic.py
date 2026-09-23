@@ -107,13 +107,32 @@ class CriticAgent:
         The plan-level guard asks "does the citation pool contain something
         releasable"; this asks, for every high-stakes claim, "does THIS
         claim's evidence actually support THIS subject". Entailment is
-        structural and deterministic: a treatment-option claim is supported
-        by a releasable trial-registry row whose trial covers one of the
-        claimed intervention's regimens — a LAURA row cannot endorse the
-        cCRT claim, and a claim citing ids the ledger does not hold is a
-        broken audit trail, said out loud.
+        deterministic and two-layered: structurally, a treatment-option
+        claim is supported by a releasable trial-registry row whose trial
+        covers one of the claimed intervention's regimens — a LAURA row
+        cannot endorse the cCRT claim, and a claim citing ids the ledger
+        does not hold is a broken audit trail, said out loud. Semantically,
+        every entailed row is then checked against the claim's OWN
+        population facts (stage within enrollment, edition-aware; driver
+        class; histology): a right-regimen citation for the wrong
+        population — LAURA cited on a stage-IV claim, FLAURA on an
+        exon20ins population — is `CLAIM_POPULATION_MISMATCH`, and a
+        population-statistic claim resting on anything but cohort-grade
+        evidence is `CLAIM_STATISTIC_SOURCE`.
         """
         from ..knowledge import regimens as regimen_lib
+        from ..knowledge import trials as trial_lib
+        from ..knowledge.trials import resolve_trial_id
+        from ..state import EvidenceLevel
+
+        plan = state.outputs.get("treatment_plan") or {}
+        declared = frozenset(
+            resolved
+            for item in plan.get("extrapolations") or []
+            if isinstance(item, dict) and item.get("trial_id")
+            and item.get("justification")
+            and (resolved := resolve_trial_id(str(item["trial_id"])))
+        )
 
         issues: list[str] = []
         for claim in state.claims:
@@ -157,11 +176,35 @@ class CriticAgent:
                             f"regimen-bearing claim '{claim.text[:60]}' has "
                             f"no releasable evidence entailing "
                             f"{'/'.join(sorted(regimens))}")
+                # Semantic layer: the right regimen citation can still be
+                # the wrong population — verify each entailed row against
+                # the claim's own population facts.
+                for evidence in entailed:
+                    trial = (evidence.payload or {}).get("trial") or {}
+                    mismatches = trial_lib.population_mismatches(
+                        trial, claim.subject,
+                        declared_extrapolations=declared)
+                    if mismatches:
+                        issues.append(
+                            f"CLAIM_POPULATION_MISMATCH[{claim.claim_id}]: "
+                            f"{trial.get('trial_id')} does not cover this "
+                            f"claim's population — "
+                            f"{'; '.join(mismatches)}")
             elif claim.kind == "prognosis_context":
                 if rows and not releasable:
                     issues.append(
                         f"CLAIM_UNSUPPORTED[{claim.claim_id}]: prognosis "
                         f"claim rests only on non-releasable evidence")
+                elif claim.support_relation == "population_statistic" \
+                        and releasable and not any(
+                            e.level == EvidenceLevel.COHORT.value
+                            or e.level == EvidenceLevel.COHORT
+                            for e in releasable):
+                    issues.append(
+                        f"CLAIM_STATISTIC_SOURCE[{claim.claim_id}]: a "
+                        f"population-statistic claim must rest on "
+                        f"cohort-grade evidence — trial rows or guideline "
+                        f"text are not a survival statistic's source")
         return issues
 
     # ------------------------------------------------------------------ guard

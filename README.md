@@ -359,6 +359,31 @@ python -m nsclc_agent adjudicate iv_egfr_first_line \
 python -m nsclc_agent adjudicate --status        # 覆盖度 + 分歧清单
 ```
 
+### 人群语义蕴含（v0.3.4）
+
+Claim 级引用验证从「结构层」加深到「人群语义层」——结构层证明引用覆盖
+**所声称的方案**，本层进一步证明它覆盖**所声称的人群**：正确方案的引用
+配错人群同样不是支持。
+
+* **Claim subject 携带完整人群事实**：`population_stage` + TNM 描述符 +
+  组织学 + `population_drivers`（驱动基因签名：阳性基因 → 变异类标签，
+  阴性/未检测缺席，缺席只表示"此处非阳性"、永不表示"未检测"）。
+* **Critic 对每条 entailed 引用做确定性人群核对**
+  （`trials.population_mismatches`，dict 进 dict 出，台账行与并行波
+  缓冲行同一函数评判）：分期在试验入组界内（**8 版回映射感知**——TNM
+  改名不是错配；计划层已声明的外推在 claim 层被尊重、不重复举报，但
+  分期声明**永不豁免**驱动/组织学错配）；驱动变异类匹配入组类
+  （FLAURA 引在 exon20ins 人群 → 错配；C797S 共存把病例移出经典人群，
+  与 `egfr_classical` 同一纪律）；基因级要求（TRIDENT-1 引在非 ROS1
+  人群 → 错配）；EGFR/ALK 排除性试验（围术期 IO）引在 EGFR 阳性主张
+  → 错配；鳞癌主张引非鳞试验 → 错配。命中 →
+  `CLAIM_POPULATION_MISMATCH`，逐条点名试验与原因。
+* **生存统计主张的来源纪律**：`population_statistic` 关系的预后主张
+  必须落在**队列级证据**上——试验行或指南文本不是生存数字的出处
+  （`CLAIM_STATISTIC_SOURCE`）。
+* 部分 subject（手工构造、无人群字段的 claim）只做结构评判——语义层
+  只裁决 subject 实际断言的内容，不对缺失字段报假警。
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -477,7 +502,7 @@ nsclc_agent/
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   eval/run_eval.py 错误分类学评测 · eval/adjudication.py 双医师裁定台账
   schemas.py · skills.py · case.py · cli.py
-tests/         422 个用例，全离线    eval/       37 例金标准 + 指标
+tests/         436 个用例，全离线    eval/       37 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -485,7 +510,7 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 422 passed，全离线
+python -m pytest -q            # 436 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 37/37：分期25/25 路由11/11 方案22/22
                                # 安全27/27 · unsafe_release_rate 0/10 · 分类学全零
@@ -504,9 +529,10 @@ python -m nsclc_agent eval     # 金标准 37/37：分期25/25 路由11/11 方�
 **近似**数字——靶向/免疫时代同分期生存已系统性改善、第9版重新分组使同名
 组不完全可比（均已逐格注明），且系统在任何层面都**不做个体生存预测**、
 不给预后因素配数字权重；重放日志证明"重放与记录一致"，不证明"记录未被
-篡改"（需存储层签名）；claim 级蕴含是**结构性** regimen↔trial 匹配而非
-语义蕴含（subject 的 population/comparator 字段仍粗、证据文本内容未做
-语义核对）；schema 校验仍刻意保持浅层（形状
+篡改"（需存储层签名）；claim 级蕴含覆盖结构层（regimen↔trial）与人群
+语义层（分期/驱动类/组织学，v0.3.4），但**证据文本内容仍未做语义核对**
+（试验结果数字与主张措辞的一致性、comparator 与结局指标的匹配仍不在
+判定范围）；schema 校验仍刻意保持浅层（形状
 校验，非临床语义完备性）；治疗库（30 方案/30 试验/14 规则+30 适应证声明）覆盖主干驱动
 通路但仍是教学规模，未覆盖后线序贯、CNS 转移分层、器官功能剂量调整与
 药物相互作用决策；金标准 37 例（27 流水线 + 10 审计型探针）仍远少于严肃

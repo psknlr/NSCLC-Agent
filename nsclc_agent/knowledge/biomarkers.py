@@ -188,6 +188,35 @@ def first_line_actionable_drivers(facts: dict[str, Any]) -> list[dict[str, Any]]
     return found
 
 
+def population_signature(facts: dict[str, Any]) -> dict[str, list[str]]:
+    """Positive drivers as a JSON-safe signature for claim subjects.
+
+    Keys are normalized gene names, values the variant-class tags the
+    ontology can derive (empty when the gene is positive but class-free).
+    Genes that are negative or untested are absent — absence means "not
+    positive here", never "not tested" (the workup posture for untested
+    genes is the indication layer's job, not the claim subject's).
+    """
+    signature: dict[str, list[str]] = {}
+    for gene, value in _normalized_drivers(facts).items():
+        if driver_status(value) != "positive":
+            continue
+        if gene == "egfr":
+            signature[gene] = sorted(egfr_variant_classes(value))
+        elif gene == "met":
+            signature[gene] = (["ex14_skipping"]
+                               if _MET_EX14_RE.search(str(value)) else [])
+        elif gene == "braf":
+            signature[gene] = (["v600e"]
+                               if _BRAF_V600_RE.search(str(value)) else [])
+        elif gene == "kras":
+            signature[gene] = (["g12c"]
+                               if _KRAS_G12C_RE.search(str(value)) else [])
+        else:
+            signature[gene] = []
+    return signature
+
+
 def later_line_actionable_drivers(facts: dict[str, Any]) -> list[dict[str, Any]]:
     """Actionable in later lines only: informs, never vetoes first-line."""
     drivers = _normalized_drivers(facts)

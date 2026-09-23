@@ -1120,8 +1120,22 @@ class TreatmentAgent:
         ``protocol_grounded`` — its authority is the routed protocol
         module, and it does not borrow trial rows it is not entitled to.
         """
+        from ..knowledge.biomarkers import population_signature
+
         plan = state.outputs.get("treatment_plan") or {}
         stage_group = str(state.staging.get("stage_group") or "")
+        tnm = state.facts.get("tnm") or {}
+        # The population the claims are ABOUT, captured as facts so the
+        # critic can verify each cited trial semantically (stage within
+        # enrollment, edition-aware; driver class; histology) — not just
+        # structurally by regimen id.
+        population = {
+            "population_stage": stage_group,
+            "population_tnm": {k: tnm[k] for k in ("t", "n", "m")
+                               if tnm.get(k)},
+            "population_histology": state.facts.get("histologic_category"),
+            "population_drivers": population_signature(state.facts),
+        }
 
         # evidence_id → the trial its row certifies (registry lookups only).
         # In a parallel wave this agent's own rows still sit in the wave
@@ -1161,7 +1175,7 @@ class TreatmentAgent:
                 origin=plan.get("origin", "rule"),
                 subject={
                     "intervention_regimen_ids": regimen_ids,
-                    "population_stage": stage_group,
+                    **population,
                     "intent": plan.get("intent"),
                 },
                 support_relation="trial_anchor" if regimen_ids

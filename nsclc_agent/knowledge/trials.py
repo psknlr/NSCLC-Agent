@@ -559,3 +559,92 @@ def search(query: str, *, limit: int = 5) -> list[Trial]:
             scored.append((score, trial))
     scored.sort(key=lambda pair: (-pair[0], pair[1].trial_id))
     return [trial for _, trial in scored[:limit]]
+
+
+# ---------------------------------------------------------------------------
+# Population entailment (claim-level semantic check)
+# ---------------------------------------------------------------------------
+
+#: driver_class_required → (signature gene, tags that satisfy it, tags
+#: whose co-occurrence removes the case from that enrollment population
+#: even when a satisfying tag is present — the egfr_classical discipline).
+_CLASS_CHECKS: dict = {
+    "egfr_ex19del_l858r": ("egfr", frozenset({"ex19del", "l858r"}),
+                           frozenset({"exon20ins", "c797s"})),
+    "egfr_exon20ins": ("egfr", frozenset({"exon20ins"}), frozenset()),
+    "egfr_uncommon": ("egfr", frozenset({"g719x", "l861q", "s768i"}),
+                      frozenset({"exon20ins", "c797s"})),
+    "met_ex14": ("met", frozenset({"ex14_skipping"}), frozenset()),
+    "braf_v600e": ("braf", frozenset({"v600e"}), frozenset()),
+}
+
+#: trial histology restriction → subject histologies that contradict it.
+#: Unknown/NOS histology contradicts nothing here — unknowns are the
+#: indication layer's workup problem, not a citation mismatch.
+_HISTOLOGY_CONFLICTS = {
+    "nonsquamous": {"squamous"},
+    "squamous": {"adenocarcinoma", "non_squamous"},
+}
+
+
+def population_mismatches(trial: dict, subject: dict, *,
+                          declared_extrapolations=frozenset()) -> list[str]:
+    """Why this trial row does NOT cover the claim's population.
+
+    Empty list = covered. Dict-in/dict-out so it grades serialized ledger
+    rows and parallel-wave buffer rows alike; every check is skipped when
+    the subject does not carry the corresponding population field (a
+    hand-built claim without population facts is graded structurally
+    only). The stage check is edition-aware — the same 8th-edition
+    back-mapping the plan rule uses — and a stage-only gap for a trial
+    declared as an extrapolation is honored here too: declared at plan
+    level means warned at plan level, not re-flagged per claim. Driver
+    and histology mismatches are never excused by a stage declaration.
+    """
+    reasons: list[str] = []
+    trial_id = str(trial.get("trial_id") or "")
+
+    stage = str(subject.get("population_stage") or "")
+    groups = set(trial.get("stage_groups") or [])
+    if stage and groups and stage not in groups:
+        legacy = None
+        if int(trial.get("tnm_edition") or 8) == 8:
+            from ..staging.legacy8 import eighth_edition_group
+
+            tnm = subject.get("population_tnm") or {}
+            legacy = eighth_edition_group(
+                tnm.get("t"), tnm.get("n"), tnm.get("m"))
+        if legacy not in groups and trial_id not in declared_extrapolations:
+            reasons.append(
+                f"stage {stage} outside enrolled "
+                f"{'/'.join(sorted(groups))}")
+
+    signature = subject.get("population_drivers")
+    if isinstance(signature, dict):
+        check = _CLASS_CHECKS.get(str(trial.get("driver_class_required")
+                                      or ""))
+        if check:
+            gene, satisfying, disqualifying = check
+            tags = set(signature.get(gene) or [])
+            if not (tags & satisfying) or (tags & disqualifying):
+                reasons.append(
+                    f"population ({'/'.join(sorted(tags)) or f'no {gene}'}) "
+                    f"is not the {trial['driver_class_required']} "
+                    f"enrollment class")
+        elif trial.get("driver_required"):
+            gene = str(trial["driver_required"]).lower()
+            if gene not in signature:
+                reasons.append(
+                    f"population is not {trial['driver_required']}-positive")
+        if trial.get("egfr_alk_excluded") \
+                and ({"egfr", "alk"} & set(signature)):
+            reasons.append("the trial excluded EGFR/ALK-altered disease")
+
+    histology = str(subject.get("population_histology") or "").lower()
+    conflicts = _HISTOLOGY_CONFLICTS.get(
+        str(trial.get("histology") or "any"))
+    if histology and conflicts and histology in conflicts:
+        reasons.append(
+            f"{histology} histology cited on a "
+            f"{trial.get('histology')}-only trial")
+    return reasons
