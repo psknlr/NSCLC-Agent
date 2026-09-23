@@ -17,10 +17,50 @@ An optional LLM pass may ADD issues; nothing can remove one.
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 from ..safety import rules as rule_engine
 from ..state import CaseRunState, NON_RELEASABLE_LEVELS
+
+# Outcome-shaped figures: percentages, hazard ratios, month spans. Doses
+# are the dose channel's problem (DOSE_SCAN); TNM descriptors, stage
+# labels and trial names carry digits but none of these shapes.
+_OUTCOME_NUMERIC_RE = re.compile(
+    r"(?:HR|hazard\s+ratio|风险比)[\s≈~=:约为]*(?P<hr>[012]?\.\d+)"
+    r"|(?P<pct>\d+(?:\.\d+)?)\s*%"
+    r"|(?P<months>\d+(?:\.\d+)?)\s*(?:months?|个月)",
+    re.I,
+)
+_ANY_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _canon_number(text: str) -> str:
+    """'26.0' → '26', '.68' → '0.68': one spelling per value."""
+    out = text.lstrip("0") or "0"
+    if out.startswith("."):
+        out = "0" + out
+    if "." in out:
+        out = out.rstrip("0").rstrip(".") or "0"
+    return out
+
+
+def _outcome_numbers(text: str) -> set[str]:
+    found: set[str] = set()
+    for match in _OUTCOME_NUMERIC_RE.finditer(text or ""):
+        for value in match.groupdict().values():
+            if value:
+                found.add(_canon_number(value))
+    return found
+
+
+def _number_pool(chunks: list[str]) -> set[str]:
+    pool: set[str] = set()
+    for chunk in chunks:
+        pool.update(_canon_number(m.group(0))
+                    for m in _ANY_NUMBER_RE.finditer(chunk or ""))
+    return pool
 
 
 class CriticAgent:
@@ -56,6 +96,10 @@ class CriticAgent:
         # -- 2b. claim guard: per-claim entailment, not a shared pool ------
         checks_run.append("claim_guard")
         issues.extend(self._claim_guard(state))
+
+        # -- 2c. numeric provenance: outcome figures are never free --------
+        checks_run.append("numeric_provenance")
+        issues.extend(self._numeric_guard(state))
 
         # -- 3. report-proposed fact check ----------------------------------
         checks_run.append("proposed_fact_check")
@@ -205,6 +249,51 @@ class CriticAgent:
                         f"population-statistic claim must rest on "
                         f"cohort-grade evidence — trial rows or guideline "
                         f"text are not a survival statistic's source")
+        return issues
+
+    # ---------------------------------------------------- numeric provenance
+    @staticmethod
+    def _numeric_guard(state: CaseRunState) -> list[str]:
+        """Outcome figures are never free.
+
+        Any percentage, hazard ratio, or month figure in a high-stakes
+        claim's text must be present in the evidence rows THAT CLAIM
+        cites, or in the claimed regimens' own registry entries
+        (deterministic system knowledge — protocol durations and
+        thresholds live there). A figure with no provenance is treated
+        as fabricated and said out loud. This checks the number's
+        presence in the cited source, not the wording around it — the
+        honest list says so.
+        """
+        from ..knowledge import regimens as regimen_lib
+
+        issues: list[str] = []
+        for claim in state.claims:
+            if claim.kind not in ("treatment_option", "prognosis_context"):
+                continue
+            claimed = _outcome_numbers(claim.text)
+            if not claimed:
+                continue
+            chunks: list[str] = []
+            for eid in claim.evidence_ids:
+                evidence = state.evidence.get(eid)
+                if evidence is not None:
+                    chunks.append(json.dumps(evidence.payload or {},
+                                             ensure_ascii=False))
+                    chunks.append(evidence.summary or "")
+            for rid in claim.subject.get("intervention_regimen_ids") or []:
+                regimen = regimen_lib.get(str(rid))
+                if regimen is not None:
+                    chunks.append(json.dumps(regimen.summary(),
+                                             ensure_ascii=False))
+            pool = _number_pool(chunks)
+            for number in sorted(claimed - pool):
+                issues.append(
+                    f"CLAIM_NUMERIC_UNANCHORED[{claim.claim_id}]: figure "
+                    f"'{number}' in '{claim.text[:60]}' has no source in "
+                    f"the claim's cited evidence or the claimed regimens' "
+                    f"registry entries — a number without provenance may "
+                    f"not be released")
         return issues
 
     # ------------------------------------------------------------------ guard

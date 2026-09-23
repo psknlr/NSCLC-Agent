@@ -280,6 +280,20 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     named in the eval report, and disagree/needs_revision require notes.
     Knowledge upgrades converge; clinical judgment preserves dissent.
 
+22. **Outcome figures are never free.** Every outcome-shaped number in a
+    high-stakes claim's text — a percentage, a hazard ratio, a month
+    span — must be present in the evidence rows that claim cites, or in
+    the claimed regimens' own registry entries (deterministic system
+    knowledge: protocol durations, thresholds). A figure with no
+    provenance is `CLAIM_NUMERIC_UNANCHORED`: a fabricated number
+    cannot ride out on a well-cited claim. The extractor targets
+    outcome shapes only — doses belong to the dose channel, TNM
+    descriptors and stage labels and trial-name digits are structural —
+    so structural numerics never false-alarm. The guard checks the
+    number's PRESENCE in the cited source, not the wording around it;
+    a real number attached to the wrong endpoint is still invisible,
+    and the honest list says so.
+
 ## 3. LLM containment table
 
 | Capability | Model may | Model may not |
