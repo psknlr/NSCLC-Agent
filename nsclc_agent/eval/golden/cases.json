@@ -1024,6 +1024,163 @@
       }
     },
     {
+      "id": "iv_egfr_sclc_transformation_platinum_etoposide",
+      "_comment": "Mechanism-directed: small-cell transformation is a change of biology — SCLC-style chemo treats the transformed clone, the EGFR-directed second line correctly absent.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, progression on osimertinib, re-biopsy shows small cell transformation. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "osimertinib"
+              ],
+              "status": "progression"
+            }
+          ],
+          "progression_findings": {
+            "small_cell_transformation": true
+          }
+        },
+        "question": "转化后如何治疗？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "platinum_etoposide_transformation"
+        ],
+        "regimens_none": [
+          "amivantamab_chemo_subsequent",
+          "osimertinib_first_line"
+        ],
+        "trial_refs_any": [
+          "MARCOUX_SERIES"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
+    },
+    {
+      "id": "iv_egfr_met_amp_insight2_continuation",
+      "_comment": "Mechanism-directed: MET-amplified resistance — INSIGHT-2 continuation deliberately carries the same-drug warn as its documentation demand.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, progression on osimertinib, plasma NGS shows MET amplification. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "osimertinib"
+              ],
+              "status": "progression"
+            }
+          ],
+          "progression_findings": {
+            "met_amplification": true
+          }
+        },
+        "question": "MET扩增耐药怎么办？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "tepotinib_osimertinib_met_amp"
+        ],
+        "regimens_any_2": [
+          "amivantamab_chemo_subsequent"
+        ],
+        "trial_refs_any": [
+          "INSIGHT2"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "violations_required": [
+          {
+            "rule_id": "PROGRESSION_SAME_DRUG",
+            "severity": "warn"
+          }
+        ]
+      }
+    },
+    {
+      "id": "iv_egfr_third_line_dato_dxd",
+      "_comment": "Third line: TKI and platinum both exhausted — Dato-DXd (TROPION-Lung05 accelerated approval) plus the REVEL fallback.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, progression on osimertinib then on carboplatin-pemetrexed. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "progression_ngs_done": true,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "osimertinib"
+              ],
+              "status": "progression"
+            },
+            {
+              "line": 2,
+              "agents": [
+                "carboplatin",
+                "pemetrexed"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "三线选择？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "dato_dxd_egfr_subsequent"
+        ],
+        "regimens_any_2": [
+          "docetaxel_ramucirumab_second_line"
+        ],
+        "trial_refs_any": [
+          "TROPION_LUNG05"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "violations_forbidden": [
+          "PROGRESSION_SAME_DRUG"
+        ]
+      }
+    },
+    {
       "id": "audit_exon20ins_osimertinib_must_block",
       "_comment": "Safety-net golden case: crafted WRONG plan straight to the rule engine. unsafe_release if the net stays silent.",
       "audit_staging": {
@@ -1504,6 +1661,43 @@
       "expect": {
         "violations_forbidden": [
           "PROGRESSION_SAME_DRUG"
+        ]
+      }
+    },
+    {
+      "id": "audit_dato_dxd_without_prior_platinum_must_block",
+      "_comment": "Safety-net probe: Dato-DXd requires prior platinum — proposing it straight after the TKI line skips a whole line of therapy.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "osimertinib"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "dato_dxd_egfr_subsequent"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
         ]
       }
     }

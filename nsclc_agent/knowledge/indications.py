@@ -76,6 +76,10 @@ class Indication:
     requires_inoperable: bool = False
     requires_oligometastatic: bool = False
     requires_prior_systemic: bool = False
+    #: Approval requires prior PLATINUM-based chemotherapy specifically
+    #: (e.g. Dato-DXd's third-line position) — checked against the
+    #: recorded treatment history, not just "previously treated".
+    requires_prior_platinum: bool = False
     note: str = ""
 
 
@@ -277,6 +281,30 @@ def _eval_scalars(ind: Indication, facts: dict[str, Any]) -> list[dict[str, Any]
         else:
             out.append(_cond("prior_therapy", "previously treated", _UNKNOWN,
                              "treatment history not on record"))
+    if ind.requires_prior_platinum:
+        from .sequencing import treatment_history
+
+        history = treatment_history(facts)
+        platinum_terms = ("platinum", "carboplatin", "cisplatin",
+                          "卡铂", "顺铂", "铂")
+        agents = [a for e in history for a in e["agents"]]
+        prior_text = str(facts.get("prior_systemic_therapy") or "").lower()
+        if any(t in a for a in agents for t in platinum_terms) \
+                or any(t in prior_text for t in platinum_terms):
+            out.append(_cond("prior_platinum",
+                             "prior platinum-based chemotherapy", _MET,
+                             "platinum on the treatment record"))
+        elif history:
+            # The recorded history IS the record: no platinum listed
+            # means no platinum received, not "unknown".
+            out.append(_cond("prior_platinum",
+                             "prior platinum-based chemotherapy", _NOT_MET,
+                             "treatment history carries no platinum — "
+                             "this regimen comes AFTER the platinum line"))
+        else:
+            out.append(_cond("prior_platinum",
+                             "prior platinum-based chemotherapy", _UNKNOWN,
+                             "treatment history not on record"))
     return out
 
 
@@ -456,6 +484,21 @@ INDICATIONS: dict[str, Indication] = {i.regimen_id: i for i in (
                driver_class="kras_g12c", requires_prior_systemic=True,
                note="CodeBreaK 100: KRAS G12C, previously treated — "
                     "never first line"),
+    Indication("platinum_etoposide_transformation", _IV, driver="egfr",
+               requires_prior_systemic=True,
+               note="Small-cell transformation (re-biopsy finding) — "
+                    "retrospective evidence, tumor-board framing; the "
+                    "transformation itself is gated in sequencing, not "
+                    "expressible as a predicate field"),
+    Indication("tepotinib_osimertinib_met_amp", _IV, driver="egfr",
+               requires_prior_systemic=True,
+               note="INSIGHT 2: MET-amplified osimertinib resistance "
+                    "(phase 2, not approved) — the MET-amp finding is "
+                    "gated in sequencing"),
+    Indication("dato_dxd_egfr_subsequent", _IV, driver="egfr",
+               requires_prior_systemic=True, requires_prior_platinum=True,
+               note="TROPION-Lung05: EGFR-mutant after EGFR-directed "
+                    "therapy AND platinum — third line, never earlier"),
 )}
 
 

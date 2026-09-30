@@ -105,6 +105,26 @@ def _option(name: str, regimen_ids: list[str], rationale: str) -> dict:
     return {"name": name, "regimen_ids": regimen_ids, "rationale": rationale}
 
 
+def progression_findings(facts: dict[str, Any]) -> dict[str, Any]:
+    """Normalized resistance-mechanism findings from the progression
+    re-biopsy / plasma NGS. Presence of the fact means the question was
+    ASKED; every unstated mechanism is False-as-recorded, not unknown —
+    the report either found it or it did not."""
+    raw = facts.get("progression_findings")
+    if not isinstance(raw, dict):
+        return {"available": False, "met_amplification": False,
+                "c797s": False, "small_cell_transformation": False,
+                "other": ""}
+    return {
+        "available": True,
+        "met_amplification": bool(raw.get("met_amplification")),
+        "c797s": bool(raw.get("c797s")),
+        "small_cell_transformation": bool(
+            raw.get("small_cell_transformation")),
+        "other": str(raw.get("other") or ""),
+    }
+
+
 def sequencing_context(stage_group: str,
                        facts: dict[str, Any]) -> Optional[dict[str, Any]]:
     """Next-line context after explicit progression, or None while the
@@ -127,30 +147,91 @@ def sequencing_context(stage_group: str,
     alk_positive = driver_status(drivers.get("alk")) == "positive"
 
     if egfr_positive and progressed_on(facts, _THIRD_GEN_EGFR):
-        if not facts.get("progression_ngs_done"):
-            workup.append(
-                "Re-biopsy or plasma NGS AT PROGRESSION — MET "
-                "amplification, C797S and histologic (small-cell) "
-                "transformation each change the next line; the options "
-                "below are provisional until the resistance mechanism "
-                "question has been asked")
-        if egfr_classical(facts):
+        findings = progression_findings(facts)
+        if findings["small_cell_transformation"]:
+            # Different disease biology: the EGFR-directed options do
+            # not apply to the transformed clone.
             options.append(_option(
-                "Amivantamab + platinum-pemetrexed",
-                ["amivantamab_chemo_subsequent"],
-                "Post-osimertinib progression, EGFR ex19del/L858R: "
-                "MARIPOSA-2"))
-        options.append(_option(
-            "Platinum-pemetrexed chemotherapy",
-            ["platinum_pemetrexed_post_tki"],
-            "Post-TKI chemotherapy backbone; adding pembrolizumab did "
-            "not improve OS in this population (KEYNOTE-789) — chemo-IO "
-            "is not the default here"))
-        honest.append(
-            "Resistance-mechanism-directed strategies (MET-amp "
-            "combinations, transformation regimens, fourth-generation "
-            "TKIs) are NOT encoded — molecular tumor board on the "
-            "progression NGS result.")
+                "Platinum-etoposide (small-cell transformation)",
+                ["platinum_etoposide_transformation"],
+                "Histologic small-cell transformation: treat the "
+                "transformed clone with SCLC-style chemotherapy "
+                "(retrospective multicenter evidence — Marcoux series); "
+                "whether to continue the EGFR TKI alongside is an MDT "
+                "decision for any co-existing adenocarcinoma clone"))
+            cautions.append(
+                "Small-cell transformation is a change of disease "
+                "biology, not a new EGFR resistance mutation — "
+                "EGFR-directed second-line options (amivantamab-chemo) "
+                "do not address the transformed clone.")
+            honest.append(
+                "Transformation management beyond the platinum-etoposide "
+                "backbone (TKI continuation, radiotherapy integration, "
+                "mixed-histology dosing) is NOT encoded — thoracic "
+                "tumor board.")
+        elif progressed_on(facts, _CHEMO_AGENTS):
+            # Third line: TKI and platinum both exhausted.
+            options.append(_option(
+                "Datopotamab deruxtecan (TROP2 ADC)",
+                ["dato_dxd_egfr_subsequent"],
+                "EGFR-mutant after EGFR-directed therapy AND "
+                "platinum-based chemotherapy: TROPION-Lung05 "
+                "(accelerated approval)"))
+            options.append(_option(
+                "Docetaxel ± ramucirumab",
+                ["docetaxel_ramucirumab_second_line",
+                 "docetaxel_second_line"],
+                "Post-platinum single-agent standard (REVEL enrolled "
+                "EGFR-mutant patients)"))
+            honest.append(
+                "Beyond this line the corpus has no encoded standard — "
+                "trial enrollment and goals-of-care are the visit's "
+                "primary questions.")
+        else:
+            if not facts.get("progression_ngs_done") \
+                    and not findings["available"]:
+                workup.append(
+                    "Re-biopsy or plasma NGS AT PROGRESSION — MET "
+                    "amplification, C797S and histologic (small-cell) "
+                    "transformation each change the next line; the "
+                    "options below are provisional until the resistance "
+                    "mechanism question has been asked")
+            if findings["met_amplification"]:
+                options.append(_option(
+                    "Tepotinib + osimertinib (MET amplification)",
+                    ["tepotinib_osimertinib_met_amp"],
+                    "MET-amplification-driven resistance: INSIGHT 2 "
+                    "(phase 2) — a mechanism-directed CONTINUATION of "
+                    "osimertinib plus MET inhibition; the same-drug "
+                    "flag on this plan is the documentation demand, "
+                    "not an error"))
+            if findings["c797s"]:
+                cautions.append(
+                    "C797S on the progression report: no approved "
+                    "fourth-generation TKI — allele configuration "
+                    "(cis/trans with T790M) changes the theoretical "
+                    "options and belongs to the molecular tumor board; "
+                    "the chemotherapy-backbone options below remain the "
+                    "evidence-based next line.")
+            if egfr_classical(facts):
+                options.append(_option(
+                    "Amivantamab + platinum-pemetrexed",
+                    ["amivantamab_chemo_subsequent"],
+                    "Post-osimertinib progression, EGFR ex19del/L858R: "
+                    "MARIPOSA-2 (enrolled irrespective of resistance "
+                    "mechanism)"))
+            options.append(_option(
+                "Platinum-pemetrexed chemotherapy",
+                ["platinum_pemetrexed_post_tki"],
+                "Post-TKI chemotherapy backbone; adding pembrolizumab "
+                "did not improve OS in this population (KEYNOTE-789) — "
+                "chemo-IO is not the default here"))
+            honest.append(
+                "Mechanism-directed coverage is exactly two findings "
+                "deep (transformation → platinum-etoposide; MET-amp → "
+                "INSIGHT-2 continuation): fourth-generation TKIs and "
+                "other combinations are NOT encoded — molecular tumor "
+                "board on the progression NGS result.")
     elif alk_positive and progressed_on(facts, _LORLATINIB):
         options.append(_option(
             "Platinum-pemetrexed chemotherapy",
@@ -166,6 +247,17 @@ def sequencing_context(stage_group: str,
             "Lorlatinib", ["lorlatinib_post_second_gen"],
             "Progression on a second-generation ALK TKI: lorlatinib "
             "(third-generation, CNS-penetrant)"))
+    elif progressed_on(facts, ("docetaxel", "多西他赛")):
+        # Beyond the encoded lines: the honest boundary IS the answer.
+        cautions.append(
+            "Progression beyond docetaxel: this corpus has no encoded "
+            "later line — clinical-trial screening, best supportive "
+            "care and a goals-of-care conversation are the "
+            "evidence-based next steps, and saying so beats inventing "
+            "a regimen.")
+        honest.append(
+            "Post-docetaxel salvage (further ADCs, rechallenge "
+            "strategies) is NOT encoded.")
     elif progressed_on(facts, _IO_AGENTS) or progressed_on(facts,
                                                            _CHEMO_AGENTS):
         kras = drivers.get("kras")
@@ -199,8 +291,9 @@ def sequencing_context(stage_group: str,
         f"not apply; goals-of-care and trial-enrollment discussion "
         f"belong in this visit.")
     honest.append(
-        "Sequencing corpus is teaching-scale: third-line and beyond, "
-        "rechallenge strategies and antibody-drug-conjugate salvage "
-        "lines are not encoded.")
+        "Sequencing corpus is teaching-scale: coverage ends at the "
+        "named branches (mechanism-directed two findings deep, EGFR "
+        "third line, chemo-IO second line) — rechallenge criteria and "
+        "further salvage lines are not encoded.")
     return {"line": line, "options": options, "workup": workup,
             "cautions": cautions, "honest_notes": honest}

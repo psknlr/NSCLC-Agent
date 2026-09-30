@@ -548,6 +548,66 @@ TRIALS: tuple[Trial, ...] = (
         keywords=("docetaxel", "ramucirumab", "REVEL", "second line"),
     ),
     Trial(
+        "MARCOUX_SERIES",
+        "Marcoux et al. (SCLC-transformed EGFR-mutant NSCLC, "
+        "retrospective)", "N/A (retrospective)", "subsequent",
+        _s(*_STAGE_IV), driver_required="EGFR",
+        regimen_ids=("platinum_etoposide_transformation",),
+        results=("Retrospective multicenter series (n=67): "
+                 "platinum-etoposide response ~54% in transformed "
+                 "disease; median OS from transformation ~10.9 months",),
+        source="JCO 2019;37:278",
+        approval="NOT a trial — retrospective evidence; the standard is "
+                 "extrapolated from SCLC practice and framed by the "
+                 "thoracic tumor board",
+        enrollment_note="Histologically confirmed small-cell "
+                        "transformation required — a re-biopsy finding, "
+                        "never inferred from imaging",
+        caveats=("Retrospective series, not a randomized standard — the "
+                 "evidence grade is stated, not laundered",),
+        keywords=("small-cell transformation", "SCLC", "etoposide",
+                  "Marcoux"),
+    ),
+    Trial(
+        "INSIGHT2", "INSIGHT 2 (tepotinib + osimertinib, MET-amplified "
+        "resistance)", "NCT03940703", "subsequent",
+        _s(*_STAGE_IV), driver_required="EGFR",
+        regimen_ids=("tepotinib_osimertinib_met_amp",),
+        results=("Phase 2: ORR ~50% (FISH MET-amplified cohort) after "
+                 "first-line osimertinib progression",),
+        source="Lancet Oncol 2024;25:989",
+        approval="NOT approved — phase 2 evidence; guideline-listed "
+                 "option with MDT/trial framing",
+        enrollment_note="MET amplification on the progression biopsy "
+                        "required; osimertinib CONTINUES — the "
+                        "same-drug flag is by design",
+        caveats=("Phase 2 single-arm — frame as mechanism-directed "
+                 "option, not standard of care",),
+        keywords=("tepotinib", "MET amplification", "INSIGHT",
+                  "resistance", "osimertinib"),
+    ),
+    Trial(
+        "TROPION_LUNG05", "TROPION-Lung05 (datopotamab deruxtecan, "
+        "EGFR-mutant, later line)", "NCT04484142", "subsequent",
+        _s(*_STAGE_IV), driver_required="EGFR",
+        regimen_ids=("dato_dxd_egfr_subsequent",),
+        results=("ORR ~45% in EGFR-mutant NSCLC after EGFR-directed "
+                 "therapy and platinum-based chemotherapy (pooled with "
+                 "TROPION-Lung01 for the approval)",),
+        source="JCO 2025 (TROPION-Lung05); FDA review of pooled "
+               "TROPION-Lung05/01",
+        approval="FDA 2025-06 accelerated: datopotamab deruxtecan, "
+                 "EGFR-mutant NSCLC after prior EGFR-directed therapy "
+                 "AND platinum-based chemotherapy",
+        enrollment_note="Requires BOTH prior EGFR-directed therapy and "
+                        "prior platinum — a third-line option, never "
+                        "earlier; stomatitis and ILD are the key "
+                        "toxicities",
+        caveats=("Accelerated approval on response rate — confirmatory "
+                 "data pending",),
+        keywords=("datopotamab", "Dato-DXd", "TROP2", "ADC", "EGFR"),
+    ),
+    Trial(
         "CODEBREAK100", "CodeBreaK 100 (sotorasib, KRAS G12C, later line)",
         "NCT03600883", "subsequent",
         _s(*_STAGE_IV), driver_required="KRAS",

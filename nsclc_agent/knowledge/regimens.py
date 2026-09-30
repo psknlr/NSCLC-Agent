@@ -465,6 +465,50 @@ REGIMENS: tuple[Regimen, ...] = (
                    "modern reference",
     ),
     Regimen(
+        "platinum_etoposide_transformation",
+        "Platinum-etoposide (small-cell transformation)", "subsequent",
+        (_C("carboplatin", "per label (AUC-based — not encoded)"),
+         _C("etoposide", "per label (BSA-based — not encoded)")),
+        trial_ids=("MARCOUX_SERIES",),
+        monitoring=("cytopenias (deep nadirs typical of SCLC-style "
+                    "chemotherapy)", "febrile neutropenia"),
+        dose_gates=("transformation_confirmed", "prior_systemic_therapy"),
+        label_note="Histologic small-cell transformation of EGFR-mutant "
+                   "NSCLC — treats the TRANSFORMED clone; retrospective "
+                   "evidence, thoracic tumor board framing",
+    ),
+    Regimen(
+        "tepotinib_osimertinib_met_amp",
+        "Tepotinib + osimertinib (MET-amplified resistance)", "subsequent",
+        (_C("tepotinib", "per label (not encoded)", schedule="daily"),
+         _C("osimertinib", "per label (not encoded)", schedule="daily")),
+        trial_ids=("INSIGHT2",),
+        monitoring=("peripheral edema (tepotinib)", "QTc", "ILD",
+                    "hepatotoxicity"),
+        dose_gates=("egfr_positive", "met_amplification_confirmed",
+                    "prior_systemic_therapy"),
+        label_note="MET-amplification-driven osimertinib resistance: "
+                   "phase 2 (INSIGHT 2) — a mechanism-directed "
+                   "CONTINUATION of osimertinib, deliberately carrying "
+                   "the same-drug flag as its documentation demand; not "
+                   "an approved indication, MDT/trial framing",
+    ),
+    Regimen(
+        "dato_dxd_egfr_subsequent",
+        "Datopotamab deruxtecan (TROPION-Lung05)", "subsequent",
+        (_C("datopotamab deruxtecan",
+            "per label (weight-based — not encoded)", schedule="q3w"),),
+        trial_ids=("TROPION_LUNG05",),
+        monitoring=("stomatitis/oral mucositis — key toxicity",
+                    "ILD/pneumonitis", "ocular surface events",
+                    "cytopenias"),
+        dose_gates=("egfr_positive", "prior_systemic_therapy",
+                    "prior_platinum"),
+        label_note="EGFR-mutant NSCLC after BOTH EGFR-directed therapy "
+                   "AND platinum-based chemotherapy (accelerated "
+                   "approval) — a third-line option, never earlier",
+    ),
+    Regimen(
         "sotorasib_subsequent_line",
         "Sotorasib (KRAS G12C, CodeBreaK 100)", "subsequent",
         (_C("sotorasib", "per label (not encoded)", schedule="daily"),),

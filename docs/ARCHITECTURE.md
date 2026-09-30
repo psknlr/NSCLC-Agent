@@ -339,6 +339,27 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     prior-systemic indication conditions directly — one fact channel,
     no double entry.
 
+25. **Resistance mechanisms are findings, not guesses.** The
+    progression re-biopsy/plasma NGS result is a structured fact
+    (`progression_findings`) whose presence means the question was
+    ASKED; every unlisted mechanism is false-as-recorded, never
+    unknown. Mechanism-directed coverage is exactly two findings deep
+    and says so: small-cell transformation switches the biology
+    (platinum-etoposide treats the transformed clone, the
+    EGFR-directed second line is deliberately absent, and the
+    retrospective evidence grade is stated, not laundered); MET
+    amplification proposes the INSIGHT-2 continuation, on which the
+    same-drug warn fires BY DESIGN — it is the documentation demand
+    for continuing a progressed drug, and the continuation regimen
+    joins the classical-EGFR family so the variant-mismatch net covers
+    it. C797S gets an honest caution (no approved fourth-generation
+    TKI) while the chemotherapy backbone stays the evidence-based next
+    line — no phantom TKI is ever proposed. The third line requires
+    its record: Dato-DXd's declaration carries `requires_prior_platinum`,
+    so a plan that skips the platinum line is blocked by the predicate,
+    and beyond docetaxel the corpus recommends the honest boundary
+    itself — trial screening, best supportive care, goals of care.
+
 ## 3. LLM containment table
 
 | Capability | Model may | Model may not |

@@ -462,6 +462,32 @@ Claim 级引用验证从「结构层」加深到「人群语义层」——结�
   unsafe_release_rate 0/15；每个序贯选项 claim 各自绑定自己的试验行
   （MARIPOSA-2 / KEYNOTE-789 / REVEL），三层证据护栏零问题。
 
+### 耐药机制定向 + 三线（v0.6.0）
+
+序贯语料从"线次"深化到"机制"——进展期 NGS 的发现改变答案，且**发现是
+问出来的，不是猜出来的**：
+
+* **`progression_findings` 结构化事实**：事实在场即代表耐药机制问题
+  已问过；每个未列出的机制是"报告未见"而非"未知"（报告要么找到了、
+  要么没有）。
+* **小细胞转化 → 铂-依托泊苷**（Marcoux 回顾性多中心系列，证据级别
+  如实标注不洗白）：转化是**疾病生物学的改变**而非新耐药突变——
+  EGFR 定向二线选项正确缺席，TKI 是否与转化克隆并行由 MDT 决定。
+* **MET 扩增 → 替泊替尼+奥希替尼**（INSIGHT 2，二期、未获批、
+  MDT/试验框架）：机制定向的**继续用药**——`PROGRESSION_SAME_DRUG`
+  warn **有意保留**，它就是"继续已进展药物须书面说明理由"的文档要求
+  本身，不是误报；该方案同时纳入经典 EGFR 家族，exon20ins 够不着它
+  （变异错配网覆盖）。
+* **C797S → 诚实警示**：无获批四代 TKI，顺反构型问题归分子肿瘤板，
+  化疗骨架仍是循证下一线——不发明幻影 TKI。
+* **三线（TKI 与铂类双双用尽）→ Dato-DXd**（TROPION-Lung05，
+  2025-06 加速批准、确证数据未出已注明）+ REVEL 兜底；适应证声明
+  新增 **`requires_prior_platinum`** 条件——病史里没有铂类，
+  Dato-DXd 想跳线直接 `INDICATION_PREDICATE` block（审计探针钉住）。
+* **多西他赛之后 → 语料到此为止**：无编码方案，试验筛选/最佳支持
+  治疗/目标对话是循证下一步——说"没有"胜过发明一个。方案库 36→39、
+  试验 35→38、声明 36→39；金标准 48→52，unsafe_release_rate 0/16。
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -485,7 +511,7 @@ python -m nsclc_agent run --presentation "肺癌病史，突然大咯血不止"
 
 # 4. 批量 + 金标准评测
 python -m nsclc_agent batch examples/cases -o out/ --resume
-python -m nsclc_agent eval                    # 48 例金标准（33 流水线 + 15 审计型安全网探针）
+python -m nsclc_agent eval                    # 52 例金标准（36 流水线 + 16 审计型安全网探针）
 
 # 5. 记录与离线复核
 python -m nsclc_agent run --case examples/cases/stage3b_unresectable_egfr.json \
@@ -563,7 +589,7 @@ r3 = sess.turn("已核对报告。", facts={"pd_l1": {"tps": 60}})  # 结构化�
 ```
 nsclc_agent/
   staging/     tnm.py 分期引擎(9版表+拒绝表) · router.py · selftest.py
-  knowledge/   trials.py 35项试验注册表(分期边界/驱动限制机器可查)
+  knowledge/   trials.py 38项试验注册表(分期边界/驱动限制机器可查)
                regimens.py 方案库(摘要无剂量/详情即剂量通道) · interactions.py
   safety/      emergencies.py 急症筛查(子句级否定) · rules.py 17条规则引擎
   interview/   axes.py 17条NSCLC问诊轴(VOI层) · adequacy.py · loop.py
@@ -580,7 +606,7 @@ nsclc_agent/
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   eval/run_eval.py 错误分类学评测 · eval/adjudication.py 双医师裁定台账
   schemas.py · skills.py · case.py · cli.py
-tests/         471 个用例，全离线    eval/       48 例金标准 + 指标
+tests/         481 个用例，全离线    eval/       52 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -588,10 +614,10 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 471 passed，全离线
+python -m pytest -q            # 481 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
-python -m nsclc_agent eval     # 金标准 48/48：分期31/31 路由11/11 方案26/26
-                               # 安全33/33 · unsafe_release_rate 0/15 · 分类学全零
+python -m nsclc_agent eval     # 金标准 52/52：分期34/34 路由11/11 方案29/29
+                               # 安全36/36 · unsafe_release_rate 0/16 · 分类学全零
 ```
 
 ## 仍未完成（诚实清单）
@@ -612,12 +638,15 @@ python -m nsclc_agent eval     # 金标准 48/48：分期31/31 路由11/11 方�
 源中存在，v0.3.5），但**措辞级语义仍未核对**——数字溯源守"无中生有"
 不守"错配语境的措辞"（一个真实存在于引用行的数字被安在错误的结局指标
 或 comparator 上仍不可见）；schema 校验仍刻意保持浅层（形状
-校验，非临床语义完备性）；治疗库（36 方案/35 试验/17 规则+36 适应证声明）覆盖主干驱动
+校验，非临床语义完备性）；治疗库（39 方案/38 试验/17 规则+39 适应证声明）覆盖主干驱动
 通路但仍是教学规模，未覆盖器官功能剂量调整与药物相互作用决策；后线
-序贯（v0.5.0）止步于二线主干——三线及以后、rechallenge 判据、ADC
-挽救线与**耐药机制定向策略**（MET 扩增联合、C797S 换代、小细胞转化
-方案）均未编码、显式路由分子肿瘤板，REVEL 入组早于化疗-IO 一线时代
-（"化疗-IO 进展后用"是接受的惯例而非其入组人群，注册表 caveat 已注明）；
+序贯覆盖二线主干、两种耐药机制（转化/MET 扩增，v0.6.0）与 EGFR 三线
+（Dato-DXd）——机制定向**恰好两个发现深**：C797S 只有警示（无获批四代
+TKI）、四代 TKI 与其他机制组合未编码，rechallenge 判据未编码，多西他赛
+之后的挽救线未编码（诚实收边即答案），转化方案是回顾性证据、Dato-DXd
+是确证数据未出的加速批准（注册表逐条注明），REVEL 入组早于化疗-IO
+一线时代（"化疗-IO 进展后用"是接受的惯例而非其入组人群，注册表
+caveat 已注明）；
 CNS 分层（v0.4.0）是教学规模的策略分层——SRS/WBRT 选择、分割、
 激素剂量与手术指征是神经肿瘤 MDT 的通道，软脑膜病变策略（鞘内治疗、
 加量 TKI）明言不在语料内、推荐即转诊，激素依赖对 ICI 疗效的影响未

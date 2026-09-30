@@ -470,7 +470,7 @@ def _rule_progression_same_drug(ctx: PlanContext) -> list[Violation]:
 _CLASSICAL_EGFR_REGIMENS = frozenset({
     "osimertinib_first_line", "osimertinib_chemo_first_line",
     "amivantamab_lazertinib", "osimertinib_adjuvant",
-    "osimertinib_consolidation",
+    "osimertinib_consolidation", "tepotinib_osimertinib_met_amp",
 })
 
 
