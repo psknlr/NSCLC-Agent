@@ -267,8 +267,11 @@ TRIALS: tuple[Trial, ...] = (
         "FLAURA", "FLAURA (first-line osimertinib)", "NCT02296125", "first_line",
         _s(*_STAGE_IV), driver_required="EGFR", driver_class_required="egfr_ex19del_l858r",
         regimen_ids=("osimertinib_first_line",),
-        results=("PFS HR 0.46 (95% CI 0.37–0.57); OS HR 0.80 (95.05% CI 0.64–1.00)",),
-        source="NEJM 2018;378:113 (PFS); NEJM 2020;382:41 (OS)",
+        results=("PFS HR 0.46 (95% CI 0.37–0.57); OS HR 0.80 (95.05% CI 0.64–1.00)",
+                 "CNS subset: CNS PFS HR 0.48; CNS ORR 91% vs 68% "
+                 "(CNS full-analysis set)"),
+        source="NEJM 2018;378:113 (PFS); NEJM 2020;382:41 (OS); "
+               "JCO 2018;36:3290 (CNS subset)",
         approval="FDA 2018-04 first-line osimertinib, metastatic EGFR ex19del/L858R "
                  "(no histology restriction in the label)",
         enrollment_note="Advanced/metastatic EGFR+, predominantly adenocarcinoma "
@@ -299,7 +302,9 @@ TRIALS: tuple[Trial, ...] = (
         "CROWN", "CROWN (first-line lorlatinib)", "NCT03052608", "first_line",
         _s(*_STAGE_IV), driver_required="ALK",
         regimen_ids=("lorlatinib_first_line",),
-        results=("PFS HR 0.27 (95% CI 0.18–0.39); 5-year PFS ~60% (HR 0.19 at long-term follow-up)",),
+        results=("PFS HR 0.27 (95% CI 0.18–0.39); 5-year PFS ~60% (HR 0.19 at long-term follow-up)",
+                 "Intracranial response 82% vs 23% with baseline measurable "
+                 "CNS disease"),
         source="NEJM 2020;383:2018; JCO 2024 long-term update",
         approval="FDA 2021-03 first-line lorlatinib, metastatic ALK+",
         enrollment_note="High CNS activity; CNS-penetrant; watch lipids and neurocognitive effects",

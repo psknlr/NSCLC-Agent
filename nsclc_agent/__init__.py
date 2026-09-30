@@ -33,7 +33,7 @@ from .staging import (
 )
 from .state import CaseRunState, EvidenceLevel
 
-__version__ = "0.3.5"
+__version__ = "0.4.0"
 
 __all__ = [
     "Case",

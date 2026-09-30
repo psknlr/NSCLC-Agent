@@ -27,7 +27,7 @@
  ToolLoop       ReAct 取证 → CapabilityBroker（角色/技能/熔断/预算）  分期 → 协议模块路由
  InterviewLoop  组织追问   → AdequacyJudge（必答轴规则判定，blocked    试验注册表（分期边界机器可查）
                              永不可被模型/轮次上限豁免）              方案库（剂量只在确定性通道）
- PerceptionAgent 读片提议  → 描述符词表校验 + 归一化交叉核对          安全规则引擎（14条确定性规则）
+ PerceptionAgent 读片提议  → 描述符词表校验 + 归一化交叉核对          安全规则引擎（16条确定性规则）
  MDT Panel      专科子体   → 最保守合成（最高紧急度，非多数票）        肿瘤急症筛查（子句级否定）
  CriticAgent    终审追加   → finally 无条件执行 + 引用核验            证据台账（工具自declare等级）
 ```
@@ -403,6 +403,34 @@ Claim 级引用验证从「结构层」加深到「人群语义层」——结�
   不是数字周边措辞的语义一致性（comparator、结局指标的匹配仍在
   诚实清单）。
 
+### CNS 转移分层（v0.4.0）
+
+脑转移根本性改变 IV 期策略，此前"M1 就是 M1"的粗模型完全看不见它
+（红队语料缺口）。`knowledge/cns.py` 给 planner 与 critic 一份**共享的
+确定性 CNS 读数**，分层而不处方：
+
+* **事实优先、诚实未知**：`cns_metastases` 结构化事实
+  （status/symptomatic/treated/burden/leptomeningeal），未声明即
+  unknown、永不推定。叙述里**明确的阴性脑影像陈述**（"brain MRI
+  negative"/"脑MRI阴性"）按急症筛查同款 setdefault 纪律种入
+  `absent`——**阳性影像陈述不种任何东西**（散文不能断言疾病，
+  只有结构化事实能）。
+* **IV 期策略分层**：CNS 未知 → 脑 MRI 入 workup、方案转临时姿态；
+  无症状未治 + CNS 活性靶向药（EGFR/ALK/RET/NTRK，FLAURA CNS 亚组 /
+  CROWN 颅内数据已入注册表）→ 先全身、局部延迟，附 MRI 随访警示；
+  驱动阴性 + 脑转移 → 局部治疗选项（SRS/全脑按负荷框架，分割与剂量
+  是放疗科的通道、永不在此产出）；**有症状未治 → CNS 局部处理领跑
+  选项列表**，"不得只做全身"入 uncertainty；**软脑膜病变是诚实边界**
+  ——推荐本身就是神经肿瘤专科转诊，鞘内/加量 TKI 策略明言不在语料内。
+* **Critic 独立执法**（两条新规则，14→16）：有症状未治脑转移（或
+  软脑膜病变）配纯全身方案 → `CNS_UNTREATED_SYMPTOMATIC` **block**
+  ——模型作者的方案无视 CNS 也过不了终局 critic；脑转移在案而 TNM
+  写 M0 → `CNS_TNM_INCONSISTENT` warn——矛盾被点名、永不静默修复
+  （分期引擎仍是唯一分期权威）。
+* 金标准 37 → 43 例（+3 流水线：CNS 活性 TKI 先行 / 有症状局部领跑 /
+  软脑膜转诊；+3 审计探针：纯全身必拦、已处理 CNS 不许误报、M0 矛盾
+  必警），unsafe_release_rate 0/13。
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -426,7 +454,7 @@ python -m nsclc_agent run --presentation "肺癌病史，突然大咯血不止"
 
 # 4. 批量 + 金标准评测
 python -m nsclc_agent batch examples/cases -o out/ --resume
-python -m nsclc_agent eval                    # 37 例金标准（27 流水线 + 10 审计型安全网探针）
+python -m nsclc_agent eval                    # 43 例金标准（30 流水线 + 13 审计型安全网探针）
 
 # 5. 记录与离线复核
 python -m nsclc_agent run --case examples/cases/stage3b_unresectable_egfr.json \
@@ -506,7 +534,7 @@ nsclc_agent/
   staging/     tnm.py 分期引擎(9版表+拒绝表) · router.py · selftest.py
   knowledge/   trials.py 20项试验注册表(分期边界/驱动限制机器可查)
                regimens.py 方案库(摘要无剂量/详情即剂量通道) · interactions.py
-  safety/      emergencies.py 急症筛查(子句级否定) · rules.py 14条规则引擎
+  safety/      emergencies.py 急症筛查(子句级否定) · rules.py 16条规则引擎
   interview/   axes.py 17条NSCLC问诊轴(VOI层) · adequacy.py · loop.py
   perception/  imaging.py 读片(词表校验/归一化交叉核对/拒绝文本模型)
   tools/       base.py Broker+熔断 · registry.py 11个工具 · retrieval.py 实连检索
@@ -521,7 +549,7 @@ nsclc_agent/
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   eval/run_eval.py 错误分类学评测 · eval/adjudication.py 双医师裁定台账
   schemas.py · skills.py · case.py · cli.py
-tests/         444 个用例，全离线    eval/       37 例金标准 + 指标
+tests/         460 个用例，全离线    eval/       43 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -529,10 +557,10 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 444 passed，全离线
+python -m pytest -q            # 460 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
-python -m nsclc_agent eval     # 金标准 37/37：分期25/25 路由11/11 方案22/22
-                               # 安全27/27 · unsafe_release_rate 0/10 · 分类学全零
+python -m nsclc_agent eval     # 金标准 43/43：分期28/28 路由11/11 方案24/24
+                               # 安全30/30 · unsafe_release_rate 0/13 · 分类学全零
 ```
 
 ## 仍未完成（诚实清单）
@@ -553,9 +581,13 @@ python -m nsclc_agent eval     # 金标准 37/37：分期25/25 路由11/11 方�
 源中存在，v0.3.5），但**措辞级语义仍未核对**——数字溯源守"无中生有"
 不守"错配语境的措辞"（一个真实存在于引用行的数字被安在错误的结局指标
 或 comparator 上仍不可见）；schema 校验仍刻意保持浅层（形状
-校验，非临床语义完备性）；治疗库（30 方案/30 试验/14 规则+30 适应证声明）覆盖主干驱动
-通路但仍是教学规模，未覆盖后线序贯、CNS 转移分层、器官功能剂量调整与
-药物相互作用决策；金标准 37 例（27 流水线 + 10 审计型探针）仍远少于严肃
+校验，非临床语义完备性）；治疗库（30 方案/30 试验/16 规则+30 适应证声明）覆盖主干驱动
+通路但仍是教学规模，未覆盖后线序贯、器官功能剂量调整与药物相互作用
+决策；CNS 分层（v0.4.0）是教学规模的策略分层——SRS/WBRT 选择、分割、
+激素剂量与手术指征是神经肿瘤 MDT 的通道，软脑膜病变策略（鞘内治疗、
+加量 TKI）明言不在语料内、推荐即转诊，激素依赖对 ICI 疗效的影响未
+建模，问诊轴未加 CNS 症状轴（急症筛查已覆盖癫痫/剧烈头痛短路）；
+金标准 43 例（30 流水线 + 13 审计型探针）仍远少于严肃
 临床验证所需的 100–200 例边界病例集——双医师裁定台账已就绪（分歧并存、
 内容寻址作废、覆盖度入 eval 报告），但**裁定本身是人的工作，出厂台账为
 空**，且裁定人身份**记录而不认证**（依赖操作环境访问控制与台账 git 审阅）；

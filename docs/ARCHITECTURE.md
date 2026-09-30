@@ -294,6 +294,28 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     a real number attached to the wrong endpoint is still invisible,
     and the honest list says so.
 
+23. **The CNS is stratified, never assumed — and never ignored.** One
+    deterministic reading of the CNS facts (`knowledge/cns.py`) serves
+    both the planner and the critic: unstated is unknown (a stage-IV
+    plan without CNS status routes a brain MRI to workup and goes
+    provisional), a negative brain-imaging statement in prose may seed
+    `absent` under the same setdefault discipline as the emergency
+    screen's negations, and a POSITIVE imaging statement seeds nothing
+    — prose never asserts disease. Strategy stratifies instead of
+    prescribing: CNS-active first-line agents may defer local therapy
+    with surveillance named; driver-negative brain mets carry the
+    local-therapy option; symptomatic untreated disease puts
+    CNS-directed care at the head of the option list; leptomeningeal
+    disease is an honest boundary whose recommendation IS the
+    specialist referral. The critic enforces independently:
+    systemic-only planning over symptomatic untreated brain metastases
+    (or LM) blocks (`CNS_UNTREATED_SYMPTOMATIC`) whoever authored the
+    plan, and brain metastases recorded against an M0 TNM is a named
+    contradiction (`CNS_TNM_INCONSISTENT`), never a silent repair —
+    the staging engine remains the only staging authority.
+    Fractionation, radiosurgery selection and steroid dosing stay in
+    the neuro-oncology MDT's channel; nothing here emits them.
+
 ## 3. LLM containment table
 
 | Capability | Model may | Model may not |

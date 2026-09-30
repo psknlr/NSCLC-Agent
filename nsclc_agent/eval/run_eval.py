@@ -152,6 +152,10 @@ def _check(state: Any, expect: dict[str, Any]) -> list[dict[str, str]]:
         if needle.lower() in plan_blob:
             failures.append(_fail(
                 "major_harmful", f"plan mentions forbidden {needle!r}"))
+    for needle in expect.get("plan_mentions") or []:
+        if needle.lower() not in plan_blob:
+            failures.append(_fail(
+                "omission", f"plan missing expected mention {needle!r}"))
     violations = (state.outputs.get("safety_audit") or {}).get("violations") or []
     failures.extend(_check_violations(violations, expect))
     return failures

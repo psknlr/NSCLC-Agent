@@ -604,6 +604,56 @@ def _rule_dose_scan(ctx: PlanContext) -> list[Violation]:
     return []
 
 
+#: Plan-text markers proving CNS-directed care is IN the plan. Broad on
+#: purpose: the rule asks "was the CNS addressed at all", not "was it
+#: addressed well" — sequencing quality is the MDT's judgment.
+_CNS_LOCAL_MARKERS = (
+    "srs", "stereotactic", "radiosurgery", "whole-brain", "wbrt",
+    "neurosurg", "cns-directed", "neuro-oncology", "神经外科", "放射外科",
+    "全脑", "脑局部", "神经肿瘤",
+)
+
+
+def _rule_cns_untreated_symptomatic(ctx: PlanContext) -> list[Violation]:
+    """Symptomatic untreated brain metastases (or leptomeningeal disease)
+    with a systemic-only plan: block. Independent of the planner's own
+    stratification — a model-authored plan that ignores the CNS must not
+    survive the critic."""
+    from ..knowledge.cns import cns_status
+
+    reading = cns_status(ctx.facts)
+    if reading["status"] != "present" or not ctx.regimen_ids:
+        return []
+    dangerous = (reading["symptomatic"] and not reading["treated"]) \
+        or bool(reading["leptomeningeal"])
+    if not dangerous:
+        return []
+    text = ctx.plan_text.lower()
+    if any(marker in text for marker in _CNS_LOCAL_MARKERS):
+        return []
+    label = ("leptomeningeal disease" if reading["leptomeningeal"]
+             else "symptomatic untreated brain metastases")
+    return [Violation(
+        "CNS_UNTREATED_SYMPTOMATIC", "block",
+        f"The record shows {label} but the plan proposes systemic therapy "
+        f"with no CNS-directed component (no neurosurgery/radiation-"
+        f"oncology/neuro-oncology involvement, no local-therapy option). "
+        f"Address the CNS explicitly before any systemic-only release.",
+    )]
+
+
+def _rule_cns_tnm_consistency(ctx: PlanContext) -> list[Violation]:
+    """CNS metastases on record while the descriptors say M0: name the
+    contradiction; never repair it (the staging engine stays the only
+    staging authority)."""
+    from ..knowledge.cns import tnm_conflict
+
+    conflict = tnm_conflict(ctx.facts)
+    if conflict:
+        return [Violation("CNS_TNM_INCONSISTENT", "warn", conflict)]
+    return []
+
+
 RULES = (
     _rule_n3_no_surgery,
     _rule_driver_excludes_periop_io,
@@ -615,6 +665,8 @@ RULES = (
     _rule_stage0_no_systemic,
     _rule_indication_predicate,
     _rule_driver_first_line,
+    _rule_cns_untreated_symptomatic,
+    _rule_cns_tnm_consistency,
     _rule_ici_comorbidity,
     _rule_ps_gate,
     _rule_biomarker_before_systemic,

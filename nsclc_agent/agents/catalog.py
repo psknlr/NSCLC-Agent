@@ -10,6 +10,7 @@ runnable, testable and teachable fully offline.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -39,6 +40,19 @@ _SCREEN_AXIS_FACTS = {
     "febrile_neutropenia": "emergency_fever_screen",
 }
 
+#: An explicit negative brain-imaging statement in the narrative seeds
+#: ``cns_metastases: absent`` (setdefault only — structured facts win).
+#: The pattern REQUIRES a negative token near the modality; "brain MRI
+#: shows metastases" matches nothing and CNS status stays unknown. This
+#: is the only CNS fact ever read from prose.
+_CNS_NEGATIVE_IMAGING_RE = re.compile(
+    r"(?:brain\s*mri|mri\s*brain|脑\s*mri|颅脑\s*(?:mri|磁共振)|头颅\s*mri)"
+    r"[^.;。；]{0,40}?"
+    r"(?:negative|clear|m0|no\s+(?:brain\s+)?met|unremarkable|"
+    r"阴性|未见|无转移|排除)",
+    re.I,
+)
+
 
 # --------------------------------------------------------------------- intake
 
@@ -63,6 +77,11 @@ class IntakeAgent:
             fact = _SCREEN_AXIS_FACTS.get(hit["signal_id"])
             if fact:
                 state.facts.setdefault(fact, f"positive:{hit['signal_id']}")
+        if _CNS_NEGATIVE_IMAGING_RE.search(state.complaint or ""):
+            state.facts.setdefault(
+                "cns_metastases",
+                {"status": "absent",
+                 "source": "presentation_imaging_statement"})
         eid = state.add_evidence(
             EvidenceLevel.OBSERVED, "emergency_screen",
             f"{len(screen.hard_hits)} hard / {len(screen.soft_hits)} soft "
@@ -387,6 +406,8 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
     Not a model stub — this is the deterministic decision table distilled from
     the protocol modules, and it must itself pass the safety rule engine.
     """
+    from ..knowledge.cns import tnm_conflict
+
     pd_l1 = facts.get("pd_l1") or {}
     tps = pd_l1.get("tps")
     egfr, alk = _driver_positive(facts, "egfr"), _driver_positive(facts, "alk")
@@ -396,6 +417,10 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         "workup_needed": [], "mdt_referral": False, "uncertainties": [],
         "origin": "rule",
     }
+    cns_conflict = tnm_conflict(facts)
+    if cns_conflict:
+        plan["uncertainties"].append(cns_conflict)
+        plan["mdt_referral"] = True
 
     def opt(name: str, regimen_ids: list[str], rationale: str) -> None:
         """Add an option — through the indication-predicate gate.
@@ -730,6 +755,22 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         plan["options"].append({
             "name": "Early palliative-care integration", "regimen_ids": [],
             "rationale": "Improves outcomes alongside systemic therapy"})
+        from ..knowledge.cns import cns_strategy
+
+        strategy = cns_strategy(stage_group, facts,
+                                lead["gene"] if lead else None)
+        if strategy:
+            reading = strategy["reading"]
+            # Symptomatic untreated CNS disease leads the option list —
+            # systemic-only sequencing is exactly what must not happen.
+            if reading["symptomatic"] and not reading["treated"]:
+                plan["options"] = strategy["options"] + plan["options"]
+            else:
+                plan["options"].extend(strategy["options"])
+            plan["uncertainties"].extend(strategy["cautions"])
+            plan["workup_needed"].extend(strategy["workup"])
+            plan["cns"] = {"reading": reading,
+                           "honest_notes": strategy["honest_notes"]}
         ecog = facts.get("ecog_ps")
         if isinstance(ecog, int) and ecog >= 3 and not (egfr or alk):
             plan["uncertainties"].append(
