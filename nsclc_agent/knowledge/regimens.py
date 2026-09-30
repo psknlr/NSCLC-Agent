@@ -387,7 +387,8 @@ REGIMENS: tuple[Regimen, ...] = (
         trial_ids=("DESTINY_LUNG02",),
         monitoring=("ILD/pneumonitis — key toxicity, hold and image early",
                     "LVEF", "cytopenias"),
-        dose_gates=("erbb2_positive", "prior_systemic_therapy"),
+        dose_gates=("erbb2_positive", "prior_systemic_therapy",
+                    "ild_history"),
         label_note="Previously treated HER2(ERBB2)-mutant NSCLC — NOT a "
                    "first-line regimen; first-line stays chemo±IO",
     ),
@@ -503,7 +504,7 @@ REGIMENS: tuple[Regimen, ...] = (
                     "ILD/pneumonitis", "ocular surface events",
                     "cytopenias"),
         dose_gates=("egfr_positive", "prior_systemic_therapy",
-                    "prior_platinum"),
+                    "prior_platinum", "ild_history"),
         label_note="EGFR-mutant NSCLC after BOTH EGFR-directed therapy "
                    "AND platinum-based chemotherapy (accelerated "
                    "approval) — a third-line option, never earlier",

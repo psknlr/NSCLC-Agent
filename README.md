@@ -27,7 +27,7 @@
  ToolLoop       ReAct 取证 → CapabilityBroker（角色/技能/熔断/预算）  分期 → 协议模块路由
  InterviewLoop  组织追问   → AdequacyJudge（必答轴规则判定，blocked    试验注册表（分期边界机器可查）
                              永不可被模型/轮次上限豁免）              方案库（剂量只在确定性通道）
- PerceptionAgent 读片提议  → 描述符词表校验 + 归一化交叉核对          安全规则引擎（17条确定性规则）
+ PerceptionAgent 读片提议  → 描述符词表校验 + 归一化交叉核对          安全规则引擎（18条确定性规则）
  MDT Panel      专科子体   → 最保守合成（最高紧急度，非多数票）        肿瘤急症筛查（子句级否定）
  CriticAgent    终审追加   → finally 无条件执行 + 引用核验            证据台账（工具自declare等级）
 ```
@@ -488,6 +488,31 @@ Claim 级引用验证从「结构层」加深到「人群语义层」——结�
   治疗/目标对话是循证下一步——说"没有"胜过发明一个。方案库 36→39、
   试验 35→38、声明 36→39；金标准 48→52，unsafe_release_rate 0/16。
 
+### 器官功能与合并症闸门（v0.7.0）
+
+人群匹配了，**这具身体**呢？方案可以分期正确、驱动匹配、证据蕴含齐全，
+却对这个病人是错的——CrCl 38 不该配培美曲塞骨架。`knowledge/organ_gates.py`
+把这类判断收进**一个确定性求值器，三处消费**：
+
+* **定量优先、标签阈值入注记**：肾（CrCl <45 → 培美曲塞闸门 fail，
+  标签阈值写在注记里）、肝（胆红素 >1×ULN 或 Child-Pugh B/C →
+  多西他赛类 fail）、QTc（≥500 fail；481–499 先纠电解质复查再说）、
+  ILD 史（ADC/ICI 类 fail——本轮探测自己发现两个 ADC 方案的闸门清单
+  漏了 `ild_history`，已补并被审计探针钉住）、出血风险（咯血史/空洞
+  中央病灶 → 雷莫芦单抗 fail，多西他赛单药替代不误报）、强 CYP3A4
+  诱导剂（用药清单命中 → TKI 闸门 fail）、B12/叶酸。字符串旧格式容忍，
+  缺记录一律 unknown。
+* **三处消费**：剂量通道 `dose_gate_check` 器官类闸门改走定量求值器；
+  critic 新规则 `ORGAN_FUNCTION_GATE`（17→18）——recorded fail →
+  **block**，无论方案谁写的；planner 在提案闸口**响亮剔除**器官不合格
+  的骨架并转 MDT/药师——"绕着不合格调剂量"在任何层都不存在。
+* **unknown 永不拦推荐、也永不放剂量**：推荐≠给药。pending 闸门入
+  `plan["organ_gates"]` 台账（"剂量通道开启前要补哪个数、为什么"），
+  刻意不进 workup_needed——否则每个没带化验单的病例都会翻转放行状态。
+* 金标准 52→57（+2 流水线：CrCl 38 剔除 / CrCl 72 对照放行；+3 审计
+  探针：肾损培美曲塞必拦、出血风险雷莫芦必拦单药不误报、ILD+T-DXd
+  必拦），unsafe_release_rate 0/19。
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -511,7 +536,7 @@ python -m nsclc_agent run --presentation "肺癌病史，突然大咯血不止"
 
 # 4. 批量 + 金标准评测
 python -m nsclc_agent batch examples/cases -o out/ --resume
-python -m nsclc_agent eval                    # 52 例金标准（36 流水线 + 16 审计型安全网探针）
+python -m nsclc_agent eval                    # 57 例金标准（38 流水线 + 19 审计型安全网探针）
 
 # 5. 记录与离线复核
 python -m nsclc_agent run --case examples/cases/stage3b_unresectable_egfr.json \
@@ -591,7 +616,7 @@ nsclc_agent/
   staging/     tnm.py 分期引擎(9版表+拒绝表) · router.py · selftest.py
   knowledge/   trials.py 38项试验注册表(分期边界/驱动限制机器可查)
                regimens.py 方案库(摘要无剂量/详情即剂量通道) · interactions.py
-  safety/      emergencies.py 急症筛查(子句级否定) · rules.py 17条规则引擎
+  safety/      emergencies.py 急症筛查(子句级否定) · rules.py 18条规则引擎
   interview/   axes.py 17条NSCLC问诊轴(VOI层) · adequacy.py · loop.py
   perception/  imaging.py 读片(词表校验/归一化交叉核对/拒绝文本模型)
   tools/       base.py Broker+熔断 · registry.py 11个工具 · retrieval.py 实连检索
@@ -606,7 +631,7 @@ nsclc_agent/
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   eval/run_eval.py 错误分类学评测 · eval/adjudication.py 双医师裁定台账
   schemas.py · skills.py · case.py · cli.py
-tests/         481 个用例，全离线    eval/       52 例金标准 + 指标
+tests/         492 个用例，全离线    eval/       57 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -614,10 +639,10 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 481 passed，全离线
+python -m pytest -q            # 492 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
-python -m nsclc_agent eval     # 金标准 52/52：分期34/34 路由11/11 方案29/29
-                               # 安全36/36 · unsafe_release_rate 0/16 · 分类学全零
+python -m nsclc_agent eval     # 金标准 57/57：分期36/36 路由11/11 方案31/31
+                               # 安全38/38 · unsafe_release_rate 0/19 · 分类学全零
 ```
 
 ## 仍未完成（诚实清单）
@@ -638,8 +663,12 @@ python -m nsclc_agent eval     # 金标准 52/52：分期34/34 路由11/11 方�
 源中存在，v0.3.5），但**措辞级语义仍未核对**——数字溯源守"无中生有"
 不守"错配语境的措辞"（一个真实存在于引用行的数字被安在错误的结局指标
 或 comparator 上仍不可见）；schema 校验仍刻意保持浅层（形状
-校验，非临床语义完备性）；治疗库（39 方案/38 试验/17 规则+39 适应证声明）覆盖主干驱动
-通路但仍是教学规模，未覆盖器官功能剂量调整与药物相互作用决策；后线
+校验，非临床语义完备性）；治疗库（39 方案/38 试验/18 规则+39 适应证声明）覆盖主干驱动
+通路但仍是教学规模；器官功能闸门（v0.7.0）的阈值是**标签教学值而非
+机构方案**（肌酐清除率公式选择、减量方案、透析患者等均不编码——闸门
+只会拦或转 MDT/药师，从不给出调整后的剂量），DDI 编码仅覆盖教学包
+（interactions.py）与强 CYP3A4 诱导剂一类，完整相互作用审查是药师的
+通道；后线
 序贯覆盖二线主干、两种耐药机制（转化/MET 扩增，v0.6.0）与 EGFR 三线
 （Dato-DXd）——机制定向**恰好两个发现深**：C797S 只有警示（无获批四代
 TKI）、四代 TKI 与其他机制组合未编码，rechallenge 判据未编码，多西他赛

@@ -360,6 +360,24 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     and beyond docetaxel the corpus recommends the honest boundary
     itself — trial screening, best supportive care, goals of care.
 
+26. **The population fits; the body must too — and unknown is neither
+    pass nor fail.** Organ-function and comorbidity gates live in ONE
+    deterministic evaluator (`knowledge/organ_gates.py`) with three
+    consumers: the dose channel's gate check (quantitative thresholds
+    replace coarse strings, the label threshold cited in every note),
+    the critic's ORGAN_FUNCTION_GATE (a regimen whose gate FAILS on
+    the recorded facts blocks at recommendation time, whoever authored
+    the plan), and the planner (an organ-failed backbone is dropped
+    loudly at the proposal gate and routed to the MDT/pharmacist — the
+    dose is never "adjusted around" a failed gate at any layer).
+    Unknown never blocks a recommendation and never passes a dose
+    gate: recommending is not dosing, so pending gates live in the
+    plan's organ-gate ledger — the named list of numbers the dose
+    channel will demand — and deliberately not in workup_needed, where
+    they would flip the release status of every plan without lab
+    values. Thresholds are label-derived teaching values, not an
+    institution's protocol, and the honest list says so.
+
 ## 3. LLM containment table
 
 | Capability | Model may | Model may not |

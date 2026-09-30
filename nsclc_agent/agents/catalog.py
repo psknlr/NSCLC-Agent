@@ -435,9 +435,21 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         from ..knowledge.indications import (
             INELIGIBLE, UNKNOWN as IND_UNKNOWN, evaluate_indication,
         )
+        from ..knowledge.organ_gates import failed_gates
 
         kept: list[str] = []
         for rid in regimen_ids:
+            organ_failures = failed_gates(rid, facts)
+            if organ_failures:
+                # The population fits; this BODY does not. Dropped loudly
+                # — a table/organ divergence routes to the MDT, never to
+                # a silently adjusted dose.
+                plan["uncertainties"].append(
+                    f"决策表提案 {rid} 因器官功能/合并症闸门不合格被剔除（"
+                    + "; ".join(f["note"] for f in organ_failures)
+                    + "）——替代骨架属 MDT/药师决策。")
+                plan["mdt_referral"] = True
+                continue
             verdict = evaluate_indication(rid, stage_group, facts)
             if verdict["verdict"] == INELIGIBLE:
                 failed = verdict["failed_conditions"]
@@ -868,6 +880,7 @@ class TreatmentAgent:
             self._attach_kg_context(state, tools, broker, plan, stage_group)
             self._attach_prognosis(state, tools, broker, stage_group)
             self._attach_indications(state, stage_group)
+            self._attach_organ_gates(state)
             self._claim_options(state)
             state.trace(
                 "TreatmentAgent", "plan_reused",
@@ -916,6 +929,7 @@ class TreatmentAgent:
                                 state.outputs["treatment_plan"], stage_group)
         self._attach_prognosis(state, tools, broker, stage_group)
         self._attach_indications(state, stage_group)
+        self._attach_organ_gates(state)
         self._claim_options(state)
         state.trace(
             "TreatmentAgent", "plan",
@@ -1076,6 +1090,34 @@ class TreatmentAgent:
                          for rid in rids],
             "note": "声明式适应证判定（eligible/ineligible/unknown）——"
                     "unknown 表示病例缺少判定所需事实，已列入补检建议",
+        }
+
+    @staticmethod
+    def _attach_organ_gates(state: CaseRunState) -> None:
+        """Organ-gate ledger for the plan on record: which body-fit
+        checks FAILED (the critic blocks those) and which are PENDING —
+        the numbers the dose channel will demand. Pending gates do NOT
+        gate the recommendation (recommending is not dosing), so they
+        live here as a named list, never in workup_needed where they
+        would flip the release status of every plan without lab values.
+        """
+        from ..knowledge.organ_gates import failed_gates, unknown_gates
+
+        plan = state.outputs.get("treatment_plan") or {}
+        rids = [str(r) for r in plan.get("regimen_ids") or []]
+        if not rids:
+            return
+        failed: list[dict[str, str]] = []
+        pending: list[str] = []
+        for rid in rids:
+            failed.extend(failed_gates(rid, state.facts))
+            pending.extend(unknown_gates(rid, state.facts))
+        plan["organ_gates"] = {
+            "failed": failed,
+            "pending": pending,
+            "note": "pending 项是剂量通道开启前必须补齐的器官功能/合并症"
+                    "事实——推荐层不因缺化验而扣住方案，剂量层因缺化验而"
+                    "拒绝开药",
         }
 
     @staticmethod

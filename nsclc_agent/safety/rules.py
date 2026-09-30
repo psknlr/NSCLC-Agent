@@ -567,6 +567,28 @@ def _rule_indication_predicate(ctx: PlanContext) -> list[Violation]:
     return out
 
 
+def _rule_organ_function(ctx: PlanContext) -> list[Violation]:
+    """The population fits; does this BODY? A regimen whose organ or
+    comorbidity gate FAILS on the recorded facts blocks at
+    recommendation time — CrCl 38 does not take a pemetrexed backbone,
+    a bilirubin above normal does not take docetaxel, a hemoptysis
+    history does not take ramucirumab. Unknown never blocks here:
+    recommending is not dosing, and the dose channel refuses unverified
+    gates on its own."""
+    from ..knowledge.organ_gates import failed_gates
+
+    out: list[Violation] = []
+    for rid in ctx.regimen_ids:
+        for failure in failed_gates(rid, ctx.facts):
+            out.append(Violation(
+                "ORGAN_FUNCTION_GATE", "block",
+                f"{rid}: {failure['note']} — choose a compatible backbone "
+                f"or route to the MDT/pharmacist; the dose is never "
+                f"'adjusted around' a failed gate at this layer.",
+            ))
+    return out
+
+
 def _rule_ici_comorbidity(ctx: PlanContext) -> list[Violation]:
     comorbid = ctx.facts.get("comorbidities") or {}
     risky = comorbid.get("ild") or comorbid.get("active_autoimmune") \
@@ -714,6 +736,7 @@ RULES = (
     _rule_progression_same_drug,
     _rule_cns_untreated_symptomatic,
     _rule_cns_tnm_consistency,
+    _rule_organ_function,
     _rule_ici_comorbidity,
     _rule_ps_gate,
     _rule_biomarker_before_systemic,

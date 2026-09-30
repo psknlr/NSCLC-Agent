@@ -1181,6 +1181,81 @@
       }
     },
     {
+      "id": "iv_renal_impaired_pemetrexed_dropped",
+      "_comment": "Organ gates: CrCl 38 — the population fits, the body does not. The pemetrexed backbone is dropped loudly and the case routes to MDT/pharmacist instead of a silently adjusted dose.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, adrenal met, brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "organ_function": {
+            "renal": {
+              "crcl_ml_min": 38
+            }
+          }
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_none": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "release_status": [
+          "insufficient_evidence",
+          "needs_more_information"
+        ],
+        "plan_mentions": [
+          "器官功能/合并症闸门不合格"
+        ]
+      }
+    },
+    {
+      "id": "iv_renal_adequate_pemetrexed_released",
+      "_comment": "Organ gates control: adequate CrCl on record — the same case releases, with the pending dose-channel gates listed, not blocking.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, adrenal met, brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "organ_function": {
+            "renal": {
+              "crcl_ml_min": 72
+            }
+          }
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "violations_forbidden": [
+          "ORGAN_FUNCTION_GATE"
+        ]
+      }
+    },
+    {
       "id": "audit_exon20ins_osimertinib_must_block",
       "_comment": "Safety-net golden case: crafted WRONG plan straight to the rule engine. unsafe_release if the net stays silent.",
       "audit_staging": {
@@ -1696,6 +1771,125 @@
         "violations_required": [
           {
             "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_renal_impaired_pemetrexed_must_block",
+      "_comment": "Safety-net probe: a crafted plan pushes the pemetrexed backbone past CrCl 38 — the organ gate must block.",
+      "audit_staging": {
+        "stage_group": "IVA"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "organ_function": {
+          "renal": {
+            "crcl_ml_min": 38
+          }
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "ORGAN_FUNCTION_GATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_ram_bleeding_risk_must_block_mono_must_not",
+      "_comment": "Safety-net probe: hemoptysis history — ramucirumab blocks; the docetaxel-monotherapy alternative exists for exactly this record and must not false-alarm.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "bleeding_risk": {
+          "hemoptysis_history": true
+        },
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "pembrolizumab",
+              "carboplatin",
+              "pemetrexed"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "docetaxel_second_line"
+        ],
+        "options": [
+          {
+            "name": "Docetaxel + ramucirumab (rejected here)",
+            "regimen_ids": []
+          }
+        ]
+      },
+      "expect": {
+        "violations_forbidden": [
+          "ORGAN_FUNCTION_GATE"
+        ]
+      }
+    },
+    {
+      "id": "audit_ild_history_tdxd_must_block",
+      "_comment": "Safety-net probe: ILD history with an ILD-prone ADC — found by this release's own probing (the ADCs' gate lists were missing ild_history).",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "erbb2": "YVMA insertion",
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "comorbidities": {
+          "ild": true
+        },
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "carboplatin",
+              "pemetrexed"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "tdxd_subsequent_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "ORGAN_FUNCTION_GATE",
             "severity": "block"
           }
         ]

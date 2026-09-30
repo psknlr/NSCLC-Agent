@@ -491,9 +491,18 @@ class ToolRegistry:
 
         from ..knowledge.biomarkers import gene_status
 
+        from ..knowledge.organ_gates import evaluate_gate
+
         results: list[dict[str, Any]] = []
         for gate in regimen.dose_gates:
             status, note = "unverified", "no matching fact on record"
+            organ = evaluate_gate(gate, facts)
+            if organ is not None:
+                # Organ/comorbidity gates: one deterministic evaluator
+                # shared with the critic and the planner (quantitative
+                # thresholds, label-cited notes).
+                results.append(organ)
+                continue
             if gate == "egfr_alk_negative":
                 egfr, alk = gene_status(facts, "egfr"), gene_status(facts, "alk")
                 if "positive" in (egfr, alk):
@@ -601,12 +610,6 @@ class ToolRegistry:
                     status, note = "fail", "active autoimmune disease on record"
                 elif "autoimmune_disease" in comorbid or "active_autoimmune" in comorbid:
                     status, note = "pass", "autoimmune screen negative"
-            elif gate == "renal_function":
-                renal = str((facts.get("organ_function") or {}).get("renal") or "").lower()
-                if renal in ("normal", "adequate"):
-                    status, note = "pass", "renal function adequate on record"
-                elif renal:
-                    status, note = "fail", f"renal function: {renal}"
             elif gate == "ecog_0_1":
                 ecog = facts.get("ecog_ps")
                 if isinstance(ecog, int):
