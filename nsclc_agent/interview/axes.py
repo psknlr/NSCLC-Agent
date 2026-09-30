@@ -94,8 +94,11 @@ def _flatten(facts: dict[str, Any]) -> dict[str, Any]:
 
 def _driver_unknown(gene: str) -> Predicate:
     def check(facts: dict[str, Any], _c: str) -> bool:
-        value = str((facts.get("driver_mutations") or {}).get(gene) or "").lower()
-        return value in ("", "not_tested", "unknown", "pending")
+        from ..knowledge.biomarkers import gene_status
+
+        # Same parser as the planner: a failed/QNS/ambiguous report keeps
+        # the axis open exactly like an untested gene.
+        return gene_status(facts, gene) == "unknown"
     return check
 
 

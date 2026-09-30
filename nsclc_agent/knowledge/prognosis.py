@@ -63,10 +63,9 @@ _CAVEATS = (
 
 
 def _positive(facts: dict[str, Any], gene: str) -> bool:
-    from .biomarkers import driver_status
+    from .biomarkers import gene_status
 
-    value = (facts.get("driver_mutations") or {}).get(gene)
-    return value is not None and driver_status(str(value)) == "positive"
+    return gene_status(facts, gene) == "positive"
 
 
 def _modifiers(stage_group: str, facts: dict[str, Any]) -> list[dict[str, Any]]:

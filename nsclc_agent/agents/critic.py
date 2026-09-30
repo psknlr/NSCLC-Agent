@@ -28,12 +28,20 @@ from ..state import CaseRunState, NON_RELEASABLE_LEVELS
 # are the dose channel's problem (DOSE_SCAN); TNM descriptors, stage
 # labels and trial names carry digits but none of these shapes.
 _OUTCOME_NUMERIC_RE = re.compile(
-    r"(?:HR|hazard\s+ratio|风险比)[\s≈~=:约为]*(?P<hr>[012]?\.\d+)"
-    r"|(?P<pct>\d+(?:\.\d+)?)\s*%"
-    r"|(?P<months>\d+(?:\.\d+)?)\s*(?:months?|个月)",
+    r"(?:\bHR\b|hazard\s+ratio|危险比|风险比)\s*(?:[,:=≈~]|of|is|was|为|约为|约)?"
+    r"\s*(?P<hr>\d*\.?\d+)"
+    r"|(?P<pct>\d+(?:\.\d+)?)\s*(?:%|percent\b|per\s*cent\b|pct\b)"
+    r"|(?P<months>\d+(?:\.\d+)?)\s*(?:months?\b|mos?\b|个月|月)",
     re.I,
 )
 _ANY_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+#: Confidence-interval expressions: their bounds are never a claim's
+#: figure and never an anchor ("95% CI 0.37–0.57").
+_CI_RE = re.compile(
+    r"\(?\s*95(?:\.\d+)?\s*%\s*(?:CI|置信区间)[^);；]*\)?", re.I)
+#: Identifiers and bibliographic numbers that must never anchor a figure.
+_IDENTIFIER_RE = re.compile(
+    r"NCT\d+|\b(?:19|20)\d{2}\b|\d+\s*:\s*\d+(?:[–-]\d+)?|;\s*\d+", re.I)
 
 
 def _canon_number(text: str) -> str:
@@ -47,8 +55,11 @@ def _canon_number(text: str) -> str:
 
 
 def _outcome_numbers(text: str) -> set[str]:
+    from ..safety.rules import normalize_for_scan
+
+    cleaned = _CI_RE.sub(" ", normalize_for_scan(text or ""))
     found: set[str] = set()
-    for match in _OUTCOME_NUMERIC_RE.finditer(text or ""):
+    for match in _OUTCOME_NUMERIC_RE.finditer(cleaned):
         for value in match.groupdict().values():
             if value:
                 found.add(_canon_number(value))
@@ -56,11 +67,38 @@ def _outcome_numbers(text: str) -> set[str]:
 
 
 def _number_pool(chunks: list[str]) -> set[str]:
+    from ..safety.rules import DOSE_RE
+
     pool: set[str] = set()
     for chunk in chunks:
+        # A dose ("60 Gy"), a CI bound or an identifier is never the
+        # source of an outcome figure.
+        text = _IDENTIFIER_RE.sub(" ", _CI_RE.sub(" ", DOSE_RE.sub(
+            " ", chunk or "")))
         pool.update(_canon_number(m.group(0))
-                    for m in _ANY_NUMBER_RE.finditer(chunk or ""))
+                    for m in _ANY_NUMBER_RE.finditer(text))
     return pool
+
+
+def _evidence_anchor_text(evidence: Any) -> list[str]:
+    """The TYPED text a row may anchor figures with: a trial row's result
+    strings, a cohort row's figure, otherwise its summary. Never the whole
+    payload JSON — NCT ids, page numbers, TNM editions and CI bounds made
+    almost any number "sourced" (v0.7.1 audit)."""
+    payload = evidence.payload or {}
+    trial = payload.get("trial") if isinstance(payload, dict) else None
+    if isinstance(trial, dict):
+        return [str(r) for r in trial.get("results") or []]
+    if isinstance(payload, dict) \
+            and payload.get("five_year_os_percent_approx") is not None:
+        return [str(payload["five_year_os_percent_approx"])]
+    return [str(evidence.summary or "")]
+
+
+def _regimen_anchor_text(regimen: Any) -> list[str]:
+    """Protocol text of a claimed regimen (label note, monitoring) — never
+    its id ("ccrt_60gy" must not anchor "OS 60%")."""
+    return [regimen.label_note or ""] + list(regimen.monitoring or ())
 
 
 class CriticAgent:
@@ -256,14 +294,15 @@ class CriticAgent:
     def _numeric_guard(state: CaseRunState) -> list[str]:
         """Outcome figures are never free.
 
-        Any percentage, hazard ratio, or month figure in a high-stakes
-        claim's text must be present in the evidence rows THAT CLAIM
-        cites, or in the claimed regimens' own registry entries
-        (deterministic system knowledge — protocol durations and
-        thresholds live there). A figure with no provenance is treated
-        as fabricated and said out loud. This checks the number's
-        presence in the cited source, not the wording around it — the
-        honest list says so.
+        Every outcome-shaped figure (percentage, hazard ratio, month span)
+        in a high-stakes claim must be present in the TYPED anchor text of
+        the rows THAT CLAIM cites (trial result strings, the cohort
+        figure) or in the claimed regimens' protocol text — CI bounds and
+        identifiers never anchor. For a model-authored plan the same check
+        runs over every string the model wrote (summary, rationales,
+        uncertainties), anchored against everything the plan cites plus
+        the case's own recorded numbers. Presence in the source is
+        checked, not the wording around it — the honest list says so.
         """
         from ..knowledge import regimens as regimen_lib
 
@@ -278,22 +317,60 @@ class CriticAgent:
             for eid in claim.evidence_ids:
                 evidence = state.evidence.get(eid)
                 if evidence is not None:
-                    chunks.append(json.dumps(evidence.payload or {},
-                                             ensure_ascii=False))
-                    chunks.append(evidence.summary or "")
+                    chunks.extend(_evidence_anchor_text(evidence))
             for rid in claim.subject.get("intervention_regimen_ids") or []:
                 regimen = regimen_lib.get(str(rid))
                 if regimen is not None:
-                    chunks.append(json.dumps(regimen.summary(),
-                                             ensure_ascii=False))
+                    chunks.extend(_regimen_anchor_text(regimen))
             pool = _number_pool(chunks)
             for number in sorted(claimed - pool):
                 issues.append(
                     f"CLAIM_NUMERIC_UNANCHORED[{claim.claim_id}]: figure "
                     f"'{number}' in '{claim.text[:60]}' has no source in "
                     f"the claim's cited evidence or the claimed regimens' "
-                    f"registry entries — a number without provenance may "
-                    f"not be released")
+                    f"protocol text — a number without provenance may not "
+                    f"be released")
+
+        plan = state.outputs.get("treatment_plan") or {}
+        if plan and plan.get("origin", "rule") != "rule":
+            authored: list[str] = [str(plan.get("summary") or "")]
+            for option in plan.get("options") or []:
+                if isinstance(option, dict):
+                    authored.append(str(option.get("name") or ""))
+                    authored.append(str(option.get("rationale") or ""))
+            authored.extend(str(u) for u in plan.get("uncertainties") or [])
+            authored.extend(str(u) for u in plan.get("follow_up") or [])
+            claimed = set().union(*(_outcome_numbers(t) for t in authored))
+            if claimed:
+                chunks = []
+                cited = set(plan.get("citations") or [])
+                for claim in state.claims:
+                    cited.update(claim.evidence_ids)
+                for eid in cited:
+                    evidence = state.evidence.get(eid)
+                    if evidence is not None:
+                        chunks.extend(_evidence_anchor_text(evidence))
+                for rid in plan.get("regimen_ids") or []:
+                    regimen = regimen_lib.get(str(rid).strip().lower())
+                    if regimen is not None:
+                        chunks.extend(_regimen_anchor_text(regimen))
+                # The patient's own recorded numbers (TPS, age, CrCl…) may
+                # be restated; so may the declared indication thresholds.
+                chunks.append(json.dumps(state.facts, ensure_ascii=False,
+                                         default=str))
+                from ..knowledge.indications import INDICATIONS
+
+                for rid in plan.get("regimen_ids") or []:
+                    ind = INDICATIONS.get(str(rid).strip().lower())
+                    if ind is not None:
+                        chunks.append(f"{ind.pd_l1_tps_ge} {ind.pd_l1_tc_ge}")
+                pool = _number_pool(chunks)
+                for number in sorted(claimed - pool):
+                    issues.append(
+                        f"PLAN_NUMERIC_UNANCHORED: figure '{number}' in the "
+                        f"model-authored plan text has no source in the "
+                        f"plan's cited evidence, its regimens' protocol "
+                        f"text or the case record")
         return issues
 
     # ------------------------------------------------------------------ guard

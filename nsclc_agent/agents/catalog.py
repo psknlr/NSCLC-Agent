@@ -53,6 +53,57 @@ _CNS_NEGATIVE_IMAGING_RE = re.compile(
     re.I,
 )
 
+_CNS_MODALITY_RE = re.compile(
+    r"brain\s*mri|mri\s*brain|脑\s*mri|颅脑\s*(?:mri|磁共振)|头颅\s*mri|"
+    r"brain\s*ct|head\s*ct|头颅\s*ct|颅脑\s*ct",
+    re.I,
+)
+
+#: Positive CNS findings. A sentence that still names one of these after
+#: its negated phrases are removed is NOT a negative report, whatever
+#: else it says ("margins not clear", "unremarkable except for 3
+#: metastases", "未见出血，可见多发转移").
+_CNS_POSITIVE_RE = re.compile(
+    r"metasta\w*|\blesions?\b|\benhanc\w*|\bmass(?:es)?\b|"
+    r"\bnodules?\b|转移|病灶|强化|结节|占位",
+    re.I,
+)
+_CNS_NEGATED_POSITIVE_RE = re.compile(
+    r"(?:\bno\b|\bwithout\b|negative\s+for|free\s+of|未见|无|排除)"
+    r"[^.;。；,，]{0,20}?"
+    r"(?:metasta\w*|\blesions?\b|\benhanc\w*|\bmass(?:es)?\b|"
+    r"\bnodules?\b|转移\w*|病灶|强化|结节|占位)",
+    re.I,
+)
+
+
+def _cns_negative_imaging(text: str) -> bool:
+    """True only for a sentence that states negative brain imaging AND
+    asserts no CNS finding after that statement once its negated phrases
+    are removed."""
+    sentences = re.split(r"[.;。；\n]", text or "")
+    # A positive brain-imaging statement ANYWHERE (e.g. a later turn's
+    # "brain MRI now shows two lesions") vetoes every negative seed —
+    # the cumulative record then reads as unknown, never as absent.
+    for sentence in sentences:
+        mention = _CNS_MODALITY_RE.search(sentence)
+        if mention:
+            tail = _CNS_NEGATED_POSITIVE_RE.sub(" ", sentence[mention.start():])
+            if _CNS_POSITIVE_RE.search(tail):
+                return False
+    for sentence in sentences:
+        match = _CNS_NEGATIVE_IMAGING_RE.search(sentence)
+        if not match:
+            continue
+        # Only what follows the brain-imaging mention describes the
+        # brain ("adrenal metastasis, brain MRI negative" is negative
+        # brain imaging); a finding after it vetoes the seed.
+        residual = _CNS_NEGATED_POSITIVE_RE.sub(" ", sentence[match.start():])
+        if _CNS_POSITIVE_RE.search(residual):
+            continue
+        return True
+    return False
+
 
 # --------------------------------------------------------------------- intake
 
@@ -69,15 +120,24 @@ class IntakeAgent:
         # An explicit narrative answer (positive or negated) closes the
         # corresponding screening axis — "没有咯血" is an answer, and without
         # this a fully cooperative history reads as "screen never done".
+        # Positive hits are written FIRST and unconditionally: two signals
+        # share one axis fact (cord compression / brain-met signs), and an
+        # earlier "没有抽搐" must never outvote a later "突然抽搐" (v0.7.1
+        # audit: the negation won and a dose was drafted over a seizure).
+        for hit in screen.hard_hits + screen.soft_hits:
+            fact = _SCREEN_AXIS_FACTS.get(hit["signal_id"])
+            if fact:
+                state.facts[fact] = f"positive:{hit['signal_id']}"
         for signal in screen.negated:
             fact = _SCREEN_AXIS_FACTS.get(signal)
             if fact:
                 state.facts.setdefault(fact, "negative_by_history")
-        for hit in screen.hard_hits + screen.soft_hits:
-            fact = _SCREEN_AXIS_FACTS.get(hit["signal_id"])
-            if fact:
-                state.facts.setdefault(fact, f"positive:{hit['signal_id']}")
-        if _CNS_NEGATIVE_IMAGING_RE.search(state.complaint or ""):
+        for hit in screen.soft_hits:
+            # Soft signals do not short-circuit, but their urgent action is
+            # never silent.
+            state.flags.append(
+                f"URGENT_SIGNAL[{hit['signal_id']}]: {hit['action']}")
+        if _cns_negative_imaging(state.complaint or ""):
             state.facts.setdefault(
                 "cns_metastases",
                 {"status": "absent",
@@ -422,7 +482,8 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         plan["uncertainties"].append(cns_conflict)
         plan["mdt_referral"] = True
 
-    def opt(name: str, regimen_ids: list[str], rationale: str) -> None:
+    def opt(name: str, regimen_ids: list[str], rationale: str, *,
+            allow_progressed: bool = False) -> None:
         """Add an option — through the indication-predicate gate.
 
         The decision table SELECTS candidates; the declared predicates
@@ -436,9 +497,20 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
             INELIGIBLE, UNKNOWN as IND_UNKNOWN, evaluate_indication,
         )
         from ..knowledge.organ_gates import failed_gates
+        from ..knowledge.sequencing import progressed_drugs_in
 
         kept: list[str] = []
+        organ_dropped: list[str] = []
         for rid in regimen_ids:
+            progressed = progressed_drugs_in(rid, facts)
+            if progressed and not allow_progressed:
+                # The table never re-proposes a drug the disease just
+                # progressed on; a deliberate continuation (INSIGHT-2)
+                # opts in explicitly and carries the critic's warn.
+                plan["uncertainties"].append(
+                    f"决策表提案 {rid} 含已记录进展的药物（"
+                    + ", ".join(progressed) + "）——已剔除。")
+                continue
             organ_failures = failed_gates(rid, facts)
             if organ_failures:
                 # The population fits; this BODY does not. Dropped loudly
@@ -449,6 +521,7 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
                     + "; ".join(f["note"] for f in organ_failures)
                     + "）——替代骨架属 MDT/药师决策。")
                 plan["mdt_referral"] = True
+                organ_dropped.append(rid)
                 continue
             verdict = evaluate_indication(rid, stage_group, facts)
             if verdict["verdict"] == INELIGIBLE:
@@ -487,7 +560,21 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
                 if note not in plan["uncertainties"]:
                     plan["uncertainties"].append(note)
         if regimen_ids and not kept:
+            if organ_dropped:
+                # The whole option fell to an organ gate: the next step is
+                # an explicit MDT/pharmacist decision, not a release of
+                # whatever non-systemic options remain.
+                plan["workup_needed"].append(
+                    f"MDT/pharmacist review: {name} is excluded by organ "
+                    f"function/comorbidity ({', '.join(organ_dropped)}) — "
+                    f"select a compatible regimen")
             return  # every regimen failed its predicate — no option
+        if kept != list(regimen_ids):
+            # Part of a combined option was dropped: the name must stop
+            # naming the dropped drug (OPTION_DRUG_UNBOUND would rightly
+            # block "Docetaxel ± ramucirumab" bound only to docetaxel).
+            name = " / ".join(regimen_lib.get(rid).name for rid in kept
+                              if regimen_lib.get(rid)) or name
         plan["options"].append({"name": name, "regimen_ids": kept,
                                 "rationale": rationale})
         for rid in kept:
@@ -666,13 +753,20 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         from ..knowledge.sequencing import sequencing_context
 
         seq = sequencing_context(stage_group, facts)
+        if seq and seq.get("defer_to_first_line"):
+            # Progression on chemo/IO but the driver's targeted agent was
+            # never given: the first-line driver table below IS the next
+            # line. Record why, then fall through to it.
+            plan["uncertainties"].extend(seq["cautions"])
+            seq = None
         if seq:
             # Documented progression: the first-line table below does not
             # apply — the sequencing corpus proposes the next line (or
             # routes to the molecular tumor board when it has nothing).
             for option in seq["options"]:
                 opt(option["name"], option["regimen_ids"],
-                    option["rationale"])
+                    option["rationale"],
+                    allow_progressed=bool(option.get("continuation")))
             plan["workup_needed"].extend(seq["workup"])
             plan["uncertainties"].extend(seq["cautions"])
             plan["sequencing"] = {"line": seq["line"],
@@ -966,14 +1060,14 @@ class TreatmentAgent:
         """
         if not stage_group:
             return  # unstaged runs are workup-mode; broad hits are noise
-        from ..knowledge.biomarkers import driver_status
+        from ..knowledge.biomarkers import _normalized_drivers, driver_status
 
         from ..state import EvidenceLevel as EL
 
         genes = sorted(
             str(g).upper()
-            for g, v in (state.facts.get("driver_mutations") or {}).items()
-            if driver_status(str(v)) == "positive"
+            for g, v in _normalized_drivers(state.facts).items()
+            if driver_status(v) == "positive"
         )
         histology = str(state.facts.get("histologic_category") or "") or None
         context: dict[str, Any] = {}
@@ -1059,8 +1153,10 @@ class TreatmentAgent:
             for key in ("supporting", "cautions")
             if context.get(key)
         }
-        plan.setdefault("citations", [])
-        plan["citations"] = list(plan["citations"]) + evidence_ids
+        # System-attached context is NOT the plan author's citation: it
+        # lives in its own list so it can never make an uncited (model)
+        # plan look supported to the citation guard (v0.7.1 audit).
+        plan["guideline_citations"] = evidence_ids
         state.trace(
             "TreatmentAgent", "kg_context",
             output_summary=f"{len(context.get('supporting') or [])} supporting"

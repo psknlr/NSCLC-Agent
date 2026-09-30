@@ -29,7 +29,7 @@ from typing import Any
 
 from .. import schemas
 from ..llm.base import LLMError, ToolSpec
-from ..safety.rules import DOSE_RE
+from ..safety.rules import dose_in_payload
 from ..state import CaseRunState
 
 MAX_STEPS = 8
@@ -406,7 +406,7 @@ class ToolLoop:
             result.mode, result.error = "schema_violation", "; ".join(problems)
             return self._finish(result)
 
-        if DOSE_RE.search(json.dumps(payload, ensure_ascii=False)):
+        if dose_in_payload(payload):
             result.steps.append(LoopStep(step, "final", ok=False,
                                          summary="dose numeric in model output"))
             result.mode, result.error = "dose_in_output", "model emitted a dose value"

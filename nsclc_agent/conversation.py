@@ -49,7 +49,7 @@ from .interview import InterviewLoop
 from .llm.base import LLMError, extract_json
 from .render import render
 from .runner import NSCLCRunner
-from .safety.rules import DOSE_RE
+from .safety.rules import DOSE_RE, dose_in_payload, redact_doses
 from .staging import StagingError
 from .staging.tnm import _normalize_m, _normalize_n, _normalize_t  # noqa: PLC2701
 from .state import CaseRunState, decision_fingerprint
@@ -91,7 +91,19 @@ ALLOWED_FACT_KEYS = frozenset({
     "resectability_category", "clinical_scenario", "disease_extent",
     "operable", "curative_feasibility", "tnm", "stage_group",
     "staging_system",
+    # Later-line, CNS and organ facts change the plan (v0.7.1 audit: they
+    # were silently dropped and the FIRST-LINE plan was reused after a
+    # documented progression).
+    "treatment_history", "progression_findings", "progression_ngs_done",
+    "prior_systemic_therapy", "cns_metastases", "bleeding_risk",
+    "b12_folate_started", "qtc_ms",
 })
+
+#: Harness-derived facts: re-derived from the cumulative narrative on
+#: every turn, never persisted as if an operator had stated them (a
+#: turn-1 "brain MRI negative" seed must not outlive a turn-3 report of
+#: new lesions).
+_DERIVED_FACT_PREFIXES = ("emergency_",)
 
 # --------------------------------------------------------------------------
 # Deterministic fact extraction (bilingual, no model required)
@@ -112,12 +124,79 @@ _TNM_RE = re.compile(
     re.IGNORECASE)
 _DRIVER_RE = re.compile(
     r"(EGFR|ALK|ROS1|KRAS|BRAF|MET|RET|HER2)"
-    r"([^。;；.\n]{0,40}?)"
+    # The span may not cross a clause break or another gene's name —
+    # "EGFR结果未出，KRAS阴性" must not read as EGFR-negative (v0.7.1).
+    r"((?:(?!EGFR|ALK|ROS1|KRAS|BRAF|MET|RET|HER2)[^。;；.\n,，、]){0,40}?)"
     r"(阳性|阴性|突变|野生型|未检出|无突变|positive|negative|mutation|"
     r"wild.?type|not detected|fusion|重排|融合|ex(?:on)?\s*19|19\s*del|"
     r"L858R|G12C|V600E|exon\s*14)",
     re.IGNORECASE)
+_PENDING_RE = re.compile(
+    r"待检|待测|待回报|未出|送检|未做|未检测(?!到)|pending|awaiting|"
+    r"not\s+(?:yet\s+)?(?:tested|done|back|available)",
+    re.IGNORECASE)
+_UNRESECTABLE_RE = re.compile(
+    r"不可切除|无法切除|不能切除|unresectable|not\s+resectable|"
+    r"non-?resectable", re.IGNORECASE)
+_RESECTABLE_RE = re.compile(r"可切除|\bresectable\b", re.IGNORECASE)
+#: Question / pending / borderline wording around resectability: no value.
+_RESECT_UNSURE_RE = re.compile(
+    r"是否|待|评估中|尚未|潜在|borderline|potentially|pending|to be "
+    r"(?:determined|assessed)|\?|？|whether", re.IGNORECASE)
 _PACKYEARS_RE = re.compile(r"(\d{1,3})\s*(?:包年|pack.?years?)", re.IGNORECASE)
+
+
+_GENE_MENTION_RE = re.compile(r"(EGFR|ALK|ROS1|KRAS|BRAF|MET|RET|HER2)",
+                               re.IGNORECASE)
+#: A "." breaks a clause only as sentence punctuation — never inside
+#: HGVS notation ("p.E746_A750del", "c.2573T>G").
+_CLAUSE_BREAK_RE = re.compile(r"[。;；\n,，、]|\.(?=\s|$)")
+#: Genes sharing one result ("EGFR/ALK阴性", "EGFR、ALK均阴性").
+_GENE_JOINER_RE = re.compile(r"^\s*(?:/|、|和|及|与|and|&|,|，)\s*$",
+                             re.IGNORECASE)
+#: A clause with no gene name that continues an EGFR result
+#: ("EGFR L858R，T790M阳性").
+_EGFR_CONTINUATION_RE = re.compile(
+    r"^\s*(?:t\s*790\s*m|c\s*797\s*s|l\s*858\s*r|g\s*719|l\s*861|"
+    r"s\s*768|ex(?:on)?\s*\d+|\d+\s*号?\s*外显子)", re.IGNORECASE)
+
+
+def _extract_drivers(text: str) -> dict[str, str]:
+    """Each gene's result = its clause (up to a clause break or the next
+    gene name), kept only when the SAME parser the planner uses reads it
+    as positive or negative — the extractor can never disagree with the
+    planner, and a pending/untested clause states no result."""
+    from .knowledge.biomarkers import driver_status
+
+    drivers: dict[str, str] = {}
+    mentions = list(_GENE_MENTION_RE.finditer(text))
+    for i, match in enumerate(mentions):
+        gene = match.group(1).lower()
+        # Shared result: walk over joined gene names to the clause that
+        # carries the status ("EGFR/ALK阴性" → both negative).
+        j = i
+        while j + 1 < len(mentions) and _GENE_JOINER_RE.match(
+                text[mentions[j].end():mentions[j + 1].start()]):
+            j += 1
+        end = mentions[j + 1].start() if j + 1 < len(mentions) else len(text)
+        brk = _CLAUSE_BREAK_RE.search(text, mentions[j].end(), end)
+        clause_end = brk.start() if brk else end
+        snippet = text[match.start():clause_end].strip()
+        if gene == "egfr":
+            # Absorb gene-less continuation clauses (T790M, C797S …).
+            cursor = clause_end
+            while cursor < end:
+                nxt = _CLAUSE_BREAK_RE.search(text, cursor + 1, end)
+                piece = text[cursor + 1:(nxt.start() if nxt else end)]
+                if not _EGFR_CONTINUATION_RE.match(piece):
+                    break
+                snippet = f"{snippet}; {piece.strip()}"
+                cursor = nxt.start() if nxt else end
+        if _PENDING_RE.search(snippet):
+            continue
+        if driver_status(snippet) in ("positive", "negative"):
+            drivers.setdefault(gene, snippet[:120])
+    return drivers
 
 
 def extract_facts_deterministic(message: str) -> dict[str, Any]:
@@ -141,10 +220,7 @@ def extract_facts_deterministic(message: str) -> dict[str, Any]:
             "t": f"T{m.group(2)}", "n": f"N{m.group(3)}", "m": f"M{m.group(4)}",
             "prefix": "yp" if prefix.startswith("yp") else (prefix[:1] or "c"),
         }
-    drivers: dict[str, str] = {}
-    for gene, middle, status in _DRIVER_RE.findall(text):
-        snippet = f"{gene}{middle}{status}".strip()
-        drivers.setdefault(gene.lower(), snippet[:80])
+    drivers = _extract_drivers(text)
     if drivers:
         facts["driver_mutations"] = drivers
 
@@ -159,10 +235,17 @@ def extract_facts_deterministic(message: str) -> dict[str, Any]:
     if m and facts.get("smoking_history"):
         facts["smoking_history"] += f" ({m.group(1)} pack-years)"
 
-    if "不可切除" in text or "unresectable" in lowered:
-        facts["resectability_category"] = "UNRESECTABLE"
-    elif "可切除" in text or "resectable" in lowered:
-        facts["resectability_category"] = "RESECTABLE"
+    for clause in re.split(r"[。；;.\n]", text):
+        if _RESECT_UNSURE_RE.search(clause) and (
+                _RESECTABLE_RE.search(clause)
+                or _UNRESECTABLE_RE.search(clause)):
+            break  # a question or pending assessment states no value
+        if _UNRESECTABLE_RE.search(clause):
+            facts["resectability_category"] = "UNRESECTABLE"
+            break
+        if _RESECTABLE_RE.search(clause):
+            facts["resectability_category"] = "RESECTABLE"
+            break
 
     if "腺鳞癌" in text or "adenosquamous" in lowered:
         facts["histologic_category"] = "adenosquamous"
@@ -317,6 +400,38 @@ def sanitize_fact_payload(
             value = sub_cleaned
         if key == "medications" and not isinstance(value, list):
             value = [str(value)]
+        if key == "treatment_history":
+            entries = value if isinstance(value, list) else [value]
+            kept = [e for e in entries
+                    if isinstance(e, str) and e.strip()
+                    or isinstance(e, dict) and (
+                        e.get("agents") or e.get("regimens")
+                        or e.get("regimen") or e.get("drugs"))]
+            if len(kept) != len(entries):
+                notes.append("CHAT_FACT_IGNORED: treatment_history entries "
+                             "without agents were dropped")
+            if not kept:
+                continue
+            value = kept
+        if key in ("progression_findings", "bleeding_risk") \
+                and not isinstance(value, dict):
+            notes.append(f"CHAT_FACT_IGNORED: {key} must be an object")
+            continue
+        if key == "cns_metastases" and not isinstance(value, (dict, str)):
+            notes.append("CHAT_FACT_IGNORED: cns_metastases must be an "
+                         "object or a status string")
+            continue
+        if key in ("progression_ngs_done", "b12_folate_started") \
+                and not isinstance(value, bool):
+            notes.append(f"CHAT_FACT_IGNORED: {key} must be true/false")
+            continue
+        if key == "qtc_ms":
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                notes.append(f"CHAT_FACT_IGNORED: qtc_ms {value!r} is not "
+                             f"a number")
+                continue
         cleaned[key] = value
     return cleaned, notes
 
@@ -419,14 +534,31 @@ def compose_reply(state: CaseRunState, *, role: str,
             f"分期：{staging['stage_group']}"
             f"（{staging.get('edition', '')}，确定性引擎计算）")
     plan = state.outputs.get("treatment_plan") or {}
-    if plan.get("summary"):
-        prefix = "（沿用上一轮方案，本轮无新决策事实）" if plan_reused else ""
-        parts.append(f"{prefix}{plan['summary']}")
-    for option in (plan.get("options") or [])[:4]:
-        name = option.get("name")
-        rationale = option.get("rationale")
-        if name:
-            parts.append(f"• {name}" + (f" — {rationale}" if rationale else ""))
+    released = state.release_status in (
+        "treatment_recommendation", "draft_for_tumor_board",
+        "approved_by_tumor_board")
+    if released or role != "patient":
+        # A plan the harness did not release is never presented to a
+        # patient as a recommendation; a clinician sees it, labeled.
+        tag = "" if released else \
+            f"【未放行 / NOT RELEASED: {state.release_status}】"
+        if plan.get("summary"):
+            prefix = "（沿用上一轮方案，本轮无新决策事实）" if plan_reused else ""
+            parts.append(f"{tag}{prefix}{plan['summary']}")
+        for option in (plan.get("options") or [])[:4]:
+            name = option.get("name")
+            rationale = option.get("rationale")
+            if name:
+                parts.append(f"• {tag}{name}"
+                             + (f" — {rationale}" if rationale else ""))
+    else:
+        parts.append(f"目前尚不能给出治疗建议（{state.release_status}）："
+                     f"请先完成下列问题与检查。")
+    for flag in state.flags:
+        if flag.startswith("URGENT_SIGNAL"):
+            # Soft emergency signals never short-circuit, but their urgent
+            # action is never silent either.
+            parts.append(f"⚠️ {flag.split(': ', 1)[-1]}")
     workup = state.outputs.get("workup_plan") or {}
     for step in (workup.get("steps") or [])[:4]:
         parts.append(f"→ 待完善：{step.get('gap')}（{step.get('test')}）")
@@ -533,6 +665,22 @@ class TurnResult:
         }
 
 
+def _redact_doses(value: Any, state: CaseRunState) -> Any:
+    """Deep dose redaction for non-dose views (the dose channel's own
+    ``dose_plan`` key is left alone — it only exists on drafts)."""
+    if isinstance(value, str):
+        if dose_in_payload(value):
+            state.warn("rendered view carried a dose numeric — redacted")
+            return redact_doses(value, "[剂量见确定性通道]")
+        return value
+    if isinstance(value, list):
+        return [_redact_doses(v, state) for v in value]
+    if isinstance(value, dict):
+        return {k: (v if k == "dose_plan" else _redact_doses(v, state))
+                for k, v in value.items()}
+    return value
+
+
 class ConsultationSession:
     """A persistent multi-turn consultation over one case.
 
@@ -564,7 +712,11 @@ class ConsultationSession:
         case_base_dir: Path | None = None,
     ) -> None:
         self.llm = llm
-        self.role = role
+        # Unknown or differently-cased role strings fail closed to the most
+        # restrictive role ("Patient", "患者" → patient).
+        normalized = str(role or "").strip().lower()
+        self.role = normalized if normalized in (
+            "patient", "oncologist", "researcher") else "patient"
         self.allow_dose_planning = allow_dose_planning
         self.polish_replies = polish_replies
         self.interview_loop = InterviewLoop(llm)
@@ -609,9 +761,15 @@ class ConsultationSession:
         notes.extend(extraction_notes)
         changed, conflicts = merge_facts(self.facts, extracted, overwrite=False)
         notes.extend(conflicts)
+        explicit_dropped = False
         if facts:
             explicit, explicit_notes = sanitize_fact_payload(facts)
             notes.extend(explicit_notes)
+            # An explicit fact the harness could not accept is NOT "nothing
+            # changed": the plan is recomputed and the drop is shown.
+            explicit_dropped = any(
+                n.startswith(("CHAT_FACT_IGNORED", "CHAT_FACT_REFUSED",
+                              "CHAT_FACT_BLOCKED")) for n in explicit_notes)
             explicit_changed, explicit_conflicts = merge_facts(
                 self.facts, explicit, overwrite=True)
             changed.extend(explicit_changed)
@@ -640,6 +798,7 @@ class ConsultationSession:
             internal["_report_proposed"] = list(self.facts["_report_proposed"])
         plan_cache = None
         if (self._plan_cache is not None and not changed
+                and not explicit_dropped
                 and not new_images and not new_reports):
             plan_cache = dict(self._plan_cache)
 
@@ -657,7 +816,12 @@ class ConsultationSession:
         #    TurnResult keeps the state it was audited with — a later turn's
         #    merges must never retroactively rewrite turn N's record.
         self.last_state = state
-        self.facts = copy.deepcopy(state.facts)
+        self.facts = {
+            k: v for k, v in copy.deepcopy(state.facts).items()
+            if not k.startswith(_DERIVED_FACT_PREFIXES)
+            and not (k == "cns_metastases" and isinstance(v, dict)
+                     and v.get("source") == "presentation_imaging_statement")
+        }
         # Mark refs as read only when their reader actually consumed them —
         # a failed or unavailable read stays retryable on the next turn
         # instead of being silently skipped forever.
@@ -717,9 +881,23 @@ class ConsultationSession:
         if self.role == "patient" and message \
                 and _PROGNOSIS_ASK_RE.search(message):
             reply = f"{reply}\n{_PATIENT_PROGNOSIS_NOTE}"
+        if explicit_dropped:
+            # An explicit fact the harness could not accept is shown, never
+            # silently ignored behind a "nothing changed" reply.
+            dropped = [n for n in notes if n.startswith(
+                ("CHAT_FACT_IGNORED", "CHAT_FACT_REFUSED", "CHAT_FACT_BLOCKED"))]
+            reply = (f"{reply}\n未采纳的结构化事实 / facts not accepted: "
+                     + "; ".join(dropped))
+
+        view = render(state, self.role)
+        if state.release_status not in ("draft_for_tumor_board",
+                                        "emergency_action_plan"):
+            # The rendered view travels further than the reply (to_dict,
+            # transcript, --json, session file): it gets the same scan.
+            view = _redact_doses(view, state)
 
         result = TurnResult(
-            reply=reply, state=state, view=render(state, self.role),
+            reply=reply, state=state, view=view,
             plan_reused=plan_reused, polished=polished,
             extracted_facts=changed, notes=notes,
             duration_s=time.monotonic() - started,
@@ -924,8 +1102,19 @@ class ConsultationSession:
 
         Models and runner wiring are NOT stored — pass ``llm=``,
         ``vision_llm=`` and any runner options exactly as for a fresh
-        session. ``role`` / ``allow_dose_planning`` / ``polish_replies``
-        default to the stored values; explicit kwargs override them.
+        session.
+
+        A session file is NOT integrity-protected, so nothing in it may
+        grant authority (v0.7.1 audit: editing ``role`` / dose planning in
+        the file escalated a patient session to a dose draft, and a forged
+        plan cache shipped "observation only" for EGFR+ stage IV):
+
+        * ``role`` and ``allow_dose_planning`` come from the CALLER only —
+          default patient / off; the stored values are ignored;
+        * facts are re-sanitized through the same allowlist and validators
+          as a live turn (sign-off and guard keys cannot enter);
+        * the plan cache is dropped — the next turn recomputes (the plan is
+          deterministic, the cache was only an optimization).
         """
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
@@ -936,18 +1125,22 @@ class ConsultationSession:
                 f"session file version {version!r} not supported "
                 f"(this build reads version {cls.SESSION_FILE_VERSION}); "
                 f"start a new session")
-        kwargs.setdefault("role", str(payload.get("role") or "patient"))
-        kwargs.setdefault("allow_dose_planning",
-                          bool(payload.get("allow_dose_planning")))
+        kwargs.setdefault("role", "patient")
+        kwargs.setdefault("allow_dose_planning", False)
         kwargs.setdefault("polish_replies",
                           bool(payload.get("polish_replies")))
         session = cls(**kwargs)
         session.narrative = [str(t) for t in payload.get("narrative") or []]
-        facts = payload.get("facts")
-        session.facts = facts if isinstance(facts, dict) else {}
+        stored = payload.get("facts")
+        stored = stored if isinstance(stored, dict) else {}
+        cleaned, _notes = sanitize_fact_payload(
+            {k: v for k, v in stored.items() if not str(k).startswith("_")})
+        proposed = stored.get("_report_proposed")
+        if isinstance(proposed, list) and proposed:
+            cleaned["_report_proposed"] = [str(p) for p in proposed]
+        session.facts = cleaned
         session.read_refs = {str(r) for r in payload.get("read_refs") or []}
-        cache = payload.get("plan_cache")
-        session._plan_cache = cache if isinstance(cache, dict) else None
+        session._plan_cache = None
         session.transcript = [
             t for t in payload.get("transcript") or [] if isinstance(t, dict)]
         interview = payload.get("interview")

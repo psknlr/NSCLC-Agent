@@ -378,6 +378,27 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     values. Thresholds are label-derived teaching values, not an
     institution's protocol, and the honest list says so.
 
+27. **One reading of every fact; no authority from text or files.**
+    (v0.7.1 full adversarial audit.) A driver result is parsed ONCE, by
+    one clause-scoped parser that every consumer uses (planner, critic,
+    indication predicates, chat extractor, prognosis, KG, interview
+    axes): negation binds to the variant it sits next to, positive
+    requires positive evidence, assay failures and ambiguous reports
+    are unknown, and variant classes are read only from positive
+    clauses. Anything a plan NAMES must be auditable: an option naming a
+    drug must bind it to a library regimen id, unknown ids block, and
+    every option's own id list is audited. Content findings gate
+    release — claim/numeric guard issues downgrade the status (and
+    withdraw a dose draft), and a plan the harness did not release is
+    never shown to a patient. No file grants authority: a session file
+    carries memory but never role, dose permission or a plan cache; a
+    journal proves a run but may not author a deterministic result
+    (local tools are re-executed on replay and a mismatch fails
+    closed); a curation-ledger upgrade needs a named reviewer, and an
+    adjudicator is one person however their name is spelled. Doses are
+    scanned after NFKC normalization, whole ranges at a time, through
+    one shared scanner.
+
 ## 3. LLM containment table
 
 | Capability | Model may | Model may not |

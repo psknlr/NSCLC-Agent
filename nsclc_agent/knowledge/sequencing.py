@@ -26,16 +26,58 @@ stratified next-line context:
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
-from .biomarkers import driver_status, egfr_classical, _normalized_drivers
+from .biomarkers import (
+    _normalized_drivers,
+    driver_status,
+    egfr_classes,
+    egfr_classical,
+    first_line_actionable_drivers,
+)
 
 _PROGRESSION = {"progression", "progressed", "pd", "进展", "耐药"}
 
+#: Free-text progression tokens. English tokens are word-bounded so
+#: "PD-L1", "updated" or "PDL1" never read as progression; Chinese tokens
+#: are substrings. A negated mention ("no progression", "未进展") is not
+#: progression.
+_PROGRESSION_TEXT_RE = re.compile(
+    r"(?<![\w-])(?:progress(?:ion|ed|ive)?|pd)(?![\w-])|进展|耐药", re.I)
+_NEGATED_PROGRESSION_RE = re.compile(
+    r"(?:\bno\s+|\bwithout\s+|\bnot\s+|未|无|没有)"
+    r"(?:evidence\s+of\s+|disease\s+|明显)?(?:progress\w*|pd\b|进展)",
+    re.I)
+
+#: Chinese (and brand) names → the generic English name the regimen
+#: library uses, so a history recorded as "奥希替尼" still matches the
+#: osimertinib component of a re-proposed regimen.
+_AGENT_ALIASES = {
+    "奥希替尼": "osimertinib", "泰瑞沙": "osimertinib",
+    "吉非替尼": "gefitinib", "易瑞沙": "gefitinib",
+    "厄洛替尼": "erlotinib", "特罗凯": "erlotinib",
+    "阿法替尼": "afatinib", "达可替尼": "dacomitinib",
+    "埃克替尼": "icotinib", "阿美替尼": "aumolertinib",
+    "伏美替尼": "furmonertinib",
+    "克唑替尼": "crizotinib", "阿来替尼": "alectinib",
+    "布格替尼": "brigatinib", "塞瑞替尼": "ceritinib",
+    "洛拉替尼": "lorlatinib", "恩沙替尼": "ensartinib",
+    "培美曲塞": "pemetrexed", "卡铂": "carboplatin", "顺铂": "cisplatin",
+    "紫杉醇": "paclitaxel", "多西他赛": "docetaxel",
+    "帕博利珠": "pembrolizumab", "阿替利珠": "atezolizumab",
+    "纳武利尤": "nivolumab", "度伐利尤": "durvalumab",
+}
+
 #: Agent keywords (lowercase substring match against recorded agents).
-_THIRD_GEN_EGFR = ("osimertinib", "奥希替尼", "lazertinib", "amivantamab")
+_THIRD_GEN_EGFR = ("osimertinib", "奥希替尼", "lazertinib", "amivantamab",
+                   "aumolertinib", "furmonertinib")
+#: First/second-generation EGFR TKIs: progression on these is the
+#: T790M question (AURA3), not the post-osimertinib question.
+_EARLY_GEN_EGFR = ("gefitinib", "erlotinib", "afatinib", "dacomitinib",
+                   "icotinib")
 _SECOND_GEN_ALK = ("alectinib", "brigatinib", "阿来替尼", "布格替尼",
-                   "ceritinib")
+                   "ceritinib", "ensartinib")
 _LORLATINIB = ("lorlatinib", "洛拉替尼")
 _IO_AGENTS = ("pembrolizumab", "atezolizumab", "nivolumab", "cemiplimab",
               "durvalumab", "帕博利珠", "阿替利珠", "纳武利尤",
@@ -44,16 +86,54 @@ _CHEMO_AGENTS = ("pemetrexed", "carboplatin", "cisplatin", "paclitaxel",
                  "nab-paclitaxel", "培美曲塞", "卡铂", "顺铂", "紫杉醇",
                  "platinum", "chemotherapy", "化疗")
 
+#: Driver-directed agents per first-line actionable driver. A patient
+#: who progressed on chemotherapy but never received the driver's
+#: targeted agent is NOT in a later-line targeted setting: the
+#: driver-directed first-line therapy is still the next line.
+DRIVER_DIRECTED_AGENTS: dict[str, tuple[str, ...]] = {
+    "EGFR": _THIRD_GEN_EGFR + _EARLY_GEN_EGFR,
+    "ALK": _SECOND_GEN_ALK + _LORLATINIB + ("crizotinib",),
+    "ROS1": ("crizotinib", "entrectinib", "repotrectinib", "taletrectinib",
+             "lorlatinib"),
+    "RET": ("selpercatinib", "pralsetinib"),
+    "MET": ("capmatinib", "tepotinib", "crizotinib", "savolitinib"),
+    "BRAF": ("dabrafenib", "trametinib", "encorafenib", "binimetinib"),
+    "NTRK": ("larotrectinib", "entrectinib", "repotrectinib"),
+}
+#: Every targeted agent above — the post-TKI chemotherapy backbone's
+#: prior-therapy requirement.
+ANY_TKI = tuple(sorted({a for agents in DRIVER_DIRECTED_AGENTS.values()
+                        for a in agents}))
+
+
+def _normalize_agent(agent: Any) -> list[str]:
+    """Lowercased agent label plus its generic alias when one applies."""
+    text = str(agent or "").strip().lower()
+    if not text:
+        return []
+    out = [text]
+    for alias, generic in _AGENT_ALIASES.items():
+        if alias in text and generic not in text:
+            out.append(generic)
+    return out
+
+
+def _text_says_progression(text: str) -> bool:
+    if not _PROGRESSION_TEXT_RE.search(text):
+        return False
+    remaining = _NEGATED_PROGRESSION_RE.sub(" ", text)
+    return bool(_PROGRESSION_TEXT_RE.search(remaining))
+
 
 def treatment_history(facts: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalized history entries: {line, agents (lowercase), status}."""
     out: list[dict[str, Any]] = []
     for raw in facts.get("treatment_history") or []:
         if isinstance(raw, str):
-            text = raw.strip().lower()
-            status = "progression" if any(p in text for p in _PROGRESSION) \
-                else None
-            out.append({"line": None, "agents": [text], "status": status})
+            text = raw.strip()
+            status = "progression" if _text_says_progression(text) else None
+            out.append({"line": None, "agents": _normalize_agent(text),
+                        "status": status})
             continue
         if not isinstance(raw, dict):
             continue
@@ -61,12 +141,14 @@ def treatment_history(facts: dict[str, Any]) -> list[dict[str, Any]]:
             or raw.get("regimen") or raw.get("drugs") or []
         if isinstance(agents, str):
             agents = [agents]
+        normalized = [n for a in agents for n in _normalize_agent(a)]
         status_raw = str(raw.get("status") or "").strip().lower()
+        progressed = status_raw in _PROGRESSION or (
+            bool(status_raw) and _text_says_progression(status_raw))
         out.append({
             "line": raw.get("line"),
-            "agents": [str(a).strip().lower() for a in agents],
-            "status": "progression" if status_raw in _PROGRESSION
-            else (status_raw or None),
+            "agents": normalized,
+            "status": "progression" if progressed else (status_raw or None),
         })
     return out
 
@@ -82,6 +164,13 @@ def progressed_on(facts: dict[str, Any], keywords: tuple[str, ...]) -> bool:
     return False
 
 
+def exposed_to(facts: dict[str, Any], keywords: tuple[str, ...]) -> bool:
+    """Any recorded exposure (whatever the outcome) to a matching agent."""
+    return any(any(k in agent for k in keywords)
+               for entry in treatment_history(facts)
+               for agent in entry["agents"])
+
+
 def progressed_agents(facts: dict[str, Any]) -> list[str]:
     """Every recorded agent with explicit progression (lowercase)."""
     agents: list[str] = []
@@ -89,6 +178,34 @@ def progressed_agents(facts: dict[str, Any]) -> list[str]:
         if entry["status"] == "progression":
             agents.extend(entry["agents"])
     return agents
+
+
+def progressed_drugs_in(regimen_id: str, facts: dict[str, Any]) -> list[str]:
+    """Components of this regimen the record documents progression on."""
+    from . import regimens as regimen_lib
+
+    regimen = regimen_lib.get(regimen_id)
+    progressed = [a for a in progressed_agents(facts) if a]
+    if regimen is None or not progressed:
+        return []
+    hits: set[str] = set()
+    for component in regimen.components:
+        drug = component.drug.lower()
+        for agent in progressed:
+            if drug in agent or agent in drug:
+                hits.add(drug)
+    return sorted(hits)
+
+
+def driver_therapy_progressed(facts: dict[str, Any]) -> bool:
+    """True when the disease progressed on the directed therapy of a
+    first-line actionable driver on record — the only history that
+    moves a driver-positive case out of the first-line question."""
+    for driver in first_line_actionable_drivers(facts):
+        agents = DRIVER_DIRECTED_AGENTS.get(driver["gene"])
+        if agents and progressed_on(facts, agents):
+            return True
+    return False
 
 
 def history_summary(facts: dict[str, Any]) -> str:
@@ -101,8 +218,15 @@ def history_summary(facts: dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
-def _option(name: str, regimen_ids: list[str], rationale: str) -> dict:
-    return {"name": name, "regimen_ids": regimen_ids, "rationale": rationale}
+def _option(name: str, regimen_ids: list[str], rationale: str, *,
+            continuation: bool = False) -> dict:
+    out = {"name": name, "regimen_ids": regimen_ids, "rationale": rationale}
+    if continuation:
+        # Deliberately continues a progressed drug (mechanism-directed);
+        # the planner lets it through and the critic's same-drug warn is
+        # its documentation demand.
+        out["continuation"] = True
+    return out
 
 
 def progression_findings(facts: dict[str, Any]) -> dict[str, Any]:
@@ -141,14 +265,51 @@ def sequencing_context(stage_group: str,
     cautions: list[str] = []
     honest: list[str] = []
     drivers = _normalized_drivers(facts)
-    line = max((e["line"] or 0 for e in history), default=0) + 1 or 2
+    numbered = [e["line"] for e in history if isinstance(e["line"], int)]
+    progressions = sum(1 for e in history if e["status"] == "progression")
+    line = max(max(numbered, default=0), progressions) + 1
+
+    # A driver-positive patient who progressed on chemotherapy (or
+    # chemo-IO) but never received the driver's targeted agent is NOT in
+    # a later-line targeted setting — the driver-directed first-line
+    # therapy is still the next line. Sequencing defers to the first-line
+    # table instead of offering docetaxel over an unused TKI.
+    actionable = first_line_actionable_drivers(facts)
+    lead = actionable[0] if actionable else None
+    if lead and not exposed_to(
+            facts, DRIVER_DIRECTED_AGENTS.get(lead["gene"], ())):
+        return {
+            "line": line, "defer_to_first_line": True, "options": [],
+            "workup": [], "honest_notes": [],
+            "cautions": [
+                f"Progression is documented ({history_summary(facts)}), "
+                f"but no {lead['gene']}-directed therapy has been given: "
+                f"the driver-directed first-line therapy IS the next "
+                f"line — chemotherapy/immunotherapy sequencing does not "
+                f"apply until it has been used."],
+        }
 
     egfr_positive = driver_status(drivers.get("egfr")) == "positive"
     alk_positive = driver_status(drivers.get("alk")) == "positive"
+    early_gen_only = progressed_on(facts, _EARLY_GEN_EGFR) \
+        and not progressed_on(facts, _THIRD_GEN_EGFR)
 
-    if egfr_positive and progressed_on(facts, _THIRD_GEN_EGFR):
+    if egfr_positive and (progressed_on(facts, _THIRD_GEN_EGFR)
+                          or early_gen_only):
         findings = progression_findings(facts)
-        if findings["small_cell_transformation"]:
+        t790m = "t790m" in egfr_classes(facts)
+        if early_gen_only and t790m \
+                and not findings["small_cell_transformation"]:
+            options.append(_option(
+                "Osimertinib (acquired T790M)",
+                ["osimertinib_t790m_subsequent"],
+                "T790M-positive progression on a first/second-generation "
+                "EGFR TKI: AURA3 (osimertinib over platinum-pemetrexed)"))
+            honest.append(
+                "Post-osimertinib resistance after this line is the "
+                "MARIPOSA-2 question — it is handled when that "
+                "progression is recorded.")
+        elif findings["small_cell_transformation"]:
             # Different disease biology: the EGFR-directed options do
             # not apply to the transformed clone.
             options.append(_option(
@@ -169,6 +330,22 @@ def sequencing_context(stage_group: str,
                 "backbone (TKI continuation, radiotherapy integration, "
                 "mixed-histology dosing) is NOT encoded — thoracic "
                 "tumor board.")
+        elif early_gen_only and not progressed_on(facts, _CHEMO_AGENTS):
+            # First/second-generation TKI progression: the T790M question.
+            if not facts.get("progression_ngs_done") \
+                    and not findings["available"]:
+                workup.append(
+                    "T790M testing AT PROGRESSION (plasma ctDNA first; "
+                    "tissue re-biopsy if plasma is negative) — "
+                    "T790M-positive disease goes to osimertinib (AURA3); "
+                    "the options below are provisional until it is known")
+            options.append(_option(
+                "Platinum-pemetrexed chemotherapy",
+                ["platinum_pemetrexed_post_tki"],
+                "T790M-negative progression on a first/second-generation "
+                "EGFR TKI: platinum-pemetrexed; continuing the "
+                "first-generation TKI alongside chemotherapy did not help "
+                "(IMPRESS)"))
         elif progressed_on(facts, _CHEMO_AGENTS):
             # Third line: TKI and platinum both exhausted.
             options.append(_option(
@@ -204,7 +381,7 @@ def sequencing_context(stage_group: str,
                     "(phase 2) — a mechanism-directed CONTINUATION of "
                     "osimertinib plus MET inhibition; the same-drug "
                     "flag on this plan is the documentation demand, "
-                    "not an error"))
+                    "not an error", continuation=True))
             if findings["c797s"]:
                 cautions.append(
                     "C797S on the progression report: no approved "

@@ -33,6 +33,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import warnings
 import os
 import re
 import time
@@ -162,12 +163,26 @@ def load_curation(path: str | Path) -> dict[str, dict[str, Any]]:
             payload = json.loads(line)
         except json.JSONDecodeError as exc:
             if line_no == len(lines):
+                warnings.warn(
+                    f"curation ledger {file_path}: torn final line "
+                    f"{line_no} ignored — re-record that review",
+                    stacklevel=2)
                 break
             raise ValueError(
                 f"corrupt curation ledger line {line_no}: {exc}") from exc
         if not isinstance(payload, dict) or not payload.get("rec_id"):
             raise ValueError(f"curation ledger line {line_no}: not a review "
                              f"entry")
+        if payload.get("status") == "clinician_verified" and (
+                not str(payload.get("reviewer") or "").strip()
+                or not str(payload.get("content_hash") or "").strip()):
+            # An UPGRADE without a named reviewer or a content pin (e.g. a
+            # hand-written line) never upgrades anything. Rejections and
+            # revocations only downgrade — the safe direction — and stand.
+            warnings.warn(
+                f"curation ledger line {line_no} ({payload.get('rec_id')}): "
+                f"no reviewer or content hash — ignored", stacklevel=2)
+            continue
         entries[str(payload["rec_id"])] = payload
     return entries
 
@@ -212,12 +227,14 @@ def append_curation(
 
 
 def _case_genes(facts: dict[str, Any]) -> set[str]:
-    from .biomarkers import driver_status
+    from .biomarkers import _normalized_drivers, driver_status
 
     genes: set[str] = set()
-    for gene, value in (facts.get("driver_mutations") or {}).items():
-        if driver_status(str(value)) == "positive":
-            genes.add(str(gene).upper())
+    for gene, value in _normalized_drivers(facts).items():
+        if driver_status(value) == "positive":
+            genes.add(gene.upper())
+            if gene == "erbb2":
+                genes.add("HER2")
     return genes
 
 

@@ -157,6 +157,16 @@ def tool_specs() -> list[ToolSpec]:
     return list(TOOL_SPECS)
 
 
+#: Tools that are pure functions of the local registries/library: replay
+#: re-executes them and compares (network-backed tools are served from the
+#: journal as recorded).
+_DETERMINISTIC_LOCAL_TOOLS = frozenset({
+    "stage_lookup", "trial_lookup", "regimen_lookup", "protocol_lookup",
+    "interaction_check", "emergency_pathway", "regimen_detail",
+    "dose_gate_check",
+})
+
+
 class ToolRegistry:
     """Tool implementations + brokered, journaled, retried dispatch."""
 
@@ -195,6 +205,16 @@ class ToolRegistry:
             hit, recorded = journal.next_result("tool", name, kwargs)
             if hit:
                 broker.charge()  # a replayed call still consumes the run budget
+                if name in _DETERMINISTIC_LOCAL_TOOLS:
+                    # Pure local tools are RE-EXECUTED and compared: the
+                    # journal proves the run, it may not author the result.
+                    live = self._execute_with_retry(name, kwargs)
+                    from ..journal import canonical_json
+
+                    if canonical_json(live.to_journal()) \
+                            != canonical_json(recorded):
+                        journal.result_divergence("tool", name, recorded,
+                                                  live.to_journal())
                 replayed = ToolResult.from_journal(name, recorded)
                 if replayed.ok:
                     broker.health.record_success(name)
@@ -271,7 +291,7 @@ class ToolRegistry:
                 {"match": "none", "trials": [],
                  "note": "not in the curated registry — verify via citation_verify/pubmed_search "
                          "before citing, or state the claim qualitatively"},
-                evidence_level=EvidenceLevel.TOOL.value,
+                evidence_level=EvidenceLevel.NO_MATCH.value,
             )
         return ToolResult(
             "trial_lookup", True,
@@ -289,6 +309,8 @@ class ToolRegistry:
             f"{len(found)} regimen(s): " + ", ".join(r.regimen_id for r in found)
             if found else f"no regimen match for {query!r}",
             {"regimens": [r.summary() for r in found]},
+            evidence_level=(EvidenceLevel.TOOL.value if found
+                            else EvidenceLevel.NO_MATCH.value),
             source_version=regimen_lib.LIBRARY_VERSION,
         )
 
@@ -491,10 +513,10 @@ class ToolRegistry:
 
         from ..knowledge.biomarkers import gene_status
 
-        from ..knowledge.organ_gates import evaluate_gate
+        from ..knowledge.organ_gates import evaluate_gate, regimen_gates
 
         results: list[dict[str, Any]] = []
-        for gate in regimen.dose_gates:
+        for gate in regimen_gates(regimen):
             status, note = "unverified", "no matching fact on record"
             organ = evaluate_gate(gate, facts)
             if organ is not None:
@@ -573,20 +595,28 @@ class ToolRegistry:
             elif gate == "met_ex14_confirmed":
                 from ..knowledge.biomarkers import _MET_EX14_RE
 
-                value = (facts.get("driver_mutations") or {}).get("met")
+                from ..knowledge.biomarkers import (
+                    _normalized_drivers, positive_evidence,
+                )
+
+                value = _normalized_drivers(facts).get("met")
                 if value is not None and gene_status(facts, "met") == "positive":
                     status, note = (
                         ("pass", "MET exon 14 skipping on record")
-                        if _MET_EX14_RE.search(str(value))
+                        if _MET_EX14_RE.search(positive_evidence(value))
                         else ("fail", "MET positive but not exon 14 skipping"))
             elif gate == "braf_v600e_confirmed":
                 from ..knowledge.biomarkers import _BRAF_V600_RE
 
-                value = (facts.get("driver_mutations") or {}).get("braf")
+                from ..knowledge.biomarkers import (
+                    _normalized_drivers, positive_evidence,
+                )
+
+                value = _normalized_drivers(facts).get("braf")
                 if value is not None and gene_status(facts, "braf") == "positive":
                     status, note = (
                         ("pass", "BRAF V600E on record")
-                        if _BRAF_V600_RE.search(str(value))
+                        if _BRAF_V600_RE.search(positive_evidence(value))
                         else ("fail", "BRAF positive but not V600"))
             elif gate.endswith("_positive") and gate[:-9] in (
                     "alk", "ros1", "ret", "ntrk", "erbb2", "kras"):

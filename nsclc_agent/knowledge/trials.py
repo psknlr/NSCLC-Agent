@@ -85,6 +85,8 @@ def _s(*groups: str) -> frozenset[str]:
 
 
 _EARLY = ("IB", "IIA", "IIB", "IIIA")
+#: "IB (≥4 cm)–IIIA" under AJCC 7 = 8th/9th-edition IIA–IIIA.
+_EARLY_GE4CM = ("IIA", "IIB", "IIIA")
 _RESECTABLE_II_IIIB = ("IIA", "IIB", "IIIA", "IIIB")
 _STAGE_III = ("IIIA", "IIIB", "IIIC")
 _STAGE_IV = ("IVA", "IVB")
@@ -110,7 +112,7 @@ TRIALS: tuple[Trial, ...] = (
     ),
     Trial(
         "ALINA", "ALINA (adjuvant alectinib)", "NCT03456076", "adjuvant",
-        _s(*_EARLY), driver_required="ALK",
+        _s(*_EARLY_GE4CM), driver_required="ALK",
         regimen_ids=("alectinib_adjuvant",),
         results=("DFS HR 0.24 (95% CI 0.13–0.45) in stage II–IIIA (primary); "
                  "HR 0.24 (95% CI 0.13–0.43) in the ITT incl. IB ≥4 cm",),
@@ -124,7 +126,7 @@ TRIALS: tuple[Trial, ...] = (
     Trial(
         "CHECKMATE816", "CheckMate 816 (neoadjuvant nivolumab + chemo)",
         "NCT02998528", "neoadjuvant",
-        _s(*_EARLY), egfr_alk_excluded=True,
+        _s(*_EARLY_GE4CM), egfr_alk_excluded=True,
         regimen_ids=("nivo_chemo_neoadjuvant",),
         results=(
             "EFS HR 0.63 (97.38% CI 0.43–0.91); pCR 24.0% vs 2.2%",
@@ -190,7 +192,7 @@ TRIALS: tuple[Trial, ...] = (
     Trial(
         "KEYNOTE091", "KEYNOTE-091/PEARLS (adjuvant pembrolizumab)",
         "NCT02504372", "adjuvant",
-        _s(*_EARLY),
+        _s(*_EARLY_GE4CM),
         regimen_ids=("pembro_adjuvant",),
         results=("DFS HR 0.76 (95% CI 0.63–0.91) in the ITT population, irrespective of PD-L1",),
         source="Lancet Oncol 2022;23:1274",
@@ -548,6 +550,21 @@ TRIALS: tuple[Trial, ...] = (
         keywords=("docetaxel", "ramucirumab", "REVEL", "second line"),
     ),
     Trial(
+        "AURA3", "AURA3 (osimertinib vs platinum-pemetrexed, acquired "
+        "T790M)", "NCT02151981", "subsequent",
+        _s(*_STAGE_IV), driver_required="EGFR",
+        driver_class_required="egfr_t790m",
+        regimen_ids=("osimertinib_t790m_subsequent",),
+        results=("PFS 10.1 vs 4.4 months (HR 0.30, 95% CI 0.23–0.41) "
+                 "over platinum-pemetrexed",),
+        source="NEJM 2017;376:629",
+        approval="FDA 2015-11 accelerated / 2017-03 regular: osimertinib, "
+                 "EGFR T790M after EGFR-TKI progression",
+        enrollment_note="Acquired T790M after progression on a "
+                        "first/second-generation EGFR TKI",
+        keywords=("osimertinib", "T790M", "AURA3", "resistance"),
+    ),
+    Trial(
         "MARCOUX_SERIES",
         "Marcoux et al. (SCLC-transformed EGFR-mutant NSCLC, "
         "retrospective)", "N/A (retrospective)", "subsequent",
@@ -724,6 +741,8 @@ _CLASS_CHECKS: dict = {
     "met_ex14": ("met", frozenset({"ex14_skipping"}), frozenset()),
     "braf_v600e": ("braf", frozenset({"v600e"}), frozenset()),
     "kras_g12c": ("kras", frozenset({"g12c"}), frozenset()),
+    "egfr_t790m": ("egfr", frozenset({"t790m"}),
+                   frozenset({"exon20ins", "c797s"})),
 }
 
 #: trial histology restriction → subject histologies that contradict it.

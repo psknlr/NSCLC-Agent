@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -41,13 +42,74 @@ _SPELLED_NUM = (
 #: through the deterministic regimen library. Covers digit and spelled-out
 #: quantities against mg/µg/IU-class units (red-team hardened: "milligrams",
 #: "mcg", "μg", "IU" all count).
-DOSE_RE = re.compile(
-    r"\d+(?:\.\d+)?\s*(?:mg/m2|mg/m²|mg/kg|mg\b|milligrams?\b|micrograms?\b|"
-    r"mcg\b|[μµ]g\b|iu\b|毫克|g\b|克|Gy\b|戈瑞)"
-    rf"|{_SPELLED_NUM}\s+(?:mg\b|milligrams?\b|micrograms?\b|mcg\b|grays?\b)"
-    r"|AUC\s*\d",
+_DOSE_UNIT = (r"(?:mg/m2|mg/m²|mg/kg|mgs?\b|milligrams?\b|micrograms?\b|"
+              r"mcg\b|[μµu]g\b|iu\b|毫克|g\b|克|c?Gy\b|戈瑞)")
+#: v0.7.1 audit hardening: whole ranges ("45 to 50.4 Gy", "(60~66) Gy")
+#: are one match so a scrub never leaves a bound behind; a closing bracket
+#: or hyphen may sit between number and unit ("74-Gy", "200-mg",
+#: "66) Gy"); "AUC=5" and "mgs"/"ug"/"cGy" count. Text is NFKC-normalized
+#: before scanning, so full-width "２００ｍｇ" and "㎎" are caught too.
+_DOSE_PATTERN = re.compile(
+    r"(?:\d+(?:\.\d+)?\s*(?:[-‐–—~〜～]|to|至|到)\s*[(\[（]?\s*)?"
+    r"\d+(?:\.\d+)?\s*[)\]）】〕]?\s*[-‐–—]?\s*" + _DOSE_UNIT
+    + rf"|{_SPELLED_NUM}\s+(?:mg\b|milligrams?\b|micrograms?\b|mcg\b|grays?\b)"
+    r"|AUC\s*[=:≈~]?\s*\d",
     re.IGNORECASE,
 )
+
+
+def normalize_for_scan(text: str) -> str:
+    """NFKC: full-width digits/letters and unit ligatures ("㎎") become
+    their ASCII forms before any dose scan."""
+    return unicodedata.normalize("NFKC", str(text))
+
+
+class _DoseScanner:
+    """``DOSE_RE`` with NFKC normalization built in — every caller (rule
+    engine, tool loop, interview loop, reply scan, KG scrub) gets the
+    same hardened behavior through the same object."""
+
+    pattern = _DOSE_PATTERN.pattern
+
+    def search(self, text: str):
+        return _DOSE_PATTERN.search(normalize_for_scan(text))
+
+    def sub(self, repl: str, text: str) -> str:
+        return _DOSE_PATTERN.sub(repl, normalize_for_scan(text))
+
+    def finditer(self, text: str):
+        return _DOSE_PATTERN.finditer(normalize_for_scan(text))
+
+
+DOSE_RE = _DoseScanner()
+
+
+def redact_doses(text: str, replacement: str) -> str:
+    """Replace dose numerics in authored text, leaving library regimen ids
+    ("ccrt_60gy") intact."""
+    protected: dict[str, str] = {}
+    out = str(text)
+    for i, rid in enumerate(sorted(regimen_lib.REGIMENS_BY_ID, key=len,
+                                   reverse=True)):
+        if rid in out:
+            token = f"\x00R{i}\x00"
+            protected[token] = rid
+            out = out.replace(rid, token)
+    out = DOSE_RE.sub(replacement, out)
+    for token, rid in protected.items():
+        out = out.replace(token, rid)
+    return out
+
+
+def dose_in_payload(payload: Any) -> bool:
+    """True when authored content carries a dose numeric. Library regimen
+    ids are references into the deterministic library, not authored
+    numerics ("ccrt_60gy"), so they are removed before scanning."""
+    blob = payload if isinstance(payload, str) else json.dumps(
+        payload, ensure_ascii=False)
+    for rid in sorted(regimen_lib.REGIMENS_BY_ID, key=len, reverse=True):
+        blob = blob.replace(rid, "")
+    return bool(DOSE_RE.search(blob))
 
 #: Surgery as the proposed management. Two layers: explicit procedure names
 #: (any mention blocks under N3) and generic surgery words only in a
@@ -101,7 +163,8 @@ def _string_leaves(value: Any) -> list[str]:
 #: Absolute RT doses (1–3 digits) and per-fraction arithmetic. Only explicit
 #: multiplication ("2 Gy × 37") or "per fraction … N fractions" multiplies —
 #: "60 Gy in 30 fractions" states a TOTAL of 60, never 60 × 30.
-_RT_DOSE_RE = re.compile(r"(\d{1,3}(?:\.\d+)?)\s*Gy", re.IGNORECASE)
+_RT_DOSE_RE = re.compile(
+    r"(\d{1,3}(?:\.\d+)?)\s*[)\]）】〕]?\s*[-‐–—]?\s*Gy", re.IGNORECASE)
 _RT_FRACTION_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*Gy\s*(?:per fraction|/fx|/fraction)\s*"
     r"[^.。;；]{0,20}?[×x*]?\s*(\d{1,2})\s*(?:fx|fractions?|次|分次)"
@@ -115,6 +178,43 @@ _RT_NEGATED_RE = re.compile(
     r"(?:不得|不要|不应|勿|避免)[^.。;；]{0,15}$",
     re.IGNORECASE,
 )
+
+
+#: A declared extrapolation must carry a real justification: a blank or
+#: token string ("  ", "ok") declared LAURA onto stage IV and silenced
+#: the stage-boundary block (v0.7.1 audit).
+_MIN_JUSTIFICATION_CHARS = 20
+
+
+def declared_extrapolation_trials(plan: dict[str, Any]) -> set[str]:
+    """Trials the plan validly declares as extrapolations: resolvable,
+    anchoring one of the plan's OWN regimens or trial refs, and carrying
+    a substantive justification."""
+    anchors: set[str] = set()
+    for raw in plan.get("trial_refs") or []:
+        resolved = resolve_trial_id(str(raw))
+        if resolved:
+            anchors.add(resolved)
+    rids = [str(r).strip().lower() for r in plan.get("regimen_ids") or []]
+    for option in plan.get("options") or []:
+        if isinstance(option, dict):
+            rids.extend(str(r).strip().lower()
+                        for r in option.get("regimen_ids") or [])
+    for rid in rids:
+        regimen = regimen_lib.get(rid)
+        if regimen:
+            anchors.update(regimen.trial_ids)
+    out: set[str] = set()
+    for item in plan.get("extrapolations") or []:
+        if not isinstance(item, dict) or not item.get("trial_id"):
+            continue
+        justification = str(item.get("justification") or "").strip()
+        if len(justification) < _MIN_JUSTIFICATION_CHARS:
+            continue
+        resolved = resolve_trial_id(str(item["trial_id"]))
+        if resolved and resolved in anchors:
+            out.add(resolved)
+    return out
 
 
 @dataclass
@@ -148,7 +248,20 @@ class PlanContext:
 
     @property
     def regimen_ids(self) -> list[str]:
-        return [str(r) for r in self.plan.get("regimen_ids") or []]
+        """Every regimen id the plan proposes — the top-level list AND each
+        option's own list — normalized (stripped, lower-cased). An id
+        hidden only inside an option, or padded with whitespace, is
+        audited exactly like a top-level one."""
+        raw = list(self.plan.get("regimen_ids") or [])
+        for option in self.plan.get("options") or []:
+            if isinstance(option, dict):
+                raw.extend(option.get("regimen_ids") or [])
+        out: list[str] = []
+        for rid in raw:
+            norm = str(rid).strip().lower()
+            if norm and norm not in out:
+                out.append(norm)
+        return out
 
     @property
     def trial_refs(self) -> list[str]:
@@ -166,13 +279,7 @@ class PlanContext:
 
     @property
     def declared_extrapolations(self) -> set[str]:
-        out: set[str] = set()
-        for item in self.plan.get("extrapolations") or []:
-            if isinstance(item, dict) and item.get("trial_id") and item.get("justification"):
-                resolved = resolve_trial_id(str(item["trial_id"]))
-                if resolved:
-                    out.add(resolved)
-        return out
+        return declared_extrapolation_trials(self.plan)
 
     def driver_positive(self, *genes: str) -> bool:
         from ..knowledge.biomarkers import driver_positive
@@ -187,11 +294,60 @@ class PlanContext:
 
 # --------------------------------------------------------------------- rules
 
+#: Any surgical procedure noun inside a proposed OPTION. Under N3 every
+#: non-negated one blocks — "induction chemoradiation followed by
+#: surgery", "thoracotomy if downstaged", "refer for operative
+#: management" all evaded the verb-anchored pattern (v0.7.1 audit).
+_PROCEDURE_RE = re.compile(
+    r"\bsurg\w*|\bresect\w*|\bthoracotom\w*|\boperati\w*|\btrimodal\w*|"
+    r"\blobectom\w*|\bpneumonectom\w*|\bsegmentectom\w*|\bvats\b|"
+    r"手术|切除|开胸",
+    re.IGNORECASE,
+)
+#: Negation reaching a following word within the same clause.
+_PRE_NEGATION_RE = re.compile(
+    r"(?:\bno\b|\bnot\b|\bnon-?|\bnever\b|\bavoid\w*|\bwithout\b|"
+    r"\binstead of\b|\brather than\b|\bunresectab\w*|contraindicat\w*|"
+    r"不|无需|无|非|避免|禁忌|而非)[^.。;；,，]{0,30}$",
+    re.IGNORECASE,
+)
+#: Negation that follows the word ("surgery is not indicated").
+_POST_NEGATION_RE = re.compile(
+    r"^[^.。;；,，]{0,25}?(?:not\s+(?:indicated|recommended|an option|"
+    r"part|appropriate|standard|needed|required)|contraindicated|"
+    r"withheld|excluded|不推荐|不适合|不宜|不考虑|禁忌)",
+    re.IGNORECASE,
+)
+
+
+def _negated(text: str, start: int, end: int) -> bool:
+    return bool(_PRE_NEGATION_RE.search(text[:start])
+                or _POST_NEGATION_RE.search(text[end:]))
+
+
+def _option_texts(ctx: "PlanContext", *, with_rationale: bool
+                  ) -> list[tuple[dict, str]]:
+    out = []
+    for option in ctx.plan.get("options") or []:
+        if not isinstance(option, dict):
+            continue
+        parts = [str(option.get("name") or "")]
+        if with_rationale:
+            parts.append(str(option.get("rationale") or ""))
+        out.append((option, " — ".join(parts)))
+    return out
+
+
 def _rule_n3_no_surgery(ctx: PlanContext) -> list[Violation]:
     if ctx.n_category != "N3":
         return []
-    if any("surgery" in rid or "perioperative" in rid or "neoadjuvant" in rid
-           for rid in ctx.regimen_ids) or _SURGERY_RE.search(ctx.plan_text):
+    proposed = any(
+        not _negated(text, m.start(), m.end())
+        for _option, text in _option_texts(ctx, with_rationale=True)
+        for m in _PROCEDURE_RE.finditer(text))
+    if proposed or any(
+            "surgery" in rid or "perioperative" in rid or "neoadjuvant" in rid
+            for rid in ctx.regimen_ids) or _SURGERY_RE.search(ctx.plan_text):
         return [Violation(
             "N3_NO_SURGERY", "block",
             "N3 disease (contralateral mediastinal / supraclavicular nodes) is "
@@ -285,7 +441,10 @@ def _rule_no_concurrent_durvalumab(ctx: PlanContext) -> list[Violation]:
 def _rule_rt_dose(ctx: PlanContext) -> list[Violation]:
     # The RT-escalation check deliberately scans the WHOLE plan including the
     # deterministic dose_plan: an escalated total is wrong wherever it lives.
-    text = json.dumps(ctx.plan, ensure_ascii=False) if ctx.plan else ""
+    text = normalize_for_scan(
+        json.dumps(ctx.plan, ensure_ascii=False)) if ctx.plan else ""
+    for rid in sorted(regimen_lib.REGIMENS_BY_ID, key=len, reverse=True):
+        text = text.replace(rid, "")
     totals: list[float] = []
     fraction_spans: list[tuple[int, int]] = []
     for match in _RT_FRACTION_RE.finditer(text):
@@ -407,12 +566,14 @@ def _rule_driver_first_line(ctx: PlanContext) -> list[Violation]:
         names = ", ".join(
             d["gene"] + (f" ({'/'.join(d['classes'])})" if d["classes"] else "")
             for d in drivers)
-        from ..knowledge.sequencing import progressed_agents
+        from ..knowledge.sequencing import driver_therapy_progressed
 
-        if progressed_agents(ctx.facts):
-            # Line-aware: after documented progression this is no longer
-            # a first-line question — but the ICI answer is still poor in
-            # driver-positive disease (KEYNOTE-789), so it stays flagged.
+        if driver_therapy_progressed(ctx.facts):
+            # Line-aware: after documented progression ON THE DRIVER'S
+            # TARGETED THERAPY this is no longer a first-line question —
+            # but the ICI answer is still poor in driver-positive disease
+            # (KEYNOTE-789), so it stays flagged. Progression on chemo
+            # alone does not qualify: the TKI is still the next line.
             return [Violation(
                 "DRIVER_FIRST_LINE", "warn",
                 f"ICI-containing regimen in driver-positive disease "
@@ -438,21 +599,11 @@ def _rule_progression_same_drug(ctx: PlanContext) -> list[Violation]:
     """Re-proposing an agent the history says the disease progressed on:
     warn. Rechallenge exists (post-chemo intervals, resistance reversal)
     but it is never a silent default — the plan must own the rationale."""
-    from ..knowledge.sequencing import progressed_agents
+    from ..knowledge.sequencing import progressed_drugs_in
 
-    progressed = progressed_agents(ctx.facts)
-    if not progressed or not ctx.regimen_ids:
-        return []
     out: list[Violation] = []
     for rid in ctx.regimen_ids:
-        regimen = regimen_lib.get(rid)
-        if regimen is None:
-            continue
-        drugs = [c.drug.lower() for c in regimen.components]
-        hits = sorted({
-            drug for drug in drugs for agent in progressed
-            if drug in agent or agent in drug
-        })
+        hits = progressed_drugs_in(rid, ctx.facts)
         if hits:
             out.append(Violation(
                 "PROGRESSION_SAME_DRUG", "warn",
@@ -471,6 +622,7 @@ _CLASSICAL_EGFR_REGIMENS = frozenset({
     "osimertinib_first_line", "osimertinib_chemo_first_line",
     "amivantamab_lazertinib", "osimertinib_adjuvant",
     "osimertinib_consolidation", "tepotinib_osimertinib_met_amp",
+    "osimertinib_t790m_subsequent",
 })
 
 
@@ -540,9 +692,11 @@ def _rule_indication_predicate(ctx: PlanContext) -> list[Violation]:
         verdict = evaluate_indication(rid, ctx.stage_group, ctx.facts)
         if not verdict["declared"]:
             out.append(Violation(
-                "INDICATION_UNDECLARED", "warn",
-                f"{rid} carries no indication declaration — every library "
-                f"regimen must declare its population machine-executably.",
+                "INDICATION_UNDECLARED", "block",
+                f"{rid} is not a declared library regimen — a plan may only "
+                f"propose regimen ids from the library (whose populations "
+                f"are machine-executable); an unknown id cannot be audited "
+                f"and does not ship.",
             ))
             continue
         if verdict["verdict"] == INELIGIBLE:
@@ -565,6 +719,107 @@ def _rule_indication_predicate(ctx: PlanContext) -> list[Violation]:
                 + ". Unknown routes to workup, not to a guess.",
             ))
     return out
+
+
+#: Systemic drugs a plan may name. Library drugs come from the regimen
+#: components; the rest are real agents with no library regimen, so
+#: naming one in an option can never be bound and always blocks.
+_DRUG_SUFFIX_RE = re.compile(
+    r"^[a-z]+(?:mab|nib|platin|trexed|taxel|poside|rasib|tecan|bine)$")
+_EXTRA_DRUGS = (
+    "gefitinib", "erlotinib", "dacomitinib", "icotinib", "aumolertinib",
+    "furmonertinib", "crizotinib", "brigatinib", "ceritinib", "ensartinib",
+    "entrectinib", "taletrectinib", "pralsetinib", "savolitinib",
+    "encorafenib", "binimetinib", "adagrasib", "cemiplimab", "tislelizumab",
+    "sintilimab", "camrelizumab", "toripalimab", "bevacizumab",
+    "gemcitabine", "irinotecan",
+)
+_CHINESE_DRUGS = {
+    "替雷利珠": "tislelizumab", "信迪利": "sintilimab",
+    "卡瑞利珠": "camrelizumab", "特瑞普利": "toripalimab",
+    "贝伐珠": "bevacizumab", "安罗替尼": "anlotinib",
+}
+
+
+def _drug_vocabulary() -> dict[str, str]:
+    """Surface form → generic drug name."""
+    from ..knowledge.sequencing import _AGENT_ALIASES
+
+    vocab: dict[str, str] = {}
+    for regimen in regimen_lib.REGIMENS:
+        for component in regimen.components:
+            for token in re.findall(r"[a-z]{5,}", component.drug.lower()):
+                if _DRUG_SUFFIX_RE.match(token):
+                    vocab[token] = token
+    for drug in _EXTRA_DRUGS:
+        vocab[drug] = drug
+    vocab["anlotinib"] = "anlotinib"
+    for alias, generic in {**_AGENT_ALIASES, **_CHINESE_DRUGS}.items():
+        if _DRUG_SUFFIX_RE.match(generic) or generic in vocab:
+            vocab[alias] = generic
+    return vocab
+
+
+_DRUGS = _drug_vocabulary()
+_DRUG_MENTION_RE = re.compile(
+    "|".join(sorted((re.escape(k) for k in _DRUGS), key=len, reverse=True)),
+    re.IGNORECASE)
+
+
+def _rule_option_drug_unbound(ctx: PlanContext) -> list[Violation]:
+    """An option NAMED after a systemic drug must carry a library regimen
+    containing that drug. Otherwise every regimen-based check (driver,
+    predicate, variant, organ, claim entailment) is silently skipped —
+    free-text "Pembrolizumab monotherapy" with empty regimen_ids on an
+    EGFR+ case released with zero violations (v0.7.1 audit)."""
+    out: list[Violation] = []
+    for option, text in _option_texts(ctx, with_rationale=False):
+        bound: set[str] = set()
+        for rid in option.get("regimen_ids") or []:
+            regimen = regimen_lib.get(str(rid).strip().lower())
+            if regimen:
+                bound.update(c.drug.lower() for c in regimen.components)
+        unbound = sorted({
+            _DRUGS[m.group(0).lower()] if m.group(0).lower() in _DRUGS
+            else _DRUGS.get(m.group(0), m.group(0))
+            for m in _DRUG_MENTION_RE.finditer(text)
+            if not _negated(text, m.start(), m.end())
+        } - {d for d in _DRUGS.values()
+             if any(d in component for component in bound)})
+        if unbound:
+            out.append(Violation(
+                "OPTION_DRUG_UNBOUND", "block",
+                f"Option '{text[:70]}' names {', '.join(unbound)} but "
+                f"carries no library regimen containing it — a drug named "
+                f"in free text bypasses every regimen-level safety check; "
+                f"bind it to a library regimen id or remove it.",
+            ))
+    return out
+
+
+_CONSOLIDATION_AFTER_CRT = ("durva_consolidation", "osimertinib_consolidation")
+_CRT_HISTORY_RE = re.compile(r"chemoradi|\bc?crt\b|放化疗|同步放化疗", re.I)
+
+
+def _rule_consolidation_requires_crt(ctx: PlanContext) -> list[Violation]:
+    """PACIFIC and LAURA consolidation exist only AFTER chemoradiation: a
+    plan proposing consolidation with no chemoradiation in the plan and
+    none in the treatment history has skipped the definitive therapy."""
+    used = [r for r in ctx.regimen_ids if r in _CONSOLIDATION_AFTER_CRT]
+    if not used or "ccrt_60gy" in ctx.regimen_ids:
+        return []
+    from ..knowledge.sequencing import treatment_history
+
+    if any(_CRT_HISTORY_RE.search(agent)
+           for entry in treatment_history(ctx.facts)
+           for agent in entry["agents"]):
+        return []
+    return [Violation(
+        "CONSOLIDATION_WITHOUT_CRT", "block",
+        f"{', '.join(used)} is consolidation AFTER definitive chemoradiation "
+        f"(PACIFIC/LAURA) — the plan has no chemoradiation and the history "
+        f"records none.",
+    )]
 
 
 def _rule_organ_function(ctx: PlanContext) -> list[Violation]:
@@ -660,10 +915,7 @@ def _rule_dose_scan(ctx: PlanContext) -> list[Violation]:
     library, not an authored numeric.
     """
     scrubbed = {k: v for k, v in ctx.plan.items() if k != "dose_plan"}
-    blob = json.dumps(scrubbed, ensure_ascii=False)
-    for rid in regimen_lib.REGIMENS_BY_ID:
-        blob = blob.replace(rid, "")
-    if DOSE_RE.search(blob):
+    if dose_in_payload(scrubbed):
         return [Violation(
             "DOSE_IN_MODEL_OUTPUT", "block",
             "A dose numeric appears in model-authored plan content. Doses enter "
@@ -696,9 +948,22 @@ def _rule_cns_untreated_symptomatic(ctx: PlanContext) -> list[Violation]:
         or bool(reading["leptomeningeal"])
     if not dangerous:
         return []
-    text = ctx.plan_text.lower()
-    if any(marker in text for marker in _CNS_LOCAL_MARKERS):
-        return []
+    # CNS-directed care must be an OPTION the plan offers: flagged
+    # cns_directed, or NAMED with a CNS marker that is not negated ("SRS
+    # not needed", "neuro-oncology consult not needed") and is not body
+    # SBRT elsewhere. A marker in a rationale, an uncertainty, a workup
+    # line or attached guideline context does not address the CNS.
+    for option, name in _option_texts(ctx, with_rationale=False):
+        if option.get("cns_directed") is True:
+            return []
+        lowered = name.lower()
+        for marker in _CNS_LOCAL_MARKERS:
+            for m in re.finditer(re.escape(marker), lowered):
+                if marker == "stereotactic" and re.match(
+                        r"stereotactic\s+body", lowered[m.start():]):
+                    continue
+                if not _negated(lowered, m.start(), m.end()):
+                    return []
     label = ("leptomeningeal disease" if reading["leptomeningeal"]
              else "symptomatic untreated brain metastases")
     return [Violation(
@@ -733,6 +998,8 @@ RULES = (
     _rule_stage0_no_systemic,
     _rule_indication_predicate,
     _rule_driver_first_line,
+    _rule_option_drug_unbound,
+    _rule_consolidation_requires_crt,
     _rule_progression_same_drug,
     _rule_cns_untreated_symptomatic,
     _rule_cns_tnm_consistency,

@@ -466,6 +466,18 @@ REGIMENS: tuple[Regimen, ...] = (
                    "modern reference",
     ),
     Regimen(
+        "osimertinib_t790m_subsequent",
+        "Osimertinib for acquired T790M (AURA3)", "subsequent",
+        (_C("osimertinib", "per label (not encoded)", schedule="daily"),),
+        trial_ids=("AURA3",),
+        monitoring=("QTc", "ILD/pneumonitis", "LVEF", "cytopenias"),
+        dose_gates=("egfr_positive", "prior_systemic_therapy",
+                    "qtc_baseline", "ild_history"),
+        label_note="Acquired EGFR T790M after progression on a "
+                   "first/second-generation EGFR TKI — distinct from the "
+                   "FLAURA first-line population",
+    ),
+    Regimen(
         "platinum_etoposide_transformation",
         "Platinum-etoposide (small-cell transformation)", "subsequent",
         (_C("carboplatin", "per label (AUC-based — not encoded)"),

@@ -30,6 +30,7 @@ emergency screen's short-circuit and never reaches this layer.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 _PRESENT = {"present", "yes", "true", "positive", "有", "存在"}
@@ -87,6 +88,8 @@ def tnm_conflict(facts: dict[str, Any]) -> Optional[str]:
     if reading["status"] != "present":
         return None
     m = str((facts.get("tnm") or {}).get("m") or "").upper().replace(" ", "")
+    # Descriptor prefixes (c/p/yp/r) do not change the category.
+    m = re.sub(r"^(?:YP|YC|RP|RC|C|P|R|Y)(?=M)", "", m)
     if m == "M0":
         return ("CNS metastases are on record but the TNM descriptors say "
                 "M0 — brain metastases are distant disease (at least M1b). "
@@ -139,7 +142,7 @@ def cns_strategy(stage_group: str, facts: dict[str, Any],
     if reading["leptomeningeal"]:
         options.append({
             "name": "Leptomeningeal disease: dedicated neuro-oncology "
-                    "referral", "regimen_ids": [],
+                    "referral", "regimen_ids": [], "cns_directed": True,
             "rationale": "LM is its own disease entity (CSF cytology / "
                          "contrast MRI axis confirmation, intrathecal and "
                          "escalated-TKI questions) — outside this system's "
@@ -152,7 +155,7 @@ def cns_strategy(stage_group: str, facts: dict[str, Any],
         options.insert(0, {
             "name": "CNS-directed local therapy first "
                     "(neurosurgery / radiation oncology)",
-            "regimen_ids": [],
+            "regimen_ids": [], "cns_directed": True,
             "rationale": "Symptomatic untreated brain metastases: local "
                          "control and symptom relief (surgical resection "
                          "or radiosurgery per burden and location; "
@@ -177,7 +180,7 @@ def cns_strategy(stage_group: str, facts: dict[str, Any],
                 "name": "CNS-directed local therapy (SRS for limited "
                         "burden; whole-brain approach for extensive "
                         "burden — radiation oncology)",
-                "regimen_ids": [],
+                "regimen_ids": [], "cns_directed": True,
                 "rationale": "Driver-negative systemic options have "
                              "limited intracranial coverage; local "
                              "therapy timing is decided with radiation "

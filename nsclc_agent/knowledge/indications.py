@@ -29,6 +29,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..staging.legacy8 import eighth_edition_group
+from .sequencing import (
+    ANY_TKI,
+    _EARLY_GEN_EGFR,
+    _SECOND_GEN_ALK,
+    _THIRD_GEN_EGFR,
+    DRIVER_DIRECTED_AGENTS,
+)
 from .biomarkers import (
     EGFR_UNCOMMON_SENSITIZING,
     _BRAF_V600_RE,
@@ -36,6 +43,7 @@ from .biomarkers import (
     _MET_EX14_RE,
     _normalized_drivers,
     driver_status,
+    positive_evidence,
     egfr_classes,
     egfr_classical,
     first_line_actionable_drivers,
@@ -73,6 +81,10 @@ class Indication:
     pd_l1_tps_ge: float | None = None
     pd_l1_tc_ge: float | None = None
     resectability: str | None = None  # RESECTABLE | UNRESECTABLE
+    #: Resectability that EXCLUDES the regimen when recorded (adjuvant
+    #: therapy never applies to UNRESECTABLE disease; PACIFIC consolidation
+    #: never to RESECTABLE) — silent when resectability is not recorded.
+    forbid_resectability: str | None = None
     requires_inoperable: bool = False
     requires_oligometastatic: bool = False
     requires_prior_systemic: bool = False
@@ -80,6 +92,11 @@ class Indication:
     #: (e.g. Dato-DXd's third-line position) — checked against the
     #: recorded treatment history, not just "previously treated".
     requires_prior_platinum: bool = False
+    #: Approval requires PROGRESSION on one of these agents specifically
+    #: (MARIPOSA-2 = post-osimertinib; AURA3 = post-first/second-gen
+    #: TKI) — "previously treated" with something else is not enough.
+    requires_prior_agents: tuple[str, ...] = ()
+    prior_agents_label: str = ""
     note: str = ""
 
 
@@ -148,7 +165,7 @@ def _eval_driver(ind: Indication, facts: dict[str, Any]) -> dict[str, Any]:
     if ind.driver_class is None:
         return _cond("driver", label, _MET, f"{gene.upper()} positive")
     classes = egfr_classes(facts) if gene == "egfr" else frozenset()
-    text = str(value)
+    text = positive_evidence(value)
     if ind.driver_class == "egfr_classical":
         if egfr_classical(facts):
             return _cond("driver", label, _MET,
@@ -173,6 +190,10 @@ def _eval_driver(ind: Indication, facts: dict[str, Any]) -> dict[str, Any]:
         return _cond("driver", label,
                      _MET if _BRAF_V600_RE.search(text) else _NOT_MET,
                      text[:60])
+    if ind.driver_class == "egfr_t790m":
+        ok = "t790m" in classes and not (classes & {"exon20ins", "c797s"})
+        return _cond("driver", label, _MET if ok else _NOT_MET,
+                     "/".join(sorted(classes)) or "unclassified")
     if ind.driver_class == "kras_g12c":
         return _cond("driver", label,
                      _MET if _KRAS_G12C_RE.search(text) else _NOT_MET,
@@ -239,6 +260,13 @@ def _eval_scalars(ind: Indication, facts: dict[str, Any]) -> list[dict[str, Any]
         else:
             out.append(_cond("resectability", ind.resectability, _UNKNOWN,
                              "resectability not on record"))
+    if ind.forbid_resectability:
+        resect = str(facts.get("resectability_category")
+                     or facts.get("resectability") or "").upper()
+        if resect == ind.forbid_resectability:
+            out.append(_cond("resectability",
+                             f"not {ind.forbid_resectability.lower()}",
+                             _NOT_MET, resect.lower()))
     if ind.requires_inoperable:
         operable = facts.get("operable")
         if operable is False:
@@ -281,6 +309,22 @@ def _eval_scalars(ind: Indication, facts: dict[str, Any]) -> list[dict[str, Any]
         else:
             out.append(_cond("prior_therapy", "previously treated", _UNKNOWN,
                              "treatment history not on record"))
+    if ind.requires_prior_agents:
+        from .sequencing import progressed_on, treatment_history
+
+        label = ind.prior_agents_label or "/".join(ind.requires_prior_agents)
+        if progressed_on(facts, ind.requires_prior_agents):
+            out.append(_cond("prior_agents", f"progression on {label}",
+                             _MET, "documented in the treatment history"))
+        elif treatment_history(facts):
+            out.append(_cond("prior_agents", f"progression on {label}",
+                             _NOT_MET,
+                             f"no documented progression on {label} — "
+                             f"this regimen's evidence is specifically "
+                             f"post-{label}"))
+        else:
+            out.append(_cond("prior_agents", f"progression on {label}",
+                             _UNKNOWN, "treatment history not on record"))
     if ind.requires_prior_platinum:
         from .sequencing import treatment_history
 
@@ -368,6 +412,10 @@ def _s(*groups: str) -> frozenset[str]:
 
 
 _EARLY = _s("IB", "IIA", "IIB", "IIIA")
+#: "IB (≥4 cm)–IIIA" under AJCC 7 (ALINA, KEYNOTE-091, CheckMate 816,
+#: IMpower010): a ≥4 cm N0 tumor is T2b = IIA in the 8th/9th editions,
+#: so 9th-edition IB (T2a, 3–4 cm) is outside these trials.
+_EARLY_GE4CM = _s("IIA", "IIB", "IIIA")
 _PERIOP = _s("IIA", "IIB", "IIIA", "IIIB")
 _III = _s("IIIA", "IIIB", "IIIC")
 _II_III = _s("IIA", "IIB", "IIIA", "IIIB", "IIIC")
@@ -377,11 +425,14 @@ INDICATIONS: dict[str, Indication] = {i.regimen_id: i for i in (
     # ---------------------------------------------------- adjuvant targeted
     Indication("osimertinib_adjuvant", _EARLY, histology="nonsquamous",
                driver="egfr", driver_class="egfr_classical",
+               forbid_resectability="UNRESECTABLE",
                note="ADAURA: resected IB–IIIA, EGFR ex19del/L858R"),
-    Indication("alectinib_adjuvant", _EARLY, driver="alk",
-               note="ALINA: resected IB(≥4cm)–IIIA, ALK+"),
+    Indication("alectinib_adjuvant", _EARLY_GE4CM, driver="alk",
+               forbid_resectability="UNRESECTABLE",
+               note="ALINA: resected IB(≥4cm, AJCC7)–IIIA = 8th/9th IIA–IIIA, "
+                    "ALK+"),
     # ---------------------------------------------------- periop / adjuvant IO
-    Indication("nivo_chemo_neoadjuvant", _EARLY,
+    Indication("nivo_chemo_neoadjuvant", _EARLY_GE4CM,
                requires_no_actionable_driver=True,
                resectability="RESECTABLE",
                note="CheckMate 816: resectable, EGFR/ALK excluded"),
@@ -397,18 +448,22 @@ INDICATIONS: dict[str, Indication] = {i.regimen_id: i for i in (
                resectability="RESECTABLE", note="CheckMate 77T"),
     Indication("adjuvant_platinum_doublet", _s("IB", "IIA", "IIB", "IIIA",
                                                "IIIB"),
+               forbid_resectability="UNRESECTABLE",
                note="LACE: resected node-positive / high-risk"),
     Indication("atezolizumab_adjuvant", _s("IIA", "IIB", "IIIA"),
                requires_no_actionable_driver=True, pd_l1_tc_ge=1,
+               forbid_resectability="UNRESECTABLE",
                note="IMpower010: adjuvant atezolizumab after chemo, TC≥1%"),
-    Indication("pembro_adjuvant", _EARLY,
+    Indication("pembro_adjuvant", _EARLY_GE4CM,
                requires_no_actionable_driver=True,
+               forbid_resectability="UNRESECTABLE",
                note="KEYNOTE-091 (PEARLS)"),
     # ------------------------------------------------------ definitive local
     Indication("ccrt_60gy", _II_III,
                note="Definitive concurrent chemoradiation, locally advanced"),
     Indication("durva_consolidation", _III,
                requires_no_actionable_driver=True,
+               forbid_resectability="RESECTABLE",
                note="PACIFIC: after cCRT without progression; driver-positive "
                     "disease has no established benefit"),
     Indication("osimertinib_consolidation", _III, histology="nonsquamous",
@@ -463,14 +518,20 @@ INDICATIONS: dict[str, Indication] = {i.regimen_id: i for i in (
     Indication("amivantamab_chemo_subsequent", _IV, driver="egfr",
                driver_class="egfr_classical", requires_prior_systemic=True,
                histology="nonsquamous",
+               requires_prior_agents=_THIRD_GEN_EGFR,
+               prior_agents_label="osimertinib",
                note="MARIPOSA-2: ex19del/L858R after osimertinib "
                     "progression"),
     Indication("platinum_pemetrexed_post_tki", _IV, histology="nonsquamous",
                requires_prior_systemic=True,
+               requires_prior_agents=ANY_TKI,
+               prior_agents_label="a targeted TKI",
                note="Post-TKI chemo backbone; KEYNOTE-789 answered the "
                     "IO question negatively"),
     Indication("lorlatinib_post_second_gen", _IV, driver="alk",
                requires_prior_systemic=True,
+               requires_prior_agents=_SECOND_GEN_ALK,
+               prior_agents_label="a second-generation ALK TKI",
                note="Post second-generation ALK TKI (phase 2 EXP "
                     "cohorts) — distinct from CROWN first line"),
     Indication("docetaxel_ramucirumab_second_line", _IV,
@@ -492,13 +553,23 @@ INDICATIONS: dict[str, Indication] = {i.regimen_id: i for i in (
                     "expressible as a predicate field"),
     Indication("tepotinib_osimertinib_met_amp", _IV, driver="egfr",
                requires_prior_systemic=True,
+               requires_prior_agents=_THIRD_GEN_EGFR,
+               prior_agents_label="osimertinib",
                note="INSIGHT 2: MET-amplified osimertinib resistance "
                     "(phase 2, not approved) — the MET-amp finding is "
                     "gated in sequencing"),
     Indication("dato_dxd_egfr_subsequent", _IV, driver="egfr",
                requires_prior_systemic=True, requires_prior_platinum=True,
+               requires_prior_agents=DRIVER_DIRECTED_AGENTS["EGFR"],
+               prior_agents_label="EGFR-directed therapy",
                note="TROPION-Lung05: EGFR-mutant after EGFR-directed "
                     "therapy AND platinum — third line, never earlier"),
+    Indication("osimertinib_t790m_subsequent", _IV, driver="egfr",
+               driver_class="egfr_t790m", requires_prior_systemic=True,
+               requires_prior_agents=_EARLY_GEN_EGFR,
+               prior_agents_label="a first/second-generation EGFR TKI",
+               note="AURA3: acquired T790M after first/second-generation "
+                    "TKI progression"),
 )}
 
 

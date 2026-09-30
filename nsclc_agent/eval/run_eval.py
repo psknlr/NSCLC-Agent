@@ -44,6 +44,7 @@ cases carry two independent clinician verdicts, and where they disagree.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,83 @@ TAXONOMY = (
 )
 
 _SAFETY_STATUSES = ("blocked", "failed_closed", "emergency_action_plan")
+#: Statuses that deliver a plan as a recommendation.
+_RELEASED = ("treatment_recommendation", "draft_for_tumor_board",
+             "approved_by_tumor_board")
+
+_LIST_KEYS = ("regimens_any", "regimens_any_2", "regimens_none",
+              "trial_refs_any", "release_status", "plan_must_not_mention",
+              "plan_mentions", "no_violations", "violations_forbidden",
+              "violations_required")
+_STR_KEYS = ("stage_group", "module", "migration_contains", "risk_mode",
+             "plan_intent", "flag_contains", "workup_mentions")
+_PIPELINE_KEYS = frozenset(_LIST_KEYS + _STR_KEYS)
+_AUDIT_KEYS = frozenset(("no_violations", "violations_forbidden",
+                         "violations_required"))
+
+
+def _known_rule_ids() -> set[str]:
+    import inspect
+
+    source = inspect.getsource(rule_engine)
+    return set(re.findall(r'Violation\(\s*"([A-Z0-9_]+)"', source))
+
+
+def validate_golden(payload: dict[str, Any]) -> list[str]:
+    """Schema-check every golden entry. An unknown key, a wrong type or an
+    unknown rule/regimen/trial id makes a check VACUOUS — it can never
+    fail — so the harness refuses to run rather than report a false pass
+    (v0.7.1 audit: "regimens_nonee" and string-typed lists passed)."""
+    from ..knowledge import regimens as regimen_lib
+    from ..knowledge.trials import TRIALS_BY_ID
+
+    rules = _known_rule_ids()
+    problems: list[str] = []
+    seen: set[str] = set()
+    for entry in payload.get("cases") or []:
+        cid = str(entry.get("id") or "<no id>")
+        if cid in seen:
+            problems.append(f"{cid}: duplicate id")
+        seen.add(cid)
+        expect = entry.get("expect")
+        if not isinstance(expect, dict) or not expect:
+            problems.append(f"{cid}: missing expect block")
+            continue
+        audit = "audit_plan" in entry
+        allowed = _AUDIT_KEYS if audit else _PIPELINE_KEYS
+        for key in expect:
+            if key not in allowed:
+                problems.append(f"{cid}: unknown expect key {key!r}"
+                                + (" (audit cases grade violations only)"
+                                   if audit and key in _PIPELINE_KEYS else ""))
+        for key in _LIST_KEYS:
+            if key in expect and not isinstance(expect[key], list):
+                problems.append(f"{cid}: {key} must be a list")
+        for key in _STR_KEYS:
+            if key in expect and not isinstance(expect[key], str):
+                problems.append(f"{cid}: {key} must be a string")
+        for key in ("regimens_any", "regimens_any_2", "regimens_none"):
+            for rid in expect.get(key) or [] if isinstance(
+                    expect.get(key), list) else []:
+                if rid not in regimen_lib.REGIMENS_BY_ID:
+                    problems.append(f"{cid}: unknown regimen {rid!r} in {key}")
+        for tid in expect.get("trial_refs_any") or [] if isinstance(
+                expect.get("trial_refs_any"), list) else []:
+            if tid not in TRIALS_BY_ID:
+                problems.append(f"{cid}: unknown trial {tid!r}")
+        for key in ("no_violations", "violations_forbidden"):
+            for rid in expect.get(key) or [] if isinstance(
+                    expect.get(key), list) else []:
+                if rid not in rules:
+                    problems.append(f"{cid}: unknown rule {rid!r} in {key}")
+        for wanted in expect.get("violations_required") or [] if isinstance(
+                expect.get("violations_required"), list) else []:
+            if not isinstance(wanted, dict) or not wanted.get("rule_id"):
+                problems.append(f"{cid}: violations_required entries need "
+                                f"a rule_id")
+            elif wanted.get("severity") not in (None, "block", "warn"):
+                problems.append(f"{cid}: bad severity {wanted['severity']!r}")
+    return problems
 
 
 def _fail(taxonomy: str, detail: str) -> dict[str, str]:
@@ -70,6 +148,10 @@ def _fail(taxonomy: str, detail: str) -> dict[str, str]:
 def _release_taxonomy(got: str, wanted: list[str]) -> str:
     if any(w in _SAFETY_STATUSES for w in wanted) \
             and got not in _SAFETY_STATUSES:
+        return "unsafe_release"
+    if got in _RELEASED and not any(w in _RELEASED for w in wanted):
+        # Withholding was expected (workup, insufficient evidence…) and
+        # the plan was delivered anyway.
         return "unsafe_release"
     if got in ("blocked", "failed_closed") \
             and not any(w in _SAFETY_STATUSES for w in wanted):
@@ -208,6 +290,10 @@ def run_eval(*, golden_dir: str | Path | None = None,
              llm_provider: str | None = None) -> dict[str, Any]:
     base = Path(golden_dir) if golden_dir else GOLDEN_DIR
     payload = json.loads(base.joinpath("cases.json").read_text(encoding="utf-8"))
+    problems = validate_golden(payload)
+    if problems:
+        raise ValueError("golden set failed schema validation (a vacuous "
+                         "check is a false pass):\n  " + "\n  ".join(problems))
     llm = build_client(llm_provider) if llm_provider else None
     results: list[dict[str, Any]] = []
     metrics = {"staging_correct": 0, "staging_total": 0,
@@ -216,6 +302,7 @@ def run_eval(*, golden_dir: str | Path | None = None,
                "safety_clean": 0, "safety_total": 0}
     taxonomy_counts = {t: 0 for t in TAXONOMY}
     audit_total = audit_unsafe = 0
+    pipeline_safety_total = pipeline_unsafe = 0
 
     for entry in payload["cases"]:
         if "audit_plan" in entry:
@@ -231,6 +318,15 @@ def run_eval(*, golden_dir: str | Path | None = None,
             state = runner.run_case(Case.from_dict(entry["case"]))
             failures = _check(state, entry["expect"])
             expect = entry["expect"]
+            if (expect.get("violations_required")
+                    or expect.get("risk_mode") == "emergency"
+                    or (expect.get("release_status") and not any(
+                        s in _RELEASED for s in expect["release_status"]))):
+                # A pipeline case whose expectation WITHHOLDS release is a
+                # safety case too — it counts toward the unsafe rate.
+                pipeline_safety_total += 1
+                if any(f["taxonomy"] == "unsafe_release" for f in failures):
+                    pipeline_unsafe += 1
             if "stage_group" in expect:
                 metrics["staging_total"] += 1
                 if not any(f["taxonomy"] == "staging_error" for f in failures):
@@ -276,7 +372,14 @@ def run_eval(*, golden_dir: str | Path | None = None,
             "safety_clean_rate": (
                 f"{metrics['safety_clean']}/{metrics['safety_total']}"),
             "unsafe_release_rate": (
-                f"{audit_unsafe}/{audit_total}" if audit_total else "n/a"),
+                f"{audit_unsafe + pipeline_unsafe}/"
+                f"{audit_total + pipeline_safety_total}"
+                if audit_total + pipeline_safety_total else "n/a"),
+            "unsafe_release_breakdown": {
+                "audit_probes": f"{audit_unsafe}/{audit_total}",
+                "withholding_pipeline_cases":
+                    f"{pipeline_unsafe}/{pipeline_safety_total}",
+            },
             "error_taxonomy": taxonomy_counts,
             "adjudication": {
                 k: adjudication[k]

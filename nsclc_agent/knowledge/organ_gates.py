@@ -25,9 +25,27 @@ they emit; the pharmacist's review is not replaced, it is fed.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from . import regimens as regimen_lib
+
+_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def _num(value: Any) -> Optional[float]:
+    """A number from a fact value: numeric as-is, the first number in a
+    string ("CrCl 38 mL/min" → 38.0), else None. Booleans are not
+    numbers here."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        match = _NUMBER_RE.search(value)
+        if match:
+            return float(match.group(0))
+    return None
 
 #: Strong CYP3A4 inducers (same keyword family the DDI pack uses).
 _CYP3A4_INDUCERS = ("rifampin", "rifampicin", "carbamazepine", "phenytoin",
@@ -60,8 +78,8 @@ def _string_verdict(gate: str, value: Any) -> Optional[dict[str, str]]:
 def _eval_renal(facts: dict[str, Any]) -> dict[str, str]:
     raw = _organ(facts, "renal")
     if isinstance(raw, dict):
-        crcl = raw.get("crcl_ml_min", raw.get("egfr_ml_min"))
-        if isinstance(crcl, (int, float)):
+        crcl = _num(raw.get("crcl_ml_min", raw.get("egfr_ml_min")))
+        if crcl is not None:
             if crcl >= 45:
                 return _gate("renal_function", "pass",
                              f"CrCl {crcl:g} mL/min ≥ 45 (pemetrexed label "
@@ -71,9 +89,9 @@ def _eval_renal(facts: dict[str, Any]) -> dict[str, str]:
                          f"label threshold; the backbone must change, not "
                          f"the dose")
         raw = raw.get("verdict")
-    if isinstance(raw, (int, float)):
+    if _num(raw) is not None:
         return _eval_renal({"organ_function": {"renal":
-                                               {"crcl_ml_min": raw}}})
+                                               {"crcl_ml_min": _num(raw)}}})
     verdict = _string_verdict("renal_function", raw)
     return verdict or _gate("renal_function", "unverified",
                             "no renal function on record — creatinine "
@@ -89,8 +107,8 @@ def _eval_hepatic(facts: dict[str, Any]) -> dict[str, str]:
             return _gate("hepatic_baseline", "fail",
                          f"Child-Pugh {child} — outside the taxane/TKI "
                          f"evidence populations")
-        bili = raw.get("bilirubin_uln")
-        if isinstance(bili, (int, float)):
+        bili = _num(raw.get("bilirubin_uln"))
+        if bili is not None:
             if bili <= 1.0:
                 return _gate("hepatic_baseline", "pass",
                              f"bilirubin {bili:g}×ULN within normal")
@@ -108,10 +126,10 @@ def _eval_hepatic(facts: dict[str, Any]) -> dict[str, str]:
 
 def _eval_qtc(facts: dict[str, Any]) -> dict[str, str]:
     raw = _organ(facts, "qtc")
-    qtc = raw.get("qtc_ms") if isinstance(raw, dict) else raw
+    qtc = _num(raw.get("qtc_ms") if isinstance(raw, dict) else raw)
     if qtc is None:
-        qtc = facts.get("qtc_ms")
-    if isinstance(qtc, (int, float)):
+        qtc = _num(facts.get("qtc_ms"))
+    if qtc is not None:
         if qtc >= 500:
             return _gate("qtc_baseline", "fail",
                          f"QTc {qtc:g} ms ≥ 500 — the label's interruption "
@@ -228,6 +246,35 @@ _EVALUATORS = {
 #: The gates this module owns.
 ORGAN_GATES = frozenset(_EVALUATORS)
 
+#: Component drug → the organ gates its label implies. Derived per
+#: regimen so a hand-maintained gate list can never silently omit one
+#: (the v0.7.1 audit found 11 regimens missing component-implied gates,
+#: docetaxel's hepatic warning among them). Conditional components
+#: ("cisplatin or carboplatin") imply nothing — the alternative exists.
+_COMPONENT_GATES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("pemetrexed", ("renal_function", "b12_folate_started")),
+    ("cisplatin", ("renal_function", "hearing_neuropathy_baseline")),
+    ("docetaxel", ("hepatic_baseline",)),
+    ("ramucirumab", ("bleeding_risk",)),
+    ("osimertinib", ("qtc_baseline",)),
+    ("lorlatinib", ("no_strong_cyp3a4_inducer",)),
+    ("deruxtecan", ("ild_history",)),
+)
+
+
+def regimen_gates(regimen: Any) -> tuple[str, ...]:
+    """The regimen's declared gates plus every component-implied organ
+    gate, declared order first."""
+    gates = list(regimen.dose_gates)
+    for component in regimen.components:
+        drug = component.drug.lower()
+        if " or " in drug:
+            continue
+        for keyword, implied in _COMPONENT_GATES:
+            if keyword in drug:
+                gates.extend(g for g in implied if g not in gates)
+    return tuple(gates)
+
 
 def evaluate_gate(gate: str,
                   facts: dict[str, Any]) -> Optional[dict[str, str]]:
@@ -244,7 +291,7 @@ def failed_gates(regimen_id: str,
     if regimen is None:
         return []
     out = []
-    for gate in regimen.dose_gates:
+    for gate in regimen_gates(regimen):
         result = evaluate_gate(gate, facts)
         if result and result["status"] == "fail":
             out.append(result)
@@ -258,7 +305,7 @@ def unknown_gates(regimen_id: str, facts: dict[str, Any]) -> list[str]:
     if regimen is None:
         return []
     out = []
-    for gate in regimen.dose_gates:
+    for gate in regimen_gates(regimen):
         result = evaluate_gate(gate, facts)
         if result and result["status"] == "unverified":
             out.append(f"{result['note']} [{regimen_id}]")

@@ -19,6 +19,7 @@ What is pinned here:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -237,7 +238,7 @@ def test_report_guard_survives_turns_until_confirmed(report_png):
     # names regimen_ids — what the dose channel expands once unblocked.
     sess = _session(llm=None, vision_llm=vision)
     r1 = sess.turn(
-        f"62岁女性，从不吸烟，肺腺癌，cT2aN2aM1b，ECOG 0，这是NGS报告。{SCREEN_NEG}",
+        f"62岁女性，从不吸烟，肺腺癌，cT2aN2aM1b，ECOG 0，脑MRI阴性，这是NGS报告。{SCREEN_NEG}",
         reports=[report_png], allow_dose_planning=True)
     proposed = list(sess.facts.get("_report_proposed") or [])
     assert "driver_mutations.egfr" in proposed
@@ -425,22 +426,30 @@ def test_session_roundtrip_resumes_plan_cache_and_transcript(tmp_path):
     r1 = first.turn(T1_MSG)
     first.save(path)
 
-    resumed = ConsultationSession.load(path, llm=MockLLMClient())
-    assert resumed.role == "oncologist"          # stored role wins
+    # A session file never grants authority: role and dose planning come
+    # from the caller (default patient / off), and the plan cache is
+    # dropped — the first post-restart turn recomputes.
+    bare = ConsultationSession.load(path, llm=MockLLMClient())
+    assert bare.role == "patient"
+    assert bare.allow_dose_planning is False
+    assert bare._plan_cache is None
+    resumed = ConsultationSession.load(path, llm=MockLLMClient(),
+                                       role="oncologist")
+    assert resumed.role == "oncologist"
     assert resumed.facts["ecog_ps"] == 1
     assert len(resumed.transcript) == 1
     r2 = resumed.turn("为什么选这个方案？")
-    assert r2.plan_reused                        # cache crossed the restart
-    assert r2.llm_calls < r1.llm_calls
-    assert len(resumed.transcript) == 2
-    # Explicit kwargs override the stored configuration.
-    assert ConsultationSession.load(path, role="patient").role == "patient"
+    assert not r2.plan_reused                    # recomputed after restart
+    r3 = resumed.turn("还有其他选择吗？")
+    assert r3.plan_reused                        # …and cached from then on
+    assert r3.llm_calls < r1.llm_calls
+    assert len(resumed.transcript) == 3
 
 
 def test_report_guard_and_read_refs_survive_restart(report_png, tmp_path):
     path = tmp_path / "sess.json"
     first = _session(llm=None, vision_llm=CountingVision(REPORT_PAYLOAD))
-    first.turn(f"肺腺癌，cT2aN2aM1b，ECOG 0。{SCREEN_NEG}",
+    first.turn(f"肺腺癌，cT2aN2aM1b，ECOG 0，脑MRI阴性。{SCREEN_NEG}",
                reports=[report_png], allow_dose_planning=True)
     proposed = list(first.facts["_report_proposed"])
     assert proposed
@@ -448,7 +457,8 @@ def test_report_guard_and_read_refs_survive_restart(report_png, tmp_path):
 
     fresh_vision = CountingVision(REPORT_PAYLOAD)
     resumed = ConsultationSession.load(path, llm=None,
-                                       vision_llm=fresh_vision)
+                                       vision_llm=fresh_vision,
+                                       role="oncologist")
     # The already-read report is session memory across the restart…
     r2 = resumed.turn("请出剂量。", reports=[report_png],
                       allow_dose_planning=True)
@@ -500,11 +510,16 @@ def test_cli_chat_session_flag_resumes(tmp_path, capsys):
     assert main(["chat", "--llm-provider", "mock", "--role", "oncologist",
                  "--json", "--session", path, "-m", T1_MSG]) == 0
     capsys.readouterr()
-    assert main(["chat", "--llm-provider", "mock", "--json",
-                 "--session", path, "-m", "为什么选这个方案？"]) == 0
-    out = capsys.readouterr().out.strip().splitlines()
-    second = json.loads(out[-1])
-    assert second["plan_reused"]
+    # Every resume recomputes: a session file carries no trusted plan cache
+    # and no authority (the role is re-asserted on the command line). The
+    # history, facts and transcript DO carry over.
+    assert main(["chat", "--llm-provider", "mock", "--role", "oncologist",
+                 "--json", "--session", path, "-m", "为什么选这个方案？"]) == 0
+    second = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert not second["plan_reused"]
+    assert second["release_status"] == "treatment_recommendation"
+    saved = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert len(saved["transcript"]) == 2
 
 
 # ------------------------------------------------------------------- CLI

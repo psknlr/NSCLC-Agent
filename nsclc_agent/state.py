@@ -68,6 +68,10 @@ class EvidenceLevel(str, Enum):
     KG_EXTRACTED = "kg_llm_extracted"
     STUB = "stub_not_for_clinical_use"
     FAILED = "failed_tool_event"
+    #: A lookup that found NOTHING. It records that the question was asked;
+    #: it supports no claim (v0.7.1 audit: "no registry match for 'zzz'"
+    #: counted as a releasable citation).
+    NO_MATCH = "lookup_no_match"
 
 
 #: Grades that may never on their own justify a released clinical claim.
@@ -76,6 +80,7 @@ NON_RELEASABLE_LEVELS = {
     EvidenceLevel.FAILED.value,
     EvidenceLevel.MODEL.value,
     EvidenceLevel.KG_EXTRACTED.value,
+    EvidenceLevel.NO_MATCH.value,
 }
 
 

@@ -54,10 +54,24 @@ def case_content_hash(entry: dict[str, Any]) -> str:
                    separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
+def adjudicator_identity(name: Any) -> str:
+    """One identity per person: case-folded, whitespace-collapsed. "Dr. Li
+    Wei" and "dr.  li wei " are the SAME adjudicator — two spellings must
+    never count as dual coverage (v0.7.1 audit)."""
+    return " ".join(str(name or "").split()).casefold()
+
+
+#: Events the loader could not accept — reported, never silently dropped.
+_LOAD_PROBLEMS: list[str] = []
+
+
 def load_adjudications(path: str | Path | None = None
                        ) -> dict[str, list[dict[str, Any]]]:
     """All events, grouped by case id — every one kept, none overwritten.
-    Interior corruption raises; a torn final line is tolerated."""
+    Interior corruption raises. A torn final line and structurally invalid
+    events (missing adjudicator/hash, unknown verdict) are NOT counted and
+    are reported in :func:`adjudication_summary` under ``ledger_problems``."""
+    _LOAD_PROBLEMS.clear()
     file_path = Path(path) if path else default_ledger_path()
     if not file_path.is_file():
         return {}
@@ -71,12 +85,24 @@ def load_adjudications(path: str | Path | None = None
             event = json.loads(line)
         except json.JSONDecodeError as exc:
             if line_no == len(lines):
+                _LOAD_PROBLEMS.append(
+                    f"line {line_no}: torn final line ignored — the last "
+                    f"write did not complete; re-record that verdict")
                 break
             raise ValueError(
                 f"corrupt adjudication ledger line {line_no}: {exc}") from exc
         if not isinstance(event, dict) or not event.get("case_id"):
             raise ValueError(
                 f"adjudication ledger line {line_no}: not an event")
+        missing = [k for k in ("adjudicator", "verdict", "content_hash")
+                   if not str(event.get(k) or "").strip()]
+        if missing or event.get("verdict") not in VERDICTS:
+            _LOAD_PROBLEMS.append(
+                f"line {line_no} ({event.get('case_id')}): invalid event "
+                f"ignored — "
+                + (f"missing {', '.join(missing)}" if missing
+                   else f"unknown verdict {event.get('verdict')!r}"))
+            continue
         grouped.setdefault(str(event["case_id"]), []).append(event)
     return grouped
 
@@ -141,7 +167,8 @@ def adjudication_summary(
         stale = len(events) - len(valid)
         by_adjudicator: dict[str, str] = {}
         for event in valid:  # a person's LATEST verdict on this content
-            by_adjudicator[event["adjudicator"]] = event["verdict"]
+            by_adjudicator[adjudicator_identity(event["adjudicator"])] = \
+                event["verdict"]
         verdicts = sorted(set(by_adjudicator.values()))
         record = {
             "adjudicators": len(by_adjudicator),
@@ -166,5 +193,6 @@ def adjudication_summary(
         "disagreements": disagreements,
         "unadjudicated": unadjudicated,
         "void_after_case_change": void_cases,
+        "ledger_problems": list(_LOAD_PROBLEMS),
         "per_case": per_case,
     }

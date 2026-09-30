@@ -162,6 +162,15 @@ def _deep_remap(value: Any, mapping: dict[str, str]) -> Any:
     return value
 
 
+#: Critic issue prefixes that make a plan's content unreleasable.
+_RELEASE_GATING_ISSUES = (
+    "CITATIONS_NOT_RELEASABLE", "NO_CITATIONS", "CITATION_CHECK_FAILED",
+    "UNVERIFIED_CITATION", "OUTPUT_TRUNCATED", "CLAIM_",
+    "PLAN_NUMERIC_UNANCHORED",
+)
+#: Issues that keep the plan provisional (facts to confirm first).
+_PROVISIONAL_ISSUES = ("PLAN_RESTS_ON_REPORT_PROPOSED_FACTS",)
+
 class NSCLCRunner:
     """Task-driven runner with bounded self-repair loops."""
 
@@ -413,6 +422,16 @@ class NSCLCRunner:
             if not self._reset_for_repair(state, repairs):
                 return
             state.outputs.pop("safety_audit", None)
+            # Only the critic sets "blocked"; a granted repair re-opens the
+            # decision and the next critic pass re-decides from scratch (a
+            # plan repaired to zero violations used to stay blocked). The
+            # rejected plan's option claims go with it — the repaired plan
+            # re-claims its own options.
+            if state.release_status == "blocked":
+                state.release_status = "needs_more_information"
+            if any(r.get("agent") == "TreatmentAgent" for r in repairs):
+                state.claims = [c for c in state.claims
+                                if c.kind != "treatment_option"]
 
     def _execute_tasks(self, state: CaseRunState) -> None:
         """Execute the task graph, overlapping the safe long-running pair.
@@ -474,6 +493,11 @@ class NSCLCRunner:
                     "dose planning skipped: emergency screening axes are "
                     "still unanswered (blocked interview verdict)")
                 return "skip"
+            incomplete = self._dose_blocked_by_incomplete_plan(state)
+            if incomplete:
+                task.status = "skipped_incomplete_plan"
+                state.warn(f"dose planning skipped: {incomplete}")
+                return "skip"
             if self._dose_blocked_by_proposed_facts(state):
                 task.status = "skipped_unconfirmed_facts"
                 state.warn(
@@ -482,6 +506,25 @@ class NSCLCRunner:
                     "documents before any dose-bearing draft")
                 return "skip"
         return "run"
+
+    @staticmethod
+    def _dose_blocked_by_incomplete_plan(state: CaseRunState) -> str:
+        """A dose is drafted only onto a plan that would itself release:
+        open workup (incomplete driver panel, CNS staging, T790M…) or a
+        positive emergency-screen signal keeps the channel closed — the
+        v0.7.1 audit found a pembrolizumab dose drafted onto a plan still
+        awaiting its driver panel, and onto a patient with a new seizure."""
+        plan = state.outputs.get("treatment_plan") or {}
+        if plan.get("intent") == "workup" or plan.get("workup_needed"):
+            return "the plan still has open workup items"
+        if plan.get("provisional_regimens"):
+            return "the plan is provisional pending facts"
+        signals = [k for k, v in state.facts.items()
+                   if k.startswith("emergency_")
+                   and str(v).startswith("positive")]
+        if signals:
+            return f"emergency-screen signal(s) open: {', '.join(signals)}"
+        return ""
 
     @staticmethod
     def _dose_blocked_by_proposed_facts(state: CaseRunState) -> bool:
@@ -677,11 +720,23 @@ class NSCLCRunner:
         terminal = ("failed_closed", "emergency_action_plan", "blocked",
                     "draft_for_tumor_board", "approved_by_tumor_board",
                     "needs_staging_workup")
+        issues = set((state.outputs.get("safety_audit") or {}).get("issues")
+                     or [])
+        # Critic findings that make the plan's CONTENT unreleasable — the
+        # claim guards included (v0.7.1 audit: a fabricated "OS 88%" or a
+        # right-regimen/wrong-population citation used to ship as advisory
+        # noise under treatment_recommendation).
+        unreleasable = any(i.startswith(_RELEASE_GATING_ISSUES) for i in issues)
+        provisional = any(i.startswith(_PROVISIONAL_ISSUES) for i in issues)
+        if state.release_status == "draft_for_tumor_board" and (
+                unreleasable or provisional or plan.get("workup_needed")):
+            # A dose draft never outranks the content checks: downgrade and
+            # withdraw the dose-bearing output.
+            state.outputs.pop("dose_plan", None)
+            state.warn("dose draft withdrawn: the plan did not pass the "
+                       "release-gating content checks")
+            state.release_status = "needs_more_information"
         if state.release_status not in terminal:
-            issues = set((state.outputs.get("safety_audit") or {}).get("issues") or [])
-            unreleasable = any(
-                i.startswith(("CITATIONS_NOT_RELEASABLE", "NO_CITATIONS"))
-                for i in issues)
             if not state.staging:
                 state.release_status = "needs_staging_workup"
             elif plan.get("intent") == "workup" or plan.get("workup_needed"):
@@ -689,6 +744,7 @@ class NSCLCRunner:
             elif plan.get("options"):
                 state.release_status = (
                     "insufficient_evidence" if unreleasable
+                    else "needs_more_information" if provisional
                     else "treatment_recommendation")
             elif state.open_questions:
                 state.release_status = "needs_more_information"
