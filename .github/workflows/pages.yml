@@ -4,14 +4,14 @@
 # the unchanged nsclc_agent package, so deploying = test + pack + upload.
 #
 # One-time setup: Settings → Pages → Build and deployment → Source:
-# "GitHub Actions". Deploys run on pushes to the default branch (and on a
-# manual run); pull requests get the full test + browser-runtime check only.
+# "GitHub Actions". Only main deploys (push or manual run); feature
+# branches and pull requests get the full test + browser-runtime check.
 
 name: Web app (GitHub Pages)
 
 on:
   push:
-    branches: [main]
+    branches: [main, "claude/**"]
     paths:
       - "nsclc_agent/**"
       - "web/**"
@@ -64,12 +64,12 @@ jobs:
             node tests/pyodide_smoke.mjs _site
 
       - uses: actions/upload-pages-artifact@v3
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:
           path: _site
 
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     permissions:
