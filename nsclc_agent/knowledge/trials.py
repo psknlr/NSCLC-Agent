@@ -481,6 +481,88 @@ TRIALS: tuple[Trial, ...] = (
         caveats=("Phase II sample size — frame as consolidative option, not universal standard",),
         keywords=("oligometastatic", "SBRT", "local consolidative therapy"),
     ),
+    # ------------------------------------------------ later-line sequencing
+    Trial(
+        "MARIPOSA2", "MARIPOSA-2 (amivantamab + chemo post-osimertinib)",
+        "NCT04988295", "subsequent",
+        _s(*_STAGE_IV), driver_required="EGFR",
+        driver_class_required="egfr_ex19del_l858r",
+        regimen_ids=("amivantamab_chemo_subsequent",),
+        results=("PFS HR 0.48 (95% CI 0.36–0.64) vs chemotherapy alone "
+                 "after osimertinib progression",),
+        source="Ann Oncol 2024;35:77",
+        approval="FDA 2024-03 amivantamab + carboplatin-pemetrexed, EGFR "
+                 "ex19del/L858R after progression on an EGFR TKI",
+        enrollment_note="AFTER osimertinib progression — not first line; "
+                        "watch infusion reactions and VTE",
+        keywords=("amivantamab", "MARIPOSA-2", "post-osimertinib",
+                  "resistance"),
+    ),
+    Trial(
+        "KEYNOTE789", "KEYNOTE-789 (chemo ± pembrolizumab post-TKI)",
+        "NCT03515837", "subsequent",
+        _s(*_STAGE_IV), histology="nonsquamous", driver_required="EGFR",
+        regimen_ids=("platinum_pemetrexed_post_tki",),
+        results=("NEGATIVE for the IO question: adding pembrolizumab to "
+                 "chemotherapy post-TKI did not significantly improve OS "
+                 "(HR 0.84, not significant)",),
+        source="JCO 2024;42:1222",
+        approval="Cited as the evidence that chemo-IO is NOT the default "
+                 "after EGFR-TKI progression; the chemo backbone itself "
+                 "is the standard arm",
+        enrollment_note="EGFR-mutant, progression on prior EGFR TKI",
+        keywords=("KEYNOTE-789", "post-TKI", "chemotherapy",
+                  "negative trial"),
+    ),
+    Trial(
+        "LORLATINIB_P2", "Lorlatinib phase 2 (post second-generation ALK)",
+        "NCT01970865", "subsequent",
+        _s(*_STAGE_IV), driver_required="ALK",
+        regimen_ids=("lorlatinib_post_second_gen",),
+        results=("ORR ~40% and intracranial ORR ~57% after ≥1 "
+                 "second-generation ALK TKI (pooled EXP cohorts)",),
+        source="Lancet Oncol 2018;19:1654",
+        approval="FDA 2018-11 lorlatinib, ALK+ after progression on "
+                 "alectinib/ceritinib (or crizotinib plus one other)",
+        enrollment_note="Post second-generation TKI cohorts — distinct "
+                        "from the CROWN first-line population",
+        keywords=("lorlatinib", "ALK", "resistance", "later line"),
+    ),
+    Trial(
+        "REVEL", "REVEL (docetaxel ± ramucirumab, second line)",
+        "NCT01168973", "subsequent",
+        _s(*_STAGE_IV),
+        regimen_ids=("docetaxel_ramucirumab_second_line",
+                     "docetaxel_second_line"),
+        results=("OS 10.5 vs 9.1 months (HR 0.86, 95% CI 0.75–0.98) for "
+                 "docetaxel + ramucirumab vs docetaxel, all histologies",),
+        source="Lancet 2014;384:665",
+        approval="FDA 2014-12 ramucirumab + docetaxel, metastatic NSCLC "
+                 "with progression on or after platinum-based therapy",
+        enrollment_note="Second line after platinum-based therapy; "
+                        "pre-dates the chemo-IO first-line era — applied "
+                        "today after chemo-IO progression by convention",
+        caveats=("Enrolled before first-line chemo-IO was standard — the "
+                 "post-IO second-line population is an accepted "
+                 "convention, not the enrolled one",),
+        keywords=("docetaxel", "ramucirumab", "REVEL", "second line"),
+    ),
+    Trial(
+        "CODEBREAK100", "CodeBreaK 100 (sotorasib, KRAS G12C, later line)",
+        "NCT03600883", "subsequent",
+        _s(*_STAGE_IV), driver_required="KRAS",
+        driver_class_required="kras_g12c",
+        regimen_ids=("sotorasib_subsequent_line",),
+        results=("ORR 37.1%, median PFS 6.8 months in previously treated "
+                 "KRAS G12C NSCLC (phase 2)",),
+        source="NEJM 2021;384:2371",
+        approval="FDA 2021-05 accelerated: sotorasib, KRAS G12C NSCLC "
+                 "after at least one prior systemic therapy",
+        enrollment_note="LATER LINE — first-line for KRAS G12C remains "
+                        "chemo±IO; adagrasib (KRYSTAL-1) is the "
+                        "alternative",
+        keywords=("sotorasib", "KRAS", "G12C", "CodeBreaK"),
+    ),
 )
 
 TRIALS_BY_ID: dict[str, Trial] = {t.trial_id: t for t in TRIALS}
@@ -581,6 +663,7 @@ _CLASS_CHECKS: dict = {
                       frozenset({"exon20ins", "c797s"})),
     "met_ex14": ("met", frozenset({"ex14_skipping"}), frozenset()),
     "braf_v600e": ("braf", frozenset({"v600e"}), frozenset()),
+    "kras_g12c": ("kras", frozenset({"g12c"}), frozenset()),
 }
 
 #: trial histology restriction → subject histologies that contradict it.

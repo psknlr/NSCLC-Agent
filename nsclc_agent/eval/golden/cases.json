@@ -886,6 +886,144 @@
       }
     },
     {
+      "id": "iv_egfr_post_osimertinib_mariposa2",
+      "_comment": "Later-line sequencing: post-osimertinib progression with the resistance question already asked — MARIPOSA-2 and the KEYNOTE-789-informed chemo backbone, never the failed TKI again.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, progression on first-line osimertinib. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "progression_ngs_done": true,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "osimertinib"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "下一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "amivantamab_chemo_subsequent"
+        ],
+        "regimens_none": [
+          "osimertinib_first_line",
+          "pembro_pemetrexed_platinum"
+        ],
+        "trial_refs_any": [
+          "MARIPOSA2"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "violations_forbidden": [
+          "PROGRESSION_SAME_DRUG",
+          "DRIVER_FIRST_LINE"
+        ]
+      }
+    },
+    {
+      "id": "iv_egfr_progression_without_rebiopsy_workup",
+      "_comment": "Sequencing discipline: progression without the resistance-mechanism question routes to workup — provisional options, not a guess.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, progression on osimertinib. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "osimertinib"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "下一步？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "release_status": [
+          "needs_more_information"
+        ],
+        "plan_mentions": [
+          "AT PROGRESSION"
+        ]
+      }
+    },
+    {
+      "id": "ivb_post_chemoio_docetaxel_and_g12c",
+      "_comment": "Later-line sequencing: post-chemo-IO progression — REVEL docetaxel±ramucirumab plus the KRAS-G12C-directed option now that it IS the line where it applies.",
+      "case": {
+        "t": "T3",
+        "n": "N2b",
+        "m": "M1c2",
+        "presentation": "Adenocarcinoma, progression after pembrolizumab + pemetrexed-carboplatin. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "kras": "G12C"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "pembrolizumab",
+                "pemetrexed",
+                "carboplatin"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "二线选择？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "sotorasib_subsequent_line"
+        ],
+        "regimens_any_2": [
+          "docetaxel_ramucirumab_second_line"
+        ],
+        "trial_refs_any": [
+          "REVEL"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "violations_forbidden": [
+          "PROGRESSION_SAME_DRUG"
+        ]
+      }
+    },
+    {
       "id": "audit_exon20ins_osimertinib_must_block",
       "_comment": "Safety-net golden case: crafted WRONG plan straight to the rule engine. unsafe_release if the net stays silent.",
       "audit_staging": {
@@ -1293,6 +1431,79 @@
             "rule_id": "CNS_TNM_INCONSISTENT",
             "severity": "warn"
           }
+        ]
+      }
+    },
+    {
+      "id": "audit_osimertinib_rechallenge_must_warn",
+      "_comment": "Safety-net probe: re-proposing the agent the disease just progressed on — rechallenge is never a silent default.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "osimertinib"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "osimertinib_first_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "PROGRESSION_SAME_DRUG",
+            "severity": "warn"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_docetaxel_post_chemoio_must_not_warn",
+      "_comment": "False-alarm control: docetaxel after chemo-IO progression shares no agent with the failed line.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "pembrolizumab",
+              "pemetrexed",
+              "carboplatin"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "docetaxel_ramucirumab_second_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_forbidden": [
+          "PROGRESSION_SAME_DRUG"
         ]
       }
     }

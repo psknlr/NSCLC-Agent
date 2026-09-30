@@ -316,6 +316,29 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     Fractionation, radiosurgery selection and steroid dosing stay in
     the neuro-oncology MDT's channel; nothing here emits them.
 
+24. **Progression ends the first-line table's authority.** One shared
+    reading of the treatment history (`knowledge/sequencing.py`) gates
+    the switch: sequencing triggers only on EXPLICIT progression —
+    exposure without a stated outcome is exposure — and once it
+    triggers, the first-line decision table no longer applies. The
+    sequencing corpus is small and named (post-osimertinib MARIPOSA-2
+    with the KEYNOTE-789 negative result encoded as the reason
+    chemo-IO is not the default; post-second-generation-ALK lorlatinib
+    distinct from its CROWN first-line population; post-lorlatinib
+    chemotherapy with "no established next TKI" said out loud;
+    post-chemo-IO REVEL, with KRAS G12C and HER2 options surfacing in
+    the line where they apply); progression that maps to none of it
+    routes to the molecular tumor board, never to a guess. The EGFR
+    resistance-mechanism question (re-biopsy/plasma NGS) is workup
+    before options, and the critic is line-aware: re-proposing an
+    agent the disease progressed on warns (PROGRESSION_SAME_DRUG —
+    rechallenge is a justified strategy, not a default), and
+    DRIVER_FIRST_LINE stops mislabeling post-progression questions as
+    first-line while still flagging ICI in driver-positive disease
+    with the KEYNOTE-789 message. A structured history satisfies the
+    prior-systemic indication conditions directly — one fact channel,
+    no double entry.
+
 ## 3. LLM containment table
 
 | Capability | Model may | Model may not |

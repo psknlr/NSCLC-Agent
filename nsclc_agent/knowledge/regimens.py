@@ -391,6 +391,92 @@ REGIMENS: tuple[Regimen, ...] = (
         label_note="Previously treated HER2(ERBB2)-mutant NSCLC — NOT a "
                    "first-line regimen; first-line stays chemo±IO",
     ),
+    # ----------------------------------------------- later-line sequencing
+    Regimen(
+        "amivantamab_chemo_subsequent",
+        "Amivantamab + platinum-pemetrexed (MARIPOSA-2)", "subsequent",
+        (_C("amivantamab", "per label (weight-based — not encoded)"),
+         _C("carboplatin", "per label (AUC-based — not encoded)"),
+         _C("pemetrexed", "per label (BSA-based — not encoded)")),
+        trial_ids=("MARIPOSA2",),
+        monitoring=("infusion reactions (first-dose split dosing per label)",
+                    "VTE — prophylactic anticoagulation advised", "rash",
+                    "cytopenias"),
+        dose_gates=("egfr_positive", "prior_systemic_therapy",
+                    "renal_function"),
+        label_note="EGFR ex19del/L858R AFTER osimertinib progression — not "
+                   "a first-line regimen",
+    ),
+    Regimen(
+        "platinum_pemetrexed_post_tki",
+        "Platinum-pemetrexed after TKI progression", "subsequent",
+        (_C("carboplatin", "per label (AUC-based — not encoded)"),
+         _C("pemetrexed", "per label (BSA-based — not encoded)")),
+        trial_ids=("KEYNOTE789",),
+        monitoring=("cytopenias", "renal function (pemetrexed)",
+                    "B12/folate supplementation"),
+        dose_gates=("prior_systemic_therapy", "renal_function"),
+        label_note="Post-TKI chemotherapy backbone (driver-positive, "
+                   "nonsquamous). KEYNOTE-789: ADDING pembrolizumab did "
+                   "not significantly improve OS — cited as the reason "
+                   "chemo-IO is not the default here",
+    ),
+    Regimen(
+        "lorlatinib_post_second_gen",
+        "Lorlatinib after second-generation ALK TKI", "subsequent",
+        (_C("lorlatinib", "per label (not encoded)", schedule="daily"),),
+        trial_ids=("LORLATINIB_P2",),
+        monitoring=("lipids (hypercholesterolemia/hypertriglyceridemia)",
+                    "CNS effects (mood, cognition, speech)", "edema",
+                    "AV conduction"),
+        dose_gates=("alk_positive", "prior_systemic_therapy"),
+        label_note="ALK+ after alectinib/brigatinib/ceritinib progression "
+                   "(phase 2 post-second-generation cohorts); distinct "
+                   "from the CROWN first-line indication",
+    ),
+    Regimen(
+        "docetaxel_ramucirumab_second_line",
+        "Docetaxel + ramucirumab (REVEL)", "subsequent",
+        (_C("docetaxel", "per label (BSA-based — not encoded)",
+            schedule="q3w"),
+         _C("ramucirumab", "per label (weight-based — not encoded)",
+            schedule="q3w")),
+        trial_ids=("REVEL",),
+        monitoring=("neutropenia/febrile neutropenia", "bleeding risk",
+                    "hypertension/proteinuria (ramucirumab)",
+                    "fluid retention"),
+        dose_gates=("prior_systemic_therapy", "bleeding_risk"),
+        label_note="Second line after platinum-based therapy (REVEL "
+                   "enrolled all histologies); screen for hemoptysis "
+                   "history and cavitating central lesions before the "
+                   "ramucirumab component",
+    ),
+    Regimen(
+        "docetaxel_second_line",
+        "Docetaxel monotherapy (second line)", "subsequent",
+        (_C("docetaxel", "per label (BSA-based — not encoded)",
+            schedule="q3w"),),
+        trial_ids=("REVEL",),
+        monitoring=("neutropenia/febrile neutropenia", "fluid retention",
+                    "neuropathy"),
+        dose_gates=("prior_systemic_therapy",),
+        label_note="The ramucirumab-free alternative (bleeding risk, "
+                   "cavitating central lesions); REVEL control arm is the "
+                   "modern reference",
+    ),
+    Regimen(
+        "sotorasib_subsequent_line",
+        "Sotorasib (KRAS G12C, CodeBreaK 100)", "subsequent",
+        (_C("sotorasib", "per label (not encoded)", schedule="daily"),),
+        trial_ids=("CODEBREAK100",),
+        monitoring=("hepatotoxicity (ALT/AST — key toxicity)", "diarrhea",
+                    "ILD (uncommon)",
+                    "acid-reducing-agent interaction (absorption)"),
+        dose_gates=("kras_g12c_positive", "prior_systemic_therapy"),
+        label_note="KRAS G12C, previously treated — NOT a first-line "
+                   "regimen (first line remains chemo±IO); adagrasib is "
+                   "the alternative",
+    ),
 )
 
 REGIMENS_BY_ID: dict[str, Regimen] = {r.regimen_id: r for r in REGIMENS}

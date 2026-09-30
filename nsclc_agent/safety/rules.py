@@ -407,6 +407,21 @@ def _rule_driver_first_line(ctx: PlanContext) -> list[Violation]:
         names = ", ".join(
             d["gene"] + (f" ({'/'.join(d['classes'])})" if d["classes"] else "")
             for d in drivers)
+        from ..knowledge.sequencing import progressed_agents
+
+        if progressed_agents(ctx.facts):
+            # Line-aware: after documented progression this is no longer
+            # a first-line question — but the ICI answer is still poor in
+            # driver-positive disease (KEYNOTE-789), so it stays flagged.
+            return [Violation(
+                "DRIVER_FIRST_LINE", "warn",
+                f"ICI-containing regimen in driver-positive disease "
+                f"({names}) after documented progression: KEYNOTE-789 "
+                f"answered the post-TKI chemo-IO question negatively for "
+                f"EGFR — the chemo-only and driver-directed sequencing "
+                f"options are the defaults; document the MDT rationale "
+                f"if proceeding.",
+            )]
         return [Violation(
             "DRIVER_FIRST_LINE", "block",
             f"Stage IV with an actionable driver on record ({names}): "
@@ -417,6 +432,37 @@ def _rule_driver_first_line(ctx: PlanContext) -> list[Violation]:
             f"EGFR/ALK/ROS1/RET/MET-ex14/BRAF-V600E/NTRK alike.",
         )]
     return []
+
+
+def _rule_progression_same_drug(ctx: PlanContext) -> list[Violation]:
+    """Re-proposing an agent the history says the disease progressed on:
+    warn. Rechallenge exists (post-chemo intervals, resistance reversal)
+    but it is never a silent default — the plan must own the rationale."""
+    from ..knowledge.sequencing import progressed_agents
+
+    progressed = progressed_agents(ctx.facts)
+    if not progressed or not ctx.regimen_ids:
+        return []
+    out: list[Violation] = []
+    for rid in ctx.regimen_ids:
+        regimen = regimen_lib.get(rid)
+        if regimen is None:
+            continue
+        drugs = [c.drug.lower() for c in regimen.components]
+        hits = sorted({
+            drug for drug in drugs for agent in progressed
+            if drug in agent or agent in drug
+        })
+        if hits:
+            out.append(Violation(
+                "PROGRESSION_SAME_DRUG", "warn",
+                f"{rid} contains {', '.join(hits)} — the record documents "
+                f"progression on this agent. Rechallenge is a deliberate, "
+                f"justified strategy, not a default: state the rationale "
+                f"(treatment-free interval, resistance re-testing) or "
+                f"choose the sequencing option.",
+            ))
+    return out
 
 
 #: Osimertinib-family regimens whose evidence populations are
@@ -665,6 +711,7 @@ RULES = (
     _rule_stage0_no_systemic,
     _rule_indication_predicate,
     _rule_driver_first_line,
+    _rule_progression_same_drug,
     _rule_cns_untreated_symptomatic,
     _rule_cns_tnm_consistency,
     _rule_ici_comorbidity,

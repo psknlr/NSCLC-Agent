@@ -27,7 +27,7 @@
  ToolLoop       ReAct 取证 → CapabilityBroker（角色/技能/熔断/预算）  分期 → 协议模块路由
  InterviewLoop  组织追问   → AdequacyJudge（必答轴规则判定，blocked    试验注册表（分期边界机器可查）
                              永不可被模型/轮次上限豁免）              方案库（剂量只在确定性通道）
- PerceptionAgent 读片提议  → 描述符词表校验 + 归一化交叉核对          安全规则引擎（16条确定性规则）
+ PerceptionAgent 读片提议  → 描述符词表校验 + 归一化交叉核对          安全规则引擎（17条确定性规则）
  MDT Panel      专科子体   → 最保守合成（最高紧急度，非多数票）        肿瘤急症筛查（子句级否定）
  CriticAgent    终审追加   → finally 无条件执行 + 引用核验            证据台账（工具自declare等级）
 ```
@@ -431,6 +431,37 @@ Claim 级引用验证从「结构层」加深到「人群语义层」——结�
   软脑膜转诊；+3 审计探针：纯全身必拦、已处理 CNS 不许误报、M0 矛盾
   必警），unsafe_release_rate 0/13。
 
+### 后线序贯（v0.5.0）
+
+疾病一进展，一线决策表就不再是问题本身——此前系统只有一线视角（红队
+语料缺口）。`knowledge/sequencing.py` 给 planner 与 critic 一份共享的
+**治疗史读数与下一线分层**：
+
+* **病史结构化且诚实**：`treatment_history`（line/agents/status 列表，
+  裸字符串容忍、中文状态词识别）。序贯只在**显式 progression** 上触发
+  ——只有暴露没有结局的记录是暴露、不是进展，模块明说缺什么。
+* **先问耐药机制，再谈耐药方案**：EGFR 进展而无进展期再活检/血浆 NGS
+  → 机制问题（MET 扩增、C797S、小细胞转化各改答案）入 workup、选项
+  临时、放行转 `needs_more_information`。
+* **编码的序贯分支（教学规模，逐条命名）**：奥希替尼进展 →
+  MARIPOSA-2（amivantamab+化疗）与化疗骨架——**KEYNOTE-789 阴性结果
+  显式编码**为"化疗-IO 不是此处默认"的理由；二代 ALK TKI 进展 →
+  洛拉替尼（区分 CROWN 一线人群）；洛拉替尼进展 → 化疗（无下一个
+  确立 TKI，如实说）；化疗-IO 进展 → REVEL 多西他赛±雷莫芦单抗，
+  且 KRAS G12C（CodeBreaK 100）/ HER2（T-DXd）在**它们真正适用的
+  线次**升格为一等选项而非脚注；映射不上的进展 → 分子肿瘤板转诊，
+  永不猜。方案库 30→36、试验注册表 30→35、适应证声明 30→36
+  （全部带 `requires_prior_systemic`，结构化病史自动满足既往治疗
+  条件——两条事实通道不用重复录入）。
+* **Critic 线感知**（规则 16→17）：`PROGRESSION_SAME_DRUG` warn——
+  把刚进展的药再开回去不是默认（rechallenge 须自带理由）；
+  `DRIVER_FIRST_LINE` 变线感知——进展后驱动阳性配化疗-IO 从
+  "一线该用靶向"的 block 转为引 KEYNOTE-789 的 warn，不再错贴
+  一线标签。
+* 金标准 43 → 48 例（+3 流水线 +2 审计探针，含"换药不误报"对照），
+  unsafe_release_rate 0/15；每个序贯选项 claim 各自绑定自己的试验行
+  （MARIPOSA-2 / KEYNOTE-789 / REVEL），三层证据护栏零问题。
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -454,7 +485,7 @@ python -m nsclc_agent run --presentation "肺癌病史，突然大咯血不止"
 
 # 4. 批量 + 金标准评测
 python -m nsclc_agent batch examples/cases -o out/ --resume
-python -m nsclc_agent eval                    # 43 例金标准（30 流水线 + 13 审计型安全网探针）
+python -m nsclc_agent eval                    # 48 例金标准（33 流水线 + 15 审计型安全网探针）
 
 # 5. 记录与离线复核
 python -m nsclc_agent run --case examples/cases/stage3b_unresectable_egfr.json \
@@ -532,9 +563,9 @@ r3 = sess.turn("已核对报告。", facts={"pd_l1": {"tps": 60}})  # 结构化�
 ```
 nsclc_agent/
   staging/     tnm.py 分期引擎(9版表+拒绝表) · router.py · selftest.py
-  knowledge/   trials.py 20项试验注册表(分期边界/驱动限制机器可查)
+  knowledge/   trials.py 35项试验注册表(分期边界/驱动限制机器可查)
                regimens.py 方案库(摘要无剂量/详情即剂量通道) · interactions.py
-  safety/      emergencies.py 急症筛查(子句级否定) · rules.py 16条规则引擎
+  safety/      emergencies.py 急症筛查(子句级否定) · rules.py 17条规则引擎
   interview/   axes.py 17条NSCLC问诊轴(VOI层) · adequacy.py · loop.py
   perception/  imaging.py 读片(词表校验/归一化交叉核对/拒绝文本模型)
   tools/       base.py Broker+熔断 · registry.py 11个工具 · retrieval.py 实连检索
@@ -549,7 +580,7 @@ nsclc_agent/
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   eval/run_eval.py 错误分类学评测 · eval/adjudication.py 双医师裁定台账
   schemas.py · skills.py · case.py · cli.py
-tests/         460 个用例，全离线    eval/       43 例金标准 + 指标
+tests/         471 个用例，全离线    eval/       48 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -557,10 +588,10 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 460 passed，全离线
+python -m pytest -q            # 471 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
-python -m nsclc_agent eval     # 金标准 43/43：分期28/28 路由11/11 方案24/24
-                               # 安全30/30 · unsafe_release_rate 0/13 · 分类学全零
+python -m nsclc_agent eval     # 金标准 48/48：分期31/31 路由11/11 方案26/26
+                               # 安全33/33 · unsafe_release_rate 0/15 · 分类学全零
 ```
 
 ## 仍未完成（诚实清单）
@@ -581,13 +612,17 @@ python -m nsclc_agent eval     # 金标准 43/43：分期28/28 路由11/11 方�
 源中存在，v0.3.5），但**措辞级语义仍未核对**——数字溯源守"无中生有"
 不守"错配语境的措辞"（一个真实存在于引用行的数字被安在错误的结局指标
 或 comparator 上仍不可见）；schema 校验仍刻意保持浅层（形状
-校验，非临床语义完备性）；治疗库（30 方案/30 试验/16 规则+30 适应证声明）覆盖主干驱动
-通路但仍是教学规模，未覆盖后线序贯、器官功能剂量调整与药物相互作用
-决策；CNS 分层（v0.4.0）是教学规模的策略分层——SRS/WBRT 选择、分割、
+校验，非临床语义完备性）；治疗库（36 方案/35 试验/17 规则+36 适应证声明）覆盖主干驱动
+通路但仍是教学规模，未覆盖器官功能剂量调整与药物相互作用决策；后线
+序贯（v0.5.0）止步于二线主干——三线及以后、rechallenge 判据、ADC
+挽救线与**耐药机制定向策略**（MET 扩增联合、C797S 换代、小细胞转化
+方案）均未编码、显式路由分子肿瘤板，REVEL 入组早于化疗-IO 一线时代
+（"化疗-IO 进展后用"是接受的惯例而非其入组人群，注册表 caveat 已注明）；
+CNS 分层（v0.4.0）是教学规模的策略分层——SRS/WBRT 选择、分割、
 激素剂量与手术指征是神经肿瘤 MDT 的通道，软脑膜病变策略（鞘内治疗、
 加量 TKI）明言不在语料内、推荐即转诊，激素依赖对 ICI 疗效的影响未
 建模，问诊轴未加 CNS 症状轴（急症筛查已覆盖癫痫/剧烈头痛短路）；
-金标准 43 例（30 流水线 + 13 审计型探针）仍远少于严肃
+金标准 48 例（33 流水线 + 15 审计型探针）仍远少于严肃
 临床验证所需的 100–200 例边界病例集——双医师裁定台账已就绪（分歧并存、
 内容寻址作废、覆盖度入 eval 报告），但**裁定本身是人的工作，出厂台账为
 空**，且裁定人身份**记录而不认证**（依赖操作环境访问控制与台账 git 审阅）；

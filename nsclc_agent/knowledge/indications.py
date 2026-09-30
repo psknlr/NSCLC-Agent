@@ -32,6 +32,7 @@ from ..staging.legacy8 import eighth_edition_group
 from .biomarkers import (
     EGFR_UNCOMMON_SENSITIZING,
     _BRAF_V600_RE,
+    _KRAS_G12C_RE,
     _MET_EX14_RE,
     _normalized_drivers,
     driver_status,
@@ -65,7 +66,8 @@ class Indication:
     #: ntrk/erbb2), optionally refined by class.
     driver: str | None = None
     driver_class: str | None = None  # egfr_classical | egfr_exon20ins |
-    #                                  egfr_uncommon | met_ex14 | braf_v600e
+    #                                  egfr_uncommon | met_ex14 |
+    #                                  braf_v600e | kras_g12c
     #: ICI-first regimens: no first-line actionable driver may be present.
     requires_no_actionable_driver: bool = False
     pd_l1_tps_ge: float | None = None
@@ -167,6 +169,10 @@ def _eval_driver(ind: Indication, facts: dict[str, Any]) -> dict[str, Any]:
         return _cond("driver", label,
                      _MET if _BRAF_V600_RE.search(text) else _NOT_MET,
                      text[:60])
+    if ind.driver_class == "kras_g12c":
+        return _cond("driver", label,
+                     _MET if _KRAS_G12C_RE.search(text) else _NOT_MET,
+                     text[:60])
     return _cond("driver", label, _UNKNOWN,
                  f"declaration error: unknown driver_class "
                  f"{ind.driver_class!r}")
@@ -255,6 +261,13 @@ def _eval_scalars(ind: Indication, facts: dict[str, Any]) -> list[dict[str, Any]
                              _UNKNOWN, "disease extent not on record"))
     if ind.requires_prior_systemic:
         prior = facts.get("prior_systemic_therapy")
+        if prior is None:
+            # A structured treatment history IS prior systemic therapy —
+            # the two fact channels stay consistent without double entry.
+            from .sequencing import history_summary, treatment_history
+
+            if treatment_history(facts):
+                prior = history_summary(facts)
         if prior:
             out.append(_cond("prior_therapy", "previously treated", _MET,
                              str(prior)[:60]))
@@ -419,6 +432,30 @@ INDICATIONS: dict[str, Indication] = {i.regimen_id: i for i in (
     Indication("tdxd_subsequent_line", _IV, driver="erbb2",
                requires_prior_systemic=True,
                note="DESTINY-Lung02: previously treated HER2-mutant"),
+    Indication("amivantamab_chemo_subsequent", _IV, driver="egfr",
+               driver_class="egfr_classical", requires_prior_systemic=True,
+               histology="nonsquamous",
+               note="MARIPOSA-2: ex19del/L858R after osimertinib "
+                    "progression"),
+    Indication("platinum_pemetrexed_post_tki", _IV, histology="nonsquamous",
+               requires_prior_systemic=True,
+               note="Post-TKI chemo backbone; KEYNOTE-789 answered the "
+                    "IO question negatively"),
+    Indication("lorlatinib_post_second_gen", _IV, driver="alk",
+               requires_prior_systemic=True,
+               note="Post second-generation ALK TKI (phase 2 EXP "
+                    "cohorts) — distinct from CROWN first line"),
+    Indication("docetaxel_ramucirumab_second_line", _IV,
+               requires_prior_systemic=True,
+               note="REVEL: second line after platinum-based therapy, "
+                    "all histologies"),
+    Indication("docetaxel_second_line", _IV,
+               requires_prior_systemic=True,
+               note="Ramucirumab-free second-line alternative"),
+    Indication("sotorasib_subsequent_line", _IV, driver="kras",
+               driver_class="kras_g12c", requires_prior_systemic=True,
+               note="CodeBreaK 100: KRAS G12C, previously treated — "
+                    "never first line"),
 )}
 
 

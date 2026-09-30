@@ -651,7 +651,23 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         # (red-team confirmed exon20ins was being released onto FLAURA).
         drivers = first_line_actionable_drivers(facts)
         lead = drivers[0] if drivers else None
-        if lead and lead["gene"] == "EGFR":
+        from ..knowledge.sequencing import sequencing_context
+
+        seq = sequencing_context(stage_group, facts)
+        if seq:
+            # Documented progression: the first-line table below does not
+            # apply — the sequencing corpus proposes the next line (or
+            # routes to the molecular tumor board when it has nothing).
+            for option in seq["options"]:
+                opt(option["name"], option["regimen_ids"],
+                    option["rationale"])
+            plan["workup_needed"].extend(seq["workup"])
+            plan["uncertainties"].extend(seq["cautions"])
+            plan["sequencing"] = {"line": seq["line"],
+                                  "honest_notes": seq["honest_notes"]}
+            if not seq["options"]:
+                plan["mdt_referral"] = True
+        elif lead and lead["gene"] == "EGFR":
             classes = set(lead["classes"])
             if "exon20ins" in classes:
                 opt("Amivantamab + carboplatin-pemetrexed",
@@ -728,9 +744,12 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         else:
             opt("Pembrolizumab + carboplatin-taxane", ["pembro_carbo_taxane"],
                 "Driver-negative squamous: KEYNOTE-407")
-        for later in later_line_actionable_drivers(facts):
-            plan["uncertainties"].append(
-                f"{later['gene']} on record: {later['note']}.")
+        if seq is None:
+            # First-line only: in a sequencing plan the later-line drivers
+            # are live options, not footnotes.
+            for later in later_line_actionable_drivers(facts):
+                plan["uncertainties"].append(
+                    f"{later['gene']} on record: {later['note']}.")
         # Panel completeness per current guidelines: EGFR/ALK alone is no
         # longer an adequate driver assessment for stage IV non-squamous.
         if _nonsquamous(facts) and not drivers and not facts.get("ngs_done"):
