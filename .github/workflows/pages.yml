@@ -1,0 +1,83 @@
+# NSCLC-Agent web app (IMPF-AI) → GitHub Pages.
+#
+# The site is static: the browser loads Pyodide (WebAssembly Python) and runs
+# the unchanged nsclc_agent package, so deploying = test + pack + upload.
+#
+# One-time setup: Settings → Pages → Build and deployment → Source:
+# "GitHub Actions". Deploys run on pushes to the default branch (and on a
+# manual run); pull requests get the full test + browser-runtime check only.
+
+name: Web app (GitHub Pages)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "nsclc_agent/**"
+      - "web/**"
+      - "tests/**"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    paths:
+      - "nsclc_agent/**"
+      - "web/**"
+      - "tests/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYODIDE_VERSION: "0.27.7"  # keep in sync with web/worker.js
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"  # the Python Pyodide 0.27 ships
+
+      - name: Test suite
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pytest -q
+
+      - name: Build static site
+        run: python web/build.py --out _site
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Browser-runtime smoke test (same Pyodide the page loads)
+        run: |
+          npm i --prefix "$RUNNER_TEMP/pyodide" "pyodide@${PYODIDE_VERSION}"
+          PYODIDE_DIR="$RUNNER_TEMP/pyodide/node_modules/pyodide" \
+            node tests/pyodide_smoke.mjs _site
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: _site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,4 +1,4 @@
-# NSCLC-Agent v0.2 — 证据受控、分期可验证的 NSCLC 智能体框架
+# NSCLC-Agent — 证据受控、分期可验证的 NSCLC 智能体框架
 
 > **NSCLC-Agent v0.1 × YaoBi-Harness 的融合重写。**
 > v0.1 贡献了可验证的确定性内核：AJCC/UICC 第 9 版 TNM 分期引擎、分期路由器与
@@ -15,6 +15,30 @@
 
 > ⚠️ **教学/科研用途。** 本系统不是医疗器械，输出未经合格多学科团队复核
 > 不得用于真实患者。
+
+## 🌐 网页端 · IMPF-AI 研发
+
+**在线使用：<https://psknlr.github.io/NSCLC-Agent/>**（GitHub Pages，零服务器）
+
+整个智能体以 WebAssembly（Pyodide）在访问者的浏览器里运行——**与命令行完全
+相同的 Python 代码**，不是 JavaScript 重写，所以分期权威、20 条安全规则、终审、
+放行状态机、剂量通道在网页里一条不少（金标准评测 70/70 在浏览器内跑绿）。
+病例数据不离开本机；接入模型时请求从浏览器直接发往您选择的服务商。
+
+| 页面 | 功能 |
+|---|---|
+| 会诊工作台 | 结构化事实表单 + 叙述文本 → 完整受治理运行；分期、方案、安全审计、证据/主张台账、适应证判定、预后（人群）、指南 KG 上下文、患者视图、剂量通道、执行轨迹；8 个一键示例 |
+| 多轮会诊 | 累积事实、方案复用、what-if 假设推演（不写入记忆）、影像/报告上传读片、会话导出/导入（导入不授予权限） |
+| 分期引擎 | 第 9 版 T×N 全矩阵；歧义（N2 未分 a/b、M1c 未分 c1/c2）直接拒绝 |
+| 指南知识图谱 | 2,960 条推荐检索（分期/基因/组织学/地区筛选） |
+| 安全网实验室 | 把构造的方案直接交给规则引擎；28 个审计探针逐个核对期望 |
+| 评测看板 | 浏览器内跑完整金标准：该拦未拦率、分类学、逐例结果 |
+| 模型接入 | Poe · MiniMax · Azure OpenAI · 离线 Mock；测试连接、Poe 模型目录核对 |
+
+本地预览：`python web/build.py --out _site && python -m http.server -d _site 8000`
+→ 打开 <http://localhost:8000>。部署：`.github/workflows/pages.yml`（测试 →
+打包 → 真 Pyodide 冒烟测试 → 发布）；首次需在仓库 **Settings → Pages →
+Source 选 "GitHub Actions"**。
 
 ---
 
@@ -568,6 +592,32 @@ AURA3 奥希替尼（新方案/试验/声明）；器官闸门读取"CrCl 38 mL/
 闸门由方案组分**结构化推导**（11 个方案曾漏掉组分隐含闸门，含多西他赛肝功能
 警告）；cM0/pM0 前缀、中文药名同药再挑战、"PD-L1"被读成进展等。
 
+### 网页端 + 模型接入核对（v0.8.0）
+
+**模型接入逐项实测**（2026-09，不带密钥即可验证的部分全部实连验证）：
+
+| 服务商 | 接入方式 | 实测结果 |
+|---|---|---|
+| **Poe** | OpenAI 兼容 `https://api.poe.com/v1`，Bearer 密钥 | 公开模型目录确认 `claude-sonnet-4.5`（工具调用 ✓ 图像 ✓）与读片默认 `gemini-3.1-pro`（✓ ✓）——**目录 id 已全部小写**，旧写法 `Claude-Sonnet-4.5` 已改；错误密钥 → HTTP 401 `authentication_error`（不重试）；浏览器 CORS 放行 `*` |
+| **MiniMax** | `/v1/text/chatcompletion_v2`，中国区 `api.minimaxi.com` / 国际区 `api.minimax.io` | **错误在 HTTP 200 内以 `base_resp` 返回**——旧实现会把它当成空回复吞掉；现在 1004 鉴权/1008 余额/1027 内容等直接报错并带 MiniMax 原文，1000/1001/1002/1013 按瞬时错误退避重试；两个区域都放行浏览器跨域 |
+| **Azure OpenAI** | `api-key` 头 + deployment 路径 | 单元测试覆盖线协议；浏览器内使用需在 Azure 侧开启 CORS |
+| **LiteLLM** | 可选依赖 | 仅命令行（浏览器内无该 SDK） |
+| **Mock** | 离线桩 | 驱动完整工具循环与 MDT 面板，网页端同样可用 |
+
+* `python -m nsclc_agent llm-check` 对 Poe 客户端自动核对公开目录（大小写错误给出
+  更正建议、报告工具/图像能力）；`--ping` 发一次极小的真实补全，**密钥、端点、
+  模型三者一起验证**，失败返回码 1。
+* 传输层统一为 `_post → (status, body)`：命令行走 urllib，浏览器走 Web Worker 内的
+  同步 XHR（status 0 = 网络断开或服务商拒绝该来源，明确报错）；429/5xx/连接错误
+  有界退避重试，4xx 立即失败。
+
+**网页端（IMPF-AI 研发）**：见文首。关键设计——`nsclc_agent/webapi.py` 是唯一桥：
+一个 JSON 进、一个 JSON 出，桥上从不抛异常；患者角色的运行只返回（也只导出）
+患者视图；会话导入的角色/剂量权限来自调用方；模型客户端只由页面上的显式设置
+构建（浏览器没有环境变量）；`platform_caps` 在浏览器内关闭线程（波次/会诊面板走
+串行路径，台账逐字相同）。模块级禁止导入 Pyodide 不带的 `ssl`/`sqlite3`（测试以
+"毒化"这些模块的方式跑整包）；CI 用网页同版本的 Pyodide 在 Node 里跑冒烟测试。
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -605,21 +655,23 @@ python -m nsclc_agent run --case examples/cases/stage3b_unresectable_egfr.json \
 ```bash
 export NSCLC_LLM_PROVIDER=poe     # azure | poe | minimax | litellm | mock
 export POE_API_KEY=...
-export NSCLC_VISION_PROVIDER=poe  NSCLC_VISION_MODEL=Gemini-3.1-Pro   # 读片
+export NSCLC_VISION_PROVIDER=poe  NSCLC_VISION_MODEL=gemini-3.1-pro   # 读片
 export NSCLC_AGENT_ONLINE=1       # 启用 PubMed / CT.gov / openFDA 实连检索
-python -m nsclc_agent llm-check
+python -m nsclc_agent llm-check --ping   # 目录核对 + 一次真实补全
 python -m nsclc_agent run --case examples/cases/stage3a_resectable_periop.json --panel
 ```
 
 | provider | 必需变量 | 可选 |
 |---|---|---|
 | `azure` | `AZURE_OPENAI_API_KEY` `AZURE_OPENAI_ENDPOINT` `AZURE_OPENAI_DEPLOYMENT` | `AZURE_OPENAI_API_VERSION` |
-| `poe` | `POE_API_KEY` | `POE_MODEL`（默认 Claude-Sonnet-4.5）`POE_BASE_URL` |
-| `minimax` | `MINIMAX_API_KEY` | `MINIMAX_MODEL` `MINIMAX_REGION`(china/global) `MINIMAX_GROUP_ID` |
+| `poe` | `POE_API_KEY` | `POE_MODEL`（默认 `claude-sonnet-4.5`，Poe 目录 id 为小写）`POE_BASE_URL` |
+| `minimax` | `MINIMAX_API_KEY` | `MINIMAX_MODEL`（默认 `MiniMax-M3`）`MINIMAX_REGION`(china/global) `MINIMAX_GROUP_ID` |
 | `litellm` | `LITELLM_MODEL`（需 `pip install litellm`） | `LITELLM_API_KEY` `LITELLM_BASE_URL` |
 
 显式指定 provider 但凭据不全会**直接报错**，不会伪装成正常的规则输出；
-`mock` 是可驱动完整工具循环的离线智能体桩。
+`mock` 是可驱动完整工具循环的离线智能体桩。MiniMax 的 `base_resp` 带内错误
+（HTTP 200 里的 1004/1008/…）会原样报出，不会被当成空回复。网页端在
+「模型接入」页填写同样的设置（密钥只存于页面的 Web Worker 内存）。
 
 ## 程序化使用
 
@@ -694,7 +746,7 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 550 passed，全离线
+python -m pytest -q            # 598 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 70/70：分期40/40 路由11/11 方案35/35
                                # 安全42/42 · unsafe_release_rate 0/35 · 分类学全零
@@ -743,7 +795,7 @@ CNS 分层（v0.4.0）是教学规模的策略分层——SRS/WBRT 选择、分�
 覆盖）；图内并发只覆盖 Treatment∥Panel 波与会诊成员（其余
 任务串行）；内置试验注册表
 与 DDI 规则包是教学语料，须经本机构药师/医师复核后使用；大规模对抗性安全
-评测未做（v0.7.1 做过一轮四路全库对抗审计，但那是一次审计，不是持续评测）。**本项目不能对外宣称为临床可用系统。**
+评测未做（v0.7.1 做过一轮四路全库对抗审计，但那是一次审计，不是持续评测）；网页端（v0.8.0）的实连检索（PubMed/CT.gov/openFDA）、记录/重放日志与 LiteLLM 只在命令行可用，Azure 在浏览器内需服务端开启 CORS，运行时从 jsDelivr CDN 加载（首次约 10 MB，信任该 CDN 的完整性），线上的 Poe/MiniMax 真实补全需要访问者自己的密钥——本仓库的验证覆盖目录、鉴权错误、跨域与带内错误，不含付费补全本身。**本项目不能对外宣称为临床可用系统。**
 
 ## License
 

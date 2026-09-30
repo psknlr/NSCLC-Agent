@@ -399,6 +399,27 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     scanned after NFKC normalization, whole ranges at a time, through
     one shared scanner.
 
+28. **The browser build is the same harness, not a port.** (v0.8.0,
+    GitHub Pages web app by IMPF-AI.) The web app runs this package
+    UNCHANGED under Pyodide (WebAssembly Python) in a Web Worker and
+    reaches it only through `webapi.call(name, json) -> json` — no
+    JavaScript re-implementation of staging, rules, gates or release,
+    so every invariant above holds in the page by construction (the
+    golden eval runs green inside the browser and in CI under the same
+    Pyodide release, `tests/pyodide_smoke.mjs`). Runtime differences
+    are scheduling and transport only, behind `platform_caps`: no
+    threads → the Treatment∥Panel wave and panel fan-out take their
+    serial path (ledger-identical by invariant); no sockets → model
+    calls are a synchronous XHR from the worker straight to the
+    provider the visitor chose (Poe and MiniMax answer CORS; keys live
+    only in worker memory, never in the page, the URL or GitHub). The
+    bridge keeps the CLI's contracts: a patient-role run returns — and
+    exports — only the patient view; a session import takes role and
+    dose permission from the call, never the file; clients are built
+    from explicit settings, never the environment. Nothing may import
+    a module Pyodide does not ship (`ssl`, `sqlite3`…) at module level
+    — a test runs the package with those imports poisoned.
+
 ## 3. LLM containment table
 
 | Capability | Model may | Model may not |

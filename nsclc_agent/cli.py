@@ -737,11 +737,22 @@ def cmd_llm_check(args) -> int:
     except LLMError as exc:
         print(f"LLM configuration error: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps({
+    report: dict = {
         "llm": describe_client(llm),
         "vision": describe_client(vision) if vision else {"provider": "none"},
-    }, ensure_ascii=False, indent=2))
-    return 0
+    }
+    from .llm.providers import poe_model_check, ping_client
+
+    for label, client in (("llm", llm), ("vision", vision)):
+        if client is not None and getattr(client, "kind", "") == "poe":
+            report[label]["poe_catalog"] = poe_model_check(
+                client.model, base_url=client.base_url)
+    rc = 0
+    if args.ping:
+        report["ping"] = ping_client(llm)
+        rc = 0 if report["ping"]["ok"] else 1
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return rc
 
 
 def _add_llm_flags(parser: argparse.ArgumentParser) -> None:
@@ -956,6 +967,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("llm-check", help="Show configured backends")
     _add_llm_flags(p)
+    p.add_argument("--ping", action="store_true",
+                   help="send one tiny real completion to verify key, "
+                        "endpoint and model together")
     p.set_defaults(func=cmd_llm_check)
 
     return parser

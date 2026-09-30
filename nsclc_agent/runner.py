@@ -231,7 +231,10 @@ class NSCLCRunner:
         self.vision_llm = vision_llm
         #: Whether the safe long-running pair (Treatment ∥ Panel) may overlap.
         #: Forced off by an active journal (single ordered lane).
-        self.parallel_tasks = bool(parallel_tasks)
+        from .platform_caps import THREADS_AVAILABLE
+
+        # The browser (Pyodide) build cannot start threads: serial path.
+        self.parallel_tasks = bool(parallel_tasks) and THREADS_AVAILABLE
         self._executed_parallel = False
         #: Explicit loop = a continuing conversation whose stall history must
         #: span turns. Absent that, every run gets a fresh loop (see run()).
