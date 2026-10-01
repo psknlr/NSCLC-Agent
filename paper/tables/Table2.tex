@@ -1,0 +1,20 @@
+\begin{table}[t]
+\small
+\caption{Table 2 | Hooks: the clinical safety nets of agent mode}
+\begin{tabular}{p{2.6cm}p{2.4cm}p{6.6cm}p{3.6cm}}
+\toprule
+Hook & Runs when & Check & Output \\
+\midrule
+Emergency screen & Prompt submitted & Clause-scoped, negation-aware oncologic-emergency screen on every message; a hit puts the standard pathway in front of the model and alerts the clinician. & Alert; context for the model \\
+Case-note seeding & Prompt submitted & Deterministically extracts unambiguous facts (TNM, age, ECOG, drivers…) from the message into the case notes; the model can correct them. & Context for the model \\
+Evidence ledger & After each tool call & Records every trial / guideline / literature id a tool actually returned and every regimen-dose lookup, for the provenance checks. & None (records references and dose lookups) \\
+Rule-engine review & Consult submitted & The 20 deterministic safety rules review the plan (driver-directed first line, no surgery for N3, indications, organ function, doses…). & Rule identifiers (20 rules)† \\
+Stage consistency & Consult submitted & Flags a stage that differs from the AJCC/UICC 9th-edition staging engine. & STAGE\_DIFFERS\_FROM\_ENGINE \\
+Citation provenance & Consult submitted & Flags cited trials / guideline items that no tool returned and no local registry or knowledge base can resolve (hallucinated citations). & UNVERIFIED\_CITATION \\
+Dose provenance & Consult submitted & Flags dose figures given without a regimen-library lookup, or doses addressed to a patient. & DOSE\_NOT\_FROM\_LIBRARY; DOSE\_TO\_PATIENT \\
+Emergency first & Consult submitted & Flags a conclusion that does not put a screened emergency first (high priority). & EMERGENCY\_NOT\_ADDRESSED \\
+\bottomrule
+\end{tabular}
+\par\footnotesize Every finding is returned to the model once; the model revises its plan or records a clinical reason (rule\_responses). No hook blocks, rewrites or withholds output.
+\par\footnotesize †For example DRIVER\_FIRST\_LINE, INDICATION\_PREDICATE, N3\_NO\_SURGERY, ORGAN\_FUNCTION\_GATE.
+\end{table}

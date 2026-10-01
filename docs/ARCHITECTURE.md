@@ -91,6 +91,22 @@ The harness runs in one of two modes.
 | Interruption | CLI: Ctrl-C ends the turn (`KeyboardInterrupt` → cancelled, history repaired). Web: the page terminates and restarts the worker; the case resumes from its last exported session. |
 | Authority | Role and runtime configuration come from the surface; a session file (format `nsclc-agent-session/2`, `/1` still readable) supplies data only: facts and checkpoint facts are re-validated, the system prompt is rebuilt, inconsistent checkpoints are dropped. |
 
+### 2.2 Languages (v1.1)
+
+Localisation happens at the display edge and never inside the clinical kernel.
+`nsclc_agent/i18n/en.json` is one dictionary shared by the browser and by
+Python. The browser copy is placed next to the app by `web/build.py`. Both
+sides apply the same steps: exact phrases first, then word-order rules, then
+longest-first substring phrases, then the English half of bilingual kernel
+strings. Model output and clinician input are never translated (`raw()` in
+the web app).
+
+In English mode, the runtime appends an "Output language" directive to the
+lead and specialist system prompts. Hooks, local commands, plan, memory and
+delegate summaries, and the mock model are bilingual. The emergency screen
+treats English negation NegEx-style (the cue must precede the symptom) and
+matches third-party and hypothetical cues on word boundaries.
+
 ## 3. Control-plane invariants (governed mode)
 
 1. **The stage is never the model's.** Only `StagingAgent` writes

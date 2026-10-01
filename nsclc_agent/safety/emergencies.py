@@ -29,12 +29,25 @@ _CLAUSE_SPLIT = re.compile(r"[。！？!?；;，,\n]")
 #: symptom denial), English cues carry word boundaries, and the symptom term
 #: itself is removed before the clause is inspected.
 _NEGATION_RE = re.compile(
-    r"没有|否认|不曾|未见|未出现|没出现|不存在|无明显|无(?!力|法|奈)|"
+    r"没有|否认|不曾|未见|未出现|没出现|不存在|无明显|无(?!力|法|奈)",
+)
+#: English negation only counts BEFORE the symptom (NegEx-style pre-negation):
+#: "no hemoptysis" / "denies hemoptysis" close the question, but the "not" in
+#: "massive hemoptysis that will not stop" describes the bleeding — read
+#: position-agnostically it suppressed a massive-hemoptysis emergency.
+_NEGATION_EN_RE = re.compile(
     r"\b(?:no|not|denies|denied|without|absent)\b|negative for",
     re.IGNORECASE,
 )
-_THIRD_PARTY_CUES = ("父亲", "母亲", "家人", "朋友", "同事", "father", "mother", "family member")
-_HYPOTHETICAL_CUES = ("如果", "万一", "要是", "担心会", "怕会", "if i", "what if", "in case")
+#: Third-party / hypothetical cues. English cues need word boundaries: as
+#: plain substrings "mother" matched inside "chemotherapy" and silently
+#: suppressed every English clause that mentioned chemotherapy
+#: ("febrile neutropenia on chemotherapy").
+_THIRD_PARTY_RE = re.compile(
+    r"父亲|母亲|家人|朋友|同事|\b(?:father|mother|family member|friend|colleague)\b",
+    re.IGNORECASE)
+_HYPOTHETICAL_RE = re.compile(
+    r"如果|万一|要是|担心会|怕会|\b(?:if i|what if|in case)\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -51,6 +64,9 @@ class EmergencyPattern:
     #: a bare positive "咯血" would not, on its own, be a massive-hemoptysis
     #: emergency — raising and closing legitimately need different specificity.
     screen_terms: tuple[str, ...] = ()
+    #: English co-occurrence cues: every term of one tuple in the same clause
+    #: raises the signal ("fever 38.5 two days after chemotherapy").
+    combos: tuple[tuple[str, ...], ...] = ()
 
 
 PATTERNS: tuple[EmergencyPattern, ...] = (
@@ -58,7 +74,8 @@ PATTERNS: tuple[EmergencyPattern, ...] = (
         "cord_compression", "脊髓压迫 / cord compression",
         ("双腿无力", "下肢无力加重", "大小便失禁", "尿潴留", "鞍区麻木", "会阴麻木",
          "saddle anesthesia", "bilateral leg weakness", "urinary retention",
-         "bowel incontinence", "new leg weakness"),
+         "bowel incontinence", "new leg weakness", "cord compression",
+         "saddle numbness", "loss of bladder control", "legs giving way"),
         "hard",
         "立即急诊：全脊柱增强MRI（24小时内），神经外科/放疗科会诊，按当地方案启动地塞米松；"
         "Immediate ED referral: whole-spine MRI within 24h, neurosurgery/RT consult, dexamethasone per protocol.",
@@ -67,7 +84,8 @@ PATTERNS: tuple[EmergencyPattern, ...] = (
     EmergencyPattern(
         "svc_syndrome", "上腔静脉综合征 / SVC syndrome",
         ("颜面肿胀", "面部肿胀", "颈静脉怒张", "面部发紫", "晨起脸肿", "上肢肿胀伴气促",
-         "facial swelling", "facial plethora", "distended neck veins", "svc"),
+         "facial swelling", "facial plethora", "distended neck veins", "svc",
+         "superior vena cava"),
         "hard",
         "急诊评估气道与静脉回流；胸部增强CT，肿瘤科+介入/放疗急会诊，评估支架/紧急放疗；"
         "Urgent airway/venous assessment, contrast CT, consider stenting or urgent RT.",
@@ -76,7 +94,9 @@ PATTERNS: tuple[EmergencyPattern, ...] = (
     EmergencyPattern(
         "massive_hemoptysis", "大咯血 / massive hemoptysis",
         ("大咯血", "咯血不止", "咯出大量鲜血", "满口鲜血", "massive hemoptysis",
-         "coughing up large amounts of blood"),
+         "coughing up large amounts of blood", "massive haemoptysis",
+         "life-threatening hemoptysis", "uncontrolled hemoptysis",
+         "large-volume hemoptysis", "cup of blood"),
         "hard",
         "急诊：患侧卧位保护健侧肺，气道保护，急诊支气管镜/介入栓塞评估；"
         "ED now: lateral decubitus (bleeding side down), airway protection, urgent bronchoscopy/IR embolization.",
@@ -94,11 +114,14 @@ PATTERNS: tuple[EmergencyPattern, ...] = (
     EmergencyPattern(
         "febrile_neutropenia", "化疗期发热 / fever on chemotherapy",
         ("化疗后发烧", "化疗期间发热", "打完化疗发烧", "fever on chemotherapy",
-         "fever after chemo", "febrile neutropenia"),
+         "fever after chemo", "febrile neutropenia", "neutropenic fever",
+         "fever during chemo", "fever while on chemo"),
         "hard",
         "按中性粒细胞减少性发热处理：1小时内急诊，血培养后经验性广谱抗生素，不得等待血象结果在家观察；"
         "Treat as febrile neutropenia: ED within 1h, cultures then empiric broad-spectrum antibiotics.",
         screen_terms=('发烧', '发热', '寒战', 'fever', 'rigors', 'chills'),
+        combos=(("fever", "chemo"), ("febrile", "chemo"), ("fever", "neutropeni"),
+                ("rigors", "chemo")),
     ),
     EmergencyPattern(
         "hypercalcemia", "高钙危象线索 / symptomatic hypercalcemia",
@@ -119,7 +142,8 @@ PATTERNS: tuple[EmergencyPattern, ...] = (
     EmergencyPattern(
         "brain_mets_signs", "颅内转移体征 / new CNS signs",
         ("新发剧烈头痛伴呕吐", "抽搐", "癫痫发作", "一侧肢体突然无力", "口齿不清",
-         "new seizure", "worst headache with vomiting", "sudden one-sided weakness"),
+         "new seizure", "worst headache with vomiting", "sudden one-sided weakness",
+         "headache with vomiting", "slurred speech"),
         "soft",
         "急诊头颅增强MRI；按占位效应决定地塞米松与神外/放疗会诊；"
         "Urgent contrast brain MRI; dexamethasone and neurosurgery/RT consult per mass effect.",
@@ -158,14 +182,18 @@ def _clause_suppressed(clause: str, matched_terms: tuple[str, ...] = ()) -> str 
     second clause.
     """
     lowered = clause.lower()
-    if any(cue in lowered for cue in _THIRD_PARTY_CUES):
+    if _THIRD_PARTY_RE.search(lowered):
         return "third_party"
-    if any(cue in lowered for cue in _HYPOTHETICAL_CUES):
+    if _HYPOTHETICAL_RE.search(lowered):
         return "hypothetical"
     masked = lowered
     for term in matched_terms:
         masked = masked.replace(term.lower(), "□")
     if _NEGATION_RE.search(masked):
+        return "negation"
+    english = _NEGATION_EN_RE.search(masked)
+    first_symptom = masked.find("□")
+    if english and (first_symptom < 0 or english.start() < first_symptom):
         return "negation"
     return None
 
@@ -182,10 +210,13 @@ def screen(narrative: str) -> ScreenResult:
             continue
         lowered = clause.lower()
         for pattern in PATTERNS:
+            combo_terms = tuple(
+                term for combo in pattern.combos
+                if all(t in lowered for t in combo) for term in combo)
             matched = tuple(
-                term for term in (*pattern.cues, *pattern.screen_terms)
+                term for term in (*pattern.cues, *pattern.screen_terms, *combo_terms)
                 if term in lowered)
-            raised = any(cue in lowered for cue in pattern.cues)
+            raised = any(cue in lowered for cue in pattern.cues) or bool(combo_terms)
             if not matched:
                 continue
             suppression = _clause_suppressed(clause, matched)

@@ -75,6 +75,13 @@ const rewound = call("agent_rewind", {});
 const cfg = call("agent_configure", { config: { hooks: { rule_review: false } } });
 check("commands, rewind and config", usage.kind === "local" && rewound.turns === 1 && cfg.hooks.rule_review === false
   && call("agent_info", {}).hooks.find((x) => x.name === "rule_review").enabled === false);
+// English: the agent is told to write English; hooks and commands follow.
+call("set_language", { lang: "en" });
+call("agent_new", { role: "oncologist" });
+const en = call("agent_turn", { message: "History of lung cancer; sudden massive hemoptysis that will not stop." });
+check("English mode in the browser", /Offline mock agent/.test(en.reply) && !/[\u3400-\u9fff]/.test(en.reply)
+  && (en.emergency || {}).signals && call("agent_command", { text: "/usage" }).text.includes("model calls"));
+call("set_language", { lang: "zh" });
 const panel = call("run_case", Object.assign({}, call("examples")[1].case, { role: "oncologist", enable_panel: true }));
 check("mock model + MDT panel (serial scheduling)", Boolean(panel.release_status), panel.release_status);
 call("chat_new", { role: "oncologist" });

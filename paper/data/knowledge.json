@@ -1,0 +1,343 @@
+{
+ "guidelines": [
+  {
+   "id": "GV_NCCN_2026V5",
+   "label": "NCCN NSCLC 5.2026 (US)",
+   "recommendations": 1466
+  },
+  {
+   "id": "GV_CSCO_NSCLC",
+   "label": "CSCO NSCLC 2025 (CN)",
+   "recommendations": 702
+  },
+  {
+   "id": "GV_CN_TCM_2023",
+   "label": "CN integrated TCM-WM 2023 (CN)",
+   "recommendations": 240
+  },
+  {
+   "id": "GV_ESMO_2025_EARLY_LA",
+   "label": "ESMO early/LA 2025 (EU)",
+   "recommendations": 194
+  },
+  {
+   "id": "GV_ESMO_2023_DRIVER_NEG",
+   "label": "ESMO non-oncogene 2023 (EU)",
+   "recommendations": 184
+  },
+  {
+   "id": "GV_ESMO_2023_DRIVER_POS",
+   "label": "ESMO oncogene-addicted 2023 (EU)",
+   "recommendations": 174
+  }
+ ],
+ "topics": [
+  [
+   "systemic_treatment",
+   1289
+  ],
+  [
+   "molecular_testing",
+   332
+  ],
+  [
+   "radiotherapy",
+   326
+  ],
+  [
+   "diagnosis",
+   206
+  ],
+  [
+   "staging",
+   195
+  ],
+  [
+   "surgery",
+   179
+  ],
+  [
+   "tcm_treatment",
+   171
+  ],
+  [
+   "supportive_care",
+   135
+  ],
+  [
+   "surveillance",
+   93
+  ],
+  [
+   "multidisciplinary_review",
+   12
+  ],
+  [
+   "treatment",
+   12
+  ],
+  [
+   "screening",
+   4
+  ],
+  [
+   "prevention",
+   3
+  ],
+  [
+   "imaging",
+   1
+  ],
+  [
+   "multidisciplinary_care",
+   1
+  ],
+  [
+   "prognostication",
+   1
+  ]
+ ],
+ "topic_matrix": {
+  "guidelines": [
+   "GV_NCCN_2026V5",
+   "GV_CSCO_NSCLC",
+   "GV_CN_TCM_2023",
+   "GV_ESMO_2025_EARLY_LA",
+   "GV_ESMO_2023_DRIVER_NEG",
+   "GV_ESMO_2023_DRIVER_POS"
+  ],
+  "topics": [
+   "systemic_treatment",
+   "molecular_testing",
+   "radiotherapy",
+   "diagnosis",
+   "staging",
+   "surgery",
+   "tcm_treatment",
+   "supportive_care",
+   "surveillance",
+   "other"
+  ],
+  "counts": [
+   [
+    565,
+    211,
+    220,
+    123,
+    141,
+    102,
+    0,
+    48,
+    38,
+    18
+   ],
+   [
+    417,
+    54,
+    44,
+    54,
+    6,
+    19,
+    0,
+    66,
+    38,
+    4
+   ],
+   [
+    31,
+    0,
+    12,
+    4,
+    8,
+    9,
+    171,
+    5,
+    0,
+    0
+   ],
+   [
+    61,
+    18,
+    31,
+    6,
+    18,
+    44,
+    0,
+    2,
+    6,
+    8
+   ],
+   [
+    111,
+    13,
+    10,
+    16,
+    11,
+    3,
+    0,
+    10,
+    7,
+    3
+   ],
+   [
+    104,
+    36,
+    9,
+    3,
+    11,
+    2,
+    0,
+    4,
+    4,
+    1
+   ]
+  ]
+ },
+ "trial_coverage": {
+  "stages": [
+   "IA1",
+   "IA2",
+   "IA3",
+   "IB",
+   "IIA",
+   "IIB",
+   "IIIA",
+   "IIIB",
+   "IIIC",
+   "IVA",
+   "IVB"
+  ],
+  "settings": [
+   "first_line",
+   "subsequent",
+   "adjuvant",
+   "perioperative",
+   "consolidation",
+   "neoadjuvant",
+   "radiotherapy",
+   "local_consolidative"
+  ],
+  "counts": [
+   [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    15,
+    15
+   ],
+   [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    10,
+    10
+   ],
+   [
+    0,
+    0,
+    0,
+    1,
+    5,
+    5,
+    5,
+    1,
+    0,
+    0,
+    0
+   ],
+   [
+    0,
+    0,
+    0,
+    0,
+    3,
+    3,
+    3,
+    3,
+    0,
+    0,
+    0
+   ],
+   [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    2,
+    2,
+    2,
+    0,
+    0
+   ],
+   [
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0
+   ],
+   [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    0,
+    0
+   ],
+   [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0
+   ]
+  ],
+  "trials": 39
+ },
+ "commands": 15,
+ "tests": 682,
+ "kg_total": 2960,
+ "kg_clusters": 147,
+ "assets": {
+  "Trials (registry)": 39,
+  "Regimens (library)": 40,
+  "Indication predicates": 40,
+  "Safety rules": 20,
+  "Interview axes": 18,
+  "Clinical tools": 20,
+  "Specialist sub-agents": 7,
+  "Hooks": 8,
+  "Gold-standard cases": 70
+ }
+}

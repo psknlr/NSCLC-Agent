@@ -19,7 +19,9 @@ STATUSES = ("pending", "in_progress", "completed", "cancelled")
 
 class Plan:
     def __init__(self, items: list[dict[str, Any]] | None = None,
-                 on_change: Callable[[list[dict[str, Any]]], None] | None = None) -> None:
+                 on_change: Callable[[list[dict[str, Any]]], None] | None = None,
+                 language: str = "zh") -> None:
+        self.language = language
         self.items: list[dict[str, Any]] = [self._clean(i) for i in items or []
                                             if isinstance(i, dict)]
         self.explanation = ""
@@ -46,9 +48,14 @@ class Plan:
         note = None
         if len(in_progress) > 1:
             note = "keep exactly one step in_progress at a time"
+        if self.language == "en":
+            summary = f"plan {done}/{len(cleaned)} done" + (
+                f" · now: {in_progress[0]['content']}" if in_progress else "")
+        else:
+            summary = f"计划 {done}/{len(cleaned)} 完成" + (
+                f" · 进行中：{in_progress[0]['content']}" if in_progress else "")
         return {"ok": True,
-                "summary": f"计划 {done}/{len(cleaned)} 完成"
-                           + (f" · 进行中：{in_progress[0]['content']}" if in_progress else ""),
+                "summary": summary,
                 "data": {"items": cleaned, **({"note": note} if note else {})},
                 "_ui": {"plan": cleaned}}
 
@@ -68,4 +75,4 @@ class Plan:
                      ["content", "status"])},
                  "explanation": {"type": "string"}}, ["items"]),
             handler=self.update, category="planning", parallel_safe=False,
-            label="更新会诊计划")
+            label="Update consult plan" if self.language == "en" else "更新会诊计划")

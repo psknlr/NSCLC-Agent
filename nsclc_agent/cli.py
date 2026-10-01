@@ -781,6 +781,7 @@ def _agent_config(args) -> dict:
         "hooks": {name: False for name in args.no_hook or []},
         "instructions": "" if args.no_memory else load_instructions(),
         "custom_agents": custom, "mcp_servers": servers,
+        "language": getattr(args, "lang", None) or "zh",
     }
     for key in ("max_steps", "context_window"):
         if getattr(args, key, None):
@@ -788,15 +789,16 @@ def _agent_config(args) -> dict:
     return config
 
 
-def _save_memory(proposals: list[str], path: Path = Path("NSCLC.md")) -> bool:
+def _save_memory(proposals: list[str], path: Path = Path("NSCLC.md"),
+                 en: bool = False) -> bool:
     """Ask before writing the agent's memory proposals to ./NSCLC.md."""
     if not proposals or not sys.stdin.isatty():
         return False
-    print("\n智能体提议记住：", file=sys.stderr)
+    print("\nThe agent proposes to remember:" if en else "\n智能体提议记住：", file=sys.stderr)
     for note in proposals:
         print(f"  - {note}", file=sys.stderr)
     try:
-        answer = input(f"写入 {path}？[y/N] ").strip().lower()
+        answer = input(f"Write to {path}? [y/N] " if en else f"写入 {path}？[y/N] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         return False
     if answer not in ("y", "yes", "是"):
@@ -813,7 +815,7 @@ def cmd_agent(args) -> int:
     from .agentic import AgentSession, load_instructions
     from .agentic.commands import expand
     from .agentic.terminal import TerminalView
-    from .agentic.toolbox import LABELS
+    from .agentic.toolbox import LABELS, LABELS_EN
 
     try:
         llm = build_client(getattr(args, "llm_provider", None) or None,
@@ -835,7 +837,10 @@ def cmd_agent(args) -> int:
         return 2
 
     fmt = args.output_format or ("json" if args.json else "text")
-    view = TerminalView(sys.stderr, labels={**LABELS, "remember": "提议写入记忆"}) \
+    en = config["language"] == "en"
+    view = TerminalView(sys.stderr, lang=config["language"],
+                        labels={**(LABELS_EN if en else LABELS),
+                                "remember": "Propose for memory" if en else "提议写入记忆"}) \
         if fmt == "text" and not args.quiet else None
 
     import threading
@@ -869,7 +874,7 @@ def cmd_agent(args) -> int:
     else:
         session = new_session()
     if view is not None:
-        view.titles.update({d.name: d.title for d in session.definitions})
+        view.titles.update({d.name: d.label(config["language"]) for d in session.definitions})
     facts = json.loads(args.facts) if args.facts else None
     interactive = not args.message
 
@@ -887,7 +892,7 @@ def cmd_agent(args) -> int:
 
     def one_turn(text: str, turn_facts=None) -> int:
         nonlocal session
-        command = expand(text)
+        command = expand(text, config["language"])
         if command["kind"] == "unknown":
             print(command["message"], file=sys.stderr)
             return 1
@@ -895,8 +900,9 @@ def cmd_agent(args) -> int:
             if command["command"] == "clear":
                 session = new_session()
                 save()
-                emit_local({"command": "clear", "text": "已开始新会诊（记忆与设置保留）。",
-                            "data": {}})
+                emit_local({"command": "clear", "data": {},
+                            "text": "Started a new consult (memory and settings kept)." if en
+                            else "已开始新会诊（记忆与设置保留）。"})
                 return 0
             try:
                 emit_local(session.local_command(command["command"], command["arg"]))
@@ -919,21 +925,31 @@ def cmd_agent(args) -> int:
             print(result.reply)
             review = result.review
             if review["findings"]:
-                print("\n— hooks 复核意见（参考，非硬约束）：")
+                print("\n— Hooks review (advisory, not hard constraints):" if en
+                      else "\n— hooks 复核意见（参考，非硬约束）：")
                 answers = {r.get("rule_id"): r for r in review["responses"]}
                 for f in review["findings"]:
                     a = answers.get(f["rule_id"])
-                    verdict = (f"{a.get('decision')}：{a.get('reason', '')}"
-                               if a else "未回应")
+                    verdict = (f"{a.get('decision')}{': ' if en else '：'}{a.get('reason', '')}"
+                               if a else ("unanswered" if en else "未回应"))
                     print(f"  [{f['severity']}] {f['rule_id']} — {verdict}")
             ctx = result.context
-            print(f"\n· {result.llm_calls} 次模型调用"
-                  + (f"（专科：{'、'.join(result.specialists)}）" if result.specialists else "")
-                  + f" · {result.duration_s:.1f}s · 上下文 {ctx.get('ratio', 0):.0%}"
-                  + (" · 已停止" if result.stop == "cancelled" else ""), file=sys.stderr)
-            if result.memory and not _save_memory(result.memory):
-                print("· 智能体提议记住：" + "；".join(result.memory)
-                      + "（交互模式下可确认写入 ./NSCLC.md）", file=sys.stderr)
+            if en:
+                print(f"\n· {result.llm_calls} model calls"
+                      + (f" (specialists: {', '.join(result.specialists)})"
+                         if result.specialists else "")
+                      + f" · {result.duration_s:.1f}s · context {ctx.get('ratio', 0):.0%}"
+                      + (" · stopped" if result.stop == "cancelled" else ""), file=sys.stderr)
+            else:
+                print(f"\n· {result.llm_calls} 次模型调用"
+                      + (f"（专科：{'、'.join(result.specialists)}）" if result.specialists else "")
+                      + f" · {result.duration_s:.1f}s · 上下文 {ctx.get('ratio', 0):.0%}"
+                      + (" · 已停止" if result.stop == "cancelled" else ""), file=sys.stderr)
+            if result.memory and not _save_memory(result.memory, en=en):
+                print(("· The agent proposes to remember: " + "; ".join(result.memory)
+                       + " (confirm in interactive mode to write ./NSCLC.md)") if en else
+                      ("· 智能体提议记住：" + "；".join(result.memory)
+                       + "（交互模式下可确认写入 ./NSCLC.md）"), file=sys.stderr)
             elif result.memory:
                 session.configure({"instructions": load_instructions()})
         return 1 if result.error else 0
@@ -943,12 +959,14 @@ def cmd_agent(args) -> int:
         for i, text in enumerate(args.message):
             rc = max(rc, one_turn(text, facts if i == 0 else None))
         return rc
-    print("NSCLC-Agent 模型主导会诊（IMPF-AI）。输入病例或问题；/help 查看命令，"
+    print("NSCLC-Agent agent-led consult (IMPF-AI). Describe the case or ask; /help lists "
+          "commands, Ctrl-C stops the current turn, an empty line or /exit quits." if en else
+          "NSCLC-Agent 模型主导会诊（IMPF-AI）。输入病例或问题；/help 查看命令，"
           "Ctrl-C 停止当前轮，空行或 /exit 退出。", file=sys.stderr)
     first = True
     while True:
         try:
-            text = input("你> ").strip()
+            text = input("you> " if en else "你> ").strip()
         except (EOFError, KeyboardInterrupt):
             print(file=sys.stderr)
             break
@@ -1200,6 +1218,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="disable a hook (emergency_screen, rule_review, …)")
     p.add_argument("--no-memory", action="store_true",
                    help="do not load NSCLC.md instructions")
+    p.add_argument("--lang", choices=["zh", "en"],
+                   help="language the agent writes in (default zh)")
     p.add_argument("--mcp", action="append", metavar="[NAME=]URL",
                    help="MCP server (Streamable HTTP); repeatable")
     p.set_defaults(func=cmd_agent)

@@ -39,10 +39,16 @@ class Hook:
     description: str
     fn: Callable[[dict[str, Any]], HookResult | None]
     default: bool = True
+    title_en: str = ""
+    description_en: str = ""
 
-    def to_dict(self, enabled: bool) -> dict[str, Any]:
-        return {"name": self.name, "event": self.event, "title": self.title,
-                "description": self.description, "enabled": enabled}
+    def to_dict(self, enabled: bool, lang: str = "zh") -> dict[str, Any]:
+        en = lang == "en"
+        return {"name": self.name, "event": self.event,
+                "title": (self.title_en or self.title) if en else self.title,
+                "description": (self.description_en or self.description) if en
+                else self.description,
+                "enabled": enabled}
 
 
 class HookRunner:
@@ -66,8 +72,21 @@ class HookRunner:
                 out.append((hook, result))
         return out
 
-    def describe(self) -> list[dict[str, Any]]:
-        return [h.to_dict(self.enabled[h.name]) for h in self.hooks]
+    def describe(self, lang: str = "zh") -> list[dict[str, Any]]:
+        return [h.to_dict(self.enabled[h.name], lang) for h in self.hooks]
+
+
+def english(text: Any) -> str:
+    """The English half of a bilingual kernel string ("大咯血 / massive
+    hemoptysis", "急诊：…；ED now: …"); the text itself otherwise."""
+    text = str(text)
+    if " / " in text:
+        return text.split(" / ", 1)[1].strip()
+    if "；" in text:
+        tail = text.rsplit("；", 1)[1].strip()
+        if tail and tail.isascii():
+            return tail
+    return text
 
 
 # --------------------------------------------------------------- built-ins
@@ -81,11 +100,16 @@ def _emergency_screen(ctx: dict[str, Any]) -> HookResult | None:
     emergency = {"signals": [h["label"] for h in screen.hard_hits],
                  "pathway": emergencies.action_plan(screen)}
     ctx["state"]["emergency"] = emergency
-    return HookResult(
-        context="【急症筛查 hook】命中：" + "、".join(emergency["signals"])
-                + "。标准处置路径：" + "；".join(emergency["pathway"].get("immediate_actions") or [])
-                + "（供你判断；急症优先）",
-        alert=emergency)
+    actions = emergency["pathway"].get("immediate_actions") or []
+    if ctx.get("lang") == "en":
+        context = ("[Emergency-screen hook] Hit: "
+                   + ", ".join(english(s) for s in emergency["signals"])
+                   + ". Standard pathway: " + " ".join(english(a) for a in actions)
+                   + " (for your judgement; emergencies come first)")
+    else:
+        context = ("【急症筛查 hook】命中：" + "、".join(emergency["signals"])
+                   + "。标准处置路径：" + "；".join(actions) + "（供你判断；急症优先）")
+    return HookResult(context=context, alert=emergency)
 
 
 def _fact_seed(ctx: dict[str, Any]) -> HookResult | None:
@@ -101,6 +125,10 @@ def _fact_seed(ctx: dict[str, Any]) -> HookResult | None:
     changed, _ = merge_facts(ctx["facts"], cleaned, overwrite=False)
     if not changed:
         return None
+    if ctx.get("lang") == "en":
+        return HookResult(context="[Case-notes hook] Pre-filled from this message: "
+                                  + ", ".join(changed)
+                                  + " (correct with record_case_facts if wrong)")
     return HookResult(context="【病例笔记 hook】已从本条消息预填："
                               + "、".join(changed) + "（如有误请用 record_case_facts 修正）")
 
@@ -141,7 +169,7 @@ def _rule_review(ctx: dict[str, Any]) -> HookResult | None:
 
 
 def _stage_consistency(ctx: dict[str, Any]) -> HookResult | None:
-    finding = ctx["toolbox"].stage_finding(ctx["consult"])
+    finding = ctx["toolbox"].stage_finding(ctx["consult"], lang=ctx.get("lang", "zh"))
     return HookResult(findings=[finding]) if finding else None
 
 
@@ -168,11 +196,15 @@ def _citation_provenance(ctx: dict[str, Any]) -> HookResult | None:
             unresolved.append(str(ref))
     if not unresolved:
         return None
-    return HookResult(findings=[{
-        "rule_id": "UNVERIFIED_CITATION", "severity": "warn",
-        "message": "以下引用既未出现在本次工具结果中，也无法在试验注册表/指南知识库中找到："
-                   + "、".join(sorted(set(unresolved)))
-                   + "——请用 search_trials / citation_verify 核实，或删除。"}])
+    refs = sorted(set(unresolved))
+    message = ("These references were neither returned by a tool in this consult nor "
+               "found in the trial registry or guideline KB: " + ", ".join(refs)
+               + " — verify them with search_trials / citation_verify, or remove them."
+               if ctx.get("lang") == "en" else
+               "以下引用既未出现在本次工具结果中，也无法在试验注册表/指南知识库中找到："
+               + "、".join(refs) + "——请用 search_trials / citation_verify 核实，或删除。")
+    return HookResult(findings=[{"rule_id": "UNVERIFIED_CITATION", "severity": "warn",
+                                 "message": message}])
 
 
 def _dose_provenance(ctx: dict[str, Any]) -> HookResult | None:
@@ -185,15 +217,21 @@ def _dose_provenance(ctx: dict[str, Any]) -> HookResult | None:
     if not dose_in_payload(text):
         return None
     findings = []
+    en = ctx.get("lang") == "en"
     if not ctx["state"]["dosing_seen"]:
         findings.append({
             "rule_id": "DOSE_NOT_FROM_LIBRARY", "severity": "warn",
-            "message": "回答含剂量数值，但本次会诊未调用 regimen_dosing 核对方案库参考剂量；"
+            "message": "The answer contains dose figures, but regimen_dosing was not called "
+                       "in this consult to check the library reference dose; verify or "
+                       "remove the specific doses." if en else
+                       "回答含剂量数值，但本次会诊未调用 regimen_dosing 核对方案库参考剂量；"
                        "请核对或删除具体剂量。"})
     if ctx.get("role") == "patient":
         findings.append({
             "rule_id": "DOSE_TO_PATIENT", "severity": "warn",
-            "message": "面向患者的回答含具体剂量；建议改为“具体剂量由主治团队确定”。"})
+            "message": "A patient-facing answer contains specific doses; say instead that "
+                       "the treating team will set the exact dose." if en else
+                       "面向患者的回答含具体剂量；建议改为“具体剂量由主治团队确定”。"})
     return HookResult(findings=findings) if findings else None
 
 
@@ -208,33 +246,58 @@ def _emergency_addressed(ctx: dict[str, Any]) -> HookResult | None:
     reply = str(consult.get("reply") or "").lower()
     if consult.get("intent") == "emergency" or any(w in reply for w in _EMERGENCY_WORDS):
         return None
-    return HookResult(findings=[{
-        "rule_id": "EMERGENCY_NOT_ADDRESSED", "severity": "block",
-        "message": "急症筛查命中（" + "、".join(emergency["signals"])
-                   + "），但结论没有优先处理急症。"}])
+    message = ("The emergency screen fired (" + ", ".join(english(s) for s in emergency["signals"])
+               + ") but the conclusion does not put the emergency first."
+               if ctx.get("lang") == "en" else
+               "急症筛查命中（" + "、".join(emergency["signals"]) + "），但结论没有优先处理急症。")
+    return HookResult(findings=[{"rule_id": "EMERGENCY_NOT_ADDRESSED", "severity": "block",
+                                 "message": message}])
 
 
 def builtin_hooks() -> list[Hook]:
     return [
         Hook("emergency_screen", "user_prompt_submit", "急症筛查",
              "每条消息做子句级、否定感知的肿瘤急症筛查；命中时把标准处置路径放到模型面前，并提示医生。",
-             _emergency_screen),
+             _emergency_screen, title_en="Emergency screen",
+             description_en="Clause-scoped, negation-aware oncologic-emergency screen on every "
+                            "message; a hit puts the standard pathway in front of the model "
+                            "and alerts the clinician."),
         Hook("fact_seed", "user_prompt_submit", "病例笔记预填",
              "从消息中确定性地提取明确事实（TNM、年龄、ECOG、驱动基因…）预填病例笔记，模型可修正。",
-             _fact_seed),
+             _fact_seed, title_en="Case-note seeding",
+             description_en="Deterministically extracts unambiguous facts (TNM, age, ECOG, "
+                            "drivers…) from the message into the case notes; the model can "
+                            "correct them."),
         Hook("evidence_ledger", "post_tool_use", "证据台账",
              "记录工具实际返回过的试验/指南/文献编号与方案库剂量查询，供引用与剂量溯源检查。",
-             _evidence_ledger),
+             _evidence_ledger, title_en="Evidence ledger",
+             description_en="Records every trial / guideline / literature id a tool actually "
+                            "returned and every regimen-dose lookup, for the provenance checks."),
         Hook("rule_review", "stop", "规则引擎复核",
              "20 条确定性安全规则复核方案（驱动基因一线、N3 手术、适应证、器官功能、剂量…）。",
-             _rule_review),
+             _rule_review, title_en="Rule-engine review",
+             description_en="The 20 deterministic safety rules review the plan (driver-directed "
+                            "first line, no surgery for N3, indications, organ function, "
+                            "doses…)."),
         Hook("stage_consistency", "stop", "分期一致性",
-             "模型给出的分期与 AJCC/UICC 第 9 版分期引擎不一致时提示。", _stage_consistency),
+             "模型给出的分期与 AJCC/UICC 第 9 版分期引擎不一致时提示。", _stage_consistency,
+             title_en="Stage consistency",
+             description_en="Flags a stage that differs from the AJCC/UICC 9th-edition "
+                            "staging engine."),
         Hook("citation_provenance", "stop", "引用溯源",
              "方案引用的试验/指南既未经工具返回、也无法在本地注册表或知识库找到时提示（防幻觉引用）。",
-             _citation_provenance),
+             _citation_provenance, title_en="Citation provenance",
+             description_en="Flags cited trials / guideline items that no tool returned and no "
+                            "local registry or knowledge base can resolve (hallucinated "
+                            "citations)."),
         Hook("dose_provenance", "stop", "剂量溯源",
-             "回答含剂量数值但未查方案库，或面向患者给出剂量时提示。", _dose_provenance),
+             "回答含剂量数值但未查方案库，或面向患者给出剂量时提示。", _dose_provenance,
+             title_en="Dose provenance",
+             description_en="Flags dose figures given without a regimen-library lookup, or "
+                            "doses addressed to a patient."),
         Hook("emergency_addressed", "stop", "急症优先",
-             "急症筛查命中而结论未优先处理急症时提示（高优先级）。", _emergency_addressed),
+             "急症筛查命中而结论未优先处理急症时提示（高优先级）。", _emergency_addressed,
+             title_en="Emergency first",
+             description_en="Flags a conclusion that does not put a screened emergency first "
+                            "(high priority)."),
     ]

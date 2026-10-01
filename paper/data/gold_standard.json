@@ -1,0 +1,145 @@
+{
+ "metrics": {
+  "Staging accuracy": {
+   "k": 40,
+   "n": 40,
+   "p": 1.0,
+   "lo": 0.9119026971211983,
+   "hi": 1.0
+  },
+  "Routing accuracy": {
+   "k": 11,
+   "n": 11,
+   "p": 1.0,
+   "lo": 0.7150858470818462,
+   "hi": 1.0
+  },
+  "Regimen accuracy": {
+   "k": 35,
+   "n": 35,
+   "p": 1.0,
+   "lo": 0.8999675644278953,
+   "hi": 1.0
+  },
+  "Safety-clean rate": {
+   "k": 42,
+   "n": 42,
+   "p": 1.0,
+   "lo": 0.9159161450596449,
+   "hi": 1.0
+  },
+  "Unsafe-release rate": {
+   "k": 0,
+   "n": 35,
+   "p": 0.0,
+   "lo": 0.0,
+   "hi": 0.10003243557210467
+  }
+ },
+ "kinds": {
+  "pipeline": 42,
+  "audit": 28
+ },
+ "releases": {
+  "treatment_recommendation": 35,
+  "needs_more_information": 5,
+  "needs_staging_workup": 1,
+  "emergency_action_plan": 1
+ },
+ "passed": 70,
+ "total": 70,
+ "error_taxonomy": {
+  "major_harmful": 0,
+  "unsafe_release": 0,
+  "overblocking": 0,
+  "false_alarm": 0,
+  "omission": 0,
+  "missing_workup": 0,
+  "incorrect_release": 0,
+  "staging_error": 0,
+  "routing_error": 0
+ },
+ "unsafe_release_breakdown": {
+  "audit_probes": "0/28",
+  "withholding_pipeline_cases": "0/7"
+ },
+ "audit_violations": [
+  {
+   "rule_id": "CNS_TNM_INCONSISTENT",
+   "severity": "warn",
+   "count": 1
+  },
+  {
+   "rule_id": "CNS_UNTREATED_SYMPTOMATIC",
+   "severity": "block",
+   "count": 2
+  },
+  {
+   "rule_id": "CONSOLIDATION_WITHOUT_CRT",
+   "severity": "block",
+   "count": 1
+  },
+  {
+   "rule_id": "DRIVER_FIRST_LINE",
+   "severity": "block",
+   "count": 2
+  },
+  {
+   "rule_id": "EGFR_III_CONSOLIDATION",
+   "severity": "block",
+   "count": 1
+  },
+  {
+   "rule_id": "EGFR_VARIANT_MISMATCH",
+   "severity": "block",
+   "count": 2
+  },
+  {
+   "rule_id": "INDICATION_PREDICATE",
+   "severity": "block",
+   "count": 11
+  },
+  {
+   "rule_id": "INDICATION_UNDECLARED",
+   "severity": "block",
+   "count": 1
+  },
+  {
+   "rule_id": "N3_NO_SURGERY",
+   "severity": "block",
+   "count": 2
+  },
+  {
+   "rule_id": "NO_CONCURRENT_DURVALUMAB",
+   "severity": "block",
+   "count": 1
+  },
+  {
+   "rule_id": "OPTION_DRUG_UNBOUND",
+   "severity": "block",
+   "count": 2
+  },
+  {
+   "rule_id": "ORGAN_FUNCTION_GATE",
+   "severity": "block",
+   "count": 3
+  },
+  {
+   "rule_id": "PROGRESSION_SAME_DRUG",
+   "severity": "warn",
+   "count": 3
+  },
+  {
+   "rule_id": "TRIAL_STAGE_BOUNDARY",
+   "severity": "block",
+   "count": 2
+  }
+ ],
+ "adjudication": {
+  "cases": 70,
+  "dual_adjudicated": 0,
+  "dual_agreements": 0,
+  "disagreements": [],
+  "unadjudicated": 70
+ }
+}

@@ -108,6 +108,28 @@ def test_consolidation_after_crt_clean():
     assert "NO_CONCURRENT_DURVALUMAB" not in _blocks(IIIB, DRIVER_NEG, plan)
 
 
+@pytest.mark.parametrize("phrase", [
+    "Definitive concurrent chemoradiation, then durvalumab consolidation",
+    "concurrent chemoradiation followed by durvalumab for 12 months",
+    "同步放化疗，随后度伐利尤单抗巩固",
+    "durvalumab after concurrent chemoradiation, within 42 days",
+])
+def test_durvalumab_sequenced_after_concurrent_crt_clean(phrase):
+    plan = {"summary": phrase, "regimen_ids": [], "options": []}
+    assert "NO_CONCURRENT_DURVALUMAB" not in _blocks(IIIB, DRIVER_NEG, plan)
+
+
+@pytest.mark.parametrize("phrase", [
+    "durvalumab concurrent with chemoradiation, then observation",
+    "durvalumab with concurrent chemoradiation",
+    "durvalumab started after 2 weeks of concurrent chemoradiation, alongside the remaining RT",
+    "concurrent chemoradiation, then durvalumab during the radiotherapy boost",
+])
+def test_concurrent_durvalumab_still_blocked_around_sequence_words(phrase):
+    plan = {"summary": phrase, "regimen_ids": [], "options": []}
+    assert "NO_CONCURRENT_DURVALUMAB" in _blocks(IIIB, DRIVER_NEG, plan)
+
+
 # ------------------------------------------------------- RT dose arithmetic
 
 def test_rt_total_in_fractions_is_not_multiplied():

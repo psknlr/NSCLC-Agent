@@ -272,6 +272,18 @@ LABELS = {
     "governed_reference": "受治理流水线参考", "read_attachment": "读片 / 读报告",
     "citation_verify": "引用核验", "pubmed_search": "PubMed 检索",
 }
+LABELS_EN = {
+    "record_case_facts": "Update case notes", "stage_tnm": "Staging engine",
+    "screen_emergency": "Emergency screen", "assess_biomarkers": "Driver-report parser",
+    "search_trials": "Trial registry search", "search_regimens": "Regimen library search",
+    "regimen_dosing": "Library reference dose", "check_indication": "Indication check",
+    "check_organ_function": "Organ-function check", "cns_assessment": "CNS stratification",
+    "later_line_options": "Later-line sequencing", "protocol_sections": "Clinical pathway sections",
+    "guideline_search": "Guideline KB", "prognosis": "Prognosis (cohort)",
+    "interaction_check": "Drug interactions", "rule_review": "Rule-engine review",
+    "governed_reference": "Governed-pipeline reference", "read_attachment": "Read image / report",
+    "citation_verify": "Citation check", "pubmed_search": "PubMed search",
+}
 #: Tools that change session state run in call order.
 _STATEFUL = frozenset({"record_case_facts"})
 
@@ -333,7 +345,7 @@ class AgentToolbox:
     def specs() -> list[ToolSpec]:
         return list(TOOL_SPECS)
 
-    def as_tools(self, *, read_only: bool = False) -> list[Any]:
+    def as_tools(self, *, read_only: bool = False, lang: str = "zh") -> list[Any]:
         """The clinical tools as runtime ``Tool`` objects (``read_only``
         drops the case-note writer — specialists read, the lead writes)."""
         from .tools import Tool
@@ -345,7 +357,7 @@ class AgentToolbox:
             out.append(Tool(spec.name, spec.description, spec.parameters,
                             handler=self._impl[spec.name], category="clinical",
                             parallel_safe=spec.name not in _STATEFUL,
-                            label=LABELS.get(spec.name, spec.name)))
+                            label=(LABELS_EN if lang == "en" else LABELS).get(spec.name, spec.name)))
         return out
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -586,13 +598,18 @@ class AgentToolbox:
         stage = self.stage_finding(consult)
         return findings + ([stage] if stage else [])
 
-    def stage_finding(self, consult: dict[str, Any]) -> dict[str, Any] | None:
+    def stage_finding(self, consult: dict[str, Any],
+                      lang: str = "zh") -> dict[str, Any] | None:
         engine = self.engine_stage() or {}
         if engine.get("staged") and consult.get("stage_group") and \
                 str(consult["stage_group"]).upper() != str(engine["stage_group"]).upper():
+            message = (f"The model staged this as {consult['stage_group']}; the AJCC/UICC "
+                       f"9th-edition staging engine reads {engine.get('tnm')} as "
+                       f"{engine['stage_group']}" if lang == "en" else
+                       f"模型分期为 {consult['stage_group']}；AJCC/UICC 第 9 版分期引擎"
+                       f"将 {engine.get('tnm')} 判为 {engine['stage_group']}")
             return {"rule_id": "STAGE_DIFFERS_FROM_ENGINE", "severity": "warn",
-                    "message": f"模型分期为 {consult['stage_group']}；AJCC/UICC 第 9 版分期引擎"
-                               f"将 {engine.get('tnm')} 判为 {engine['stage_group']}"}
+                    "message": message}
         return None
 
     def rule_findings(self, consult: dict[str, Any]) -> list[dict[str, Any]]:

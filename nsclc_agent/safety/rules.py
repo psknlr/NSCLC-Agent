@@ -139,6 +139,19 @@ _RADIATION_RE = re.compile(
     r"radiation|radiotherapy|chemoradi|\bc?crt\b|\brt\b|放疗|放化疗", re.IGNORECASE,
 )
 _CLAUSE_RE = re.compile(r"[^.。;；\n]+")
+#: Sequence words split a clause into steps: "concurrent chemoradiation,
+#: then durvalumab" gives durvalumab AFTER the concurrent step, not with it.
+_SEQUENCE_RE = re.compile(
+    r"\bthen\b|followed by|thereafter|subsequently|\bafter\b|随后|之后|然后|序贯",
+    re.IGNORECASE,
+)
+#: "Concurrent chemoradiation" is the name of a treatment (cCRT), not a
+#: statement that durvalumab is concurrent with it.
+_CCRT_NAME_RE = re.compile(
+    r"concurrent\s+(?:chemo-?radi\w*|radio-?chemo\w*|crt\b|chemotherapy\s+and\s+radi\w*)"
+    r"|同步放化疗|同期放化疗",
+    re.IGNORECASE,
+)
 
 
 def _string_leaves(value: Any) -> list[str]:
@@ -423,11 +436,21 @@ def _rule_egfr_iii_consolidation(ctx: PlanContext) -> list[Violation]:
     return []
 
 
+def _concurrent_durvalumab(text: str) -> bool:
+    return bool(_DURVA_RE.search(text) and _CONCURRENCY_RE.search(text)
+                and _RADIATION_RE.search(text))
+
+
 def _rule_no_concurrent_durvalumab(ctx: PlanContext) -> list[Violation]:
+    # A clause fires when any one step of it (split at sequence words) puts
+    # durvalumab with radiation, OR when it still does once "concurrent
+    # chemoradiation" is read as a treatment name — so "cCRT, then
+    # durvalumab" is clean while "durvalumab … alongside the remaining RT"
+    # still fires whatever sequence words surround it.
     for leaf in _string_leaves(ctx.plan):
         for clause in _CLAUSE_RE.findall(leaf):
-            if not (_DURVA_RE.search(clause) and _CONCURRENCY_RE.search(clause)
-                    and _RADIATION_RE.search(clause)):
+            if not (any(_concurrent_durvalumab(step) for step in _SEQUENCE_RE.split(clause))
+                    or _concurrent_durvalumab(_CCRT_NAME_RE.sub("cCRT", clause))):
                 continue
             return [Violation(
                 "NO_CONCURRENT_DURVALUMAB", "block",

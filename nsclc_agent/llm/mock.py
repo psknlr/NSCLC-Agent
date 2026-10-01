@@ -237,6 +237,14 @@ class MockLLMClient:
             tool_calls=[ToolCall(name, args, id=f"mock_{self._seq}_{i}")
                         for i, (name, args) in enumerate(calls)])
 
+    @staticmethod
+    def _english(messages: list[dict[str, Any]]) -> bool:
+        """The runtime appends an "Output language" section to the system
+        prompt when the clinician works in English."""
+        system = next((m.get("content") or "" for m in messages
+                       if m.get("role") == "system"), "")
+        return "## Output language" in str(system)
+
     def _agent(self, messages: list[dict[str, Any]], tool_names: set[str]) -> LLMResponse:
         """Scripted lead agent. It exercises the real runtime — plan,
         parallel evidence calls, specialist delegation (when an MDT is
@@ -245,13 +253,22 @@ class MockLLMClient:
         user, seen, called = self._current_turn(messages)
         # Only an explicit request convenes the MDT ("请 MDT", "/mdt"), not
         # a case that merely mentions one ("MDT判定不可切除").
+        en = self._english(messages)
         mdt = "delegate" in tool_names and (
-            "delegate" in user or re.search(r"请\s*(召集)?\s*(MDT|多学科)", user) is not None)
+            "delegate" in user or re.search(r"请\s*(召集)?\s*(MDT|多学科)", user) is not None
+            or re.search(r"\b(please\s+(convene\s+)?(an?\s+)?MDT|convene)\b", user, re.I) is not None)
         planning = "update_plan" in tool_names
-        steps = ["理解病例并核对分期", "参考受治理流水线意见"]
-        if mdt:
-            steps.append("多学科会诊：影像科、肿瘤内科")
-        steps.append("综合并提交结论")
+        if en:
+            steps = ["Understand the case and check the stage",
+                     "Consult the governed-pipeline reference"]
+            if mdt:
+                steps.append("MDT: radiology and medical oncology")
+            steps.append("Integrate and submit the conclusion")
+        else:
+            steps = ["理解病例并核对分期", "参考受治理流水线意见"]
+            if mdt:
+                steps.append("多学科会诊：影像科、肿瘤内科")
+            steps.append("综合并提交结论")
 
         def plan(done: int) -> dict[str, Any]:
             return {"items": [{"content": c, "status": "completed" if i < done else
@@ -260,30 +277,41 @@ class MockLLMClient:
 
         if planning and "update_plan" not in called:
             calls = [("update_plan", plan(0))]
-            if "remember" in tool_names and "记住" in user:
-                said = user.split("\n\n", 1)[0]
-                note = said.split("记住", 1)[1].strip(" ：:，,。")[:120] if "记住" in said else ""
+            said = user.split("\n\n", 1)[0]
+            marker = next((m for m in ("记住", "remember:", "Remember:", "remember")
+                           if m in said), None)
+            if "remember" in tool_names and marker:
+                note = said.split(marker, 1)[1].strip(" ：:，,。.")[:120]
                 if note:
                     calls.append(("remember", {"note": note, "scope": "preference"}))
-            return self._calls("先制定会诊计划。", *calls)
+            return self._calls("Planning the consult first." if en else "先制定会诊计划。",
+                               *calls)
         if "governed_reference" not in seen:
             calls = [("governed_reference", {})]
             if mdt:
-                calls += [("delegate", {"agent": "radiology",
-                                        "task": "核对分期描述符与需要补做的影像检查"}),
-                          ("delegate", {"agent": "medical_oncology",
-                                        "task": "评估全身治疗选择与驱动基因的影响"})]
-            return self._calls("并行调取参考意见" + ("并邀请专科会诊。" if mdt else "。"),
-                               *calls)
+                calls += [("delegate", {"agent": "radiology", "task":
+                                        "Check the staging descriptors and the imaging still "
+                                        "needed" if en else "核对分期描述符与需要补做的影像检查"}),
+                          ("delegate", {"agent": "medical_oncology", "task":
+                                        "Assess systemic options and the impact of the driver "
+                                        "status" if en else "评估全身治疗选择与驱动基因的影响"})]
+            text = (("Fetching the reference opinion" + (" and consulting specialists in "
+                                                          "parallel." if mdt else "."))
+                    if en else "并行调取参考意见" + ("并邀请专科会诊。" if mdt else "。"))
+            return self._calls(text, *calls)
         reference = (seen["governed_reference"] or {}).get("data") or {}
-        consult = self._mock_consult(reference)
+        consult = self._mock_consult(reference, en=en)
         if mdt:
-            consult["reply"] += "\n\n**专科意见**：已请影像科与肿瘤内科子智能体评估（离线 Mock 意见，见会诊轨迹）。"
+            consult["reply"] += ("\n\n**Specialists**: radiology and medical oncology "
+                                 "sub-agents were consulted (offline mock opinions; see the "
+                                 "trace)." if en else
+                                 "\n\n**专科意见**：已请影像科与肿瘤内科子智能体评估（离线 Mock 意见，见会诊轨迹）。")
         review = seen.get("submit_consult") or {}
         if review.get("status") == "review":
             consult["rule_responses"] = [
                 {"rule_id": f.get("rule_id", ""), "decision": "accepted",
-                 "reason": "离线 Mock：直接采纳 hooks 的复核意见"}
+                 "reason": "Offline mock: accepts the hooks' review as given" if en
+                 else "离线 Mock：直接采纳 hooks 的复核意见"}
                 for f in review.get("findings") or []]
         calls = []
         if planning and "submit_consult" not in seen:
@@ -295,27 +323,43 @@ class MockLLMClient:
         """Scripted MDT specialist: one real tool call, then a report that
         says it is a mock."""
         _user, seen, _called = self._current_turn(messages)
+        en = self._english(messages)
         system = next((m.get("content") or "" for m in messages
                        if m.get("role") == "system"), "")
         title = "专科医师"
         if "中的" in system:
             title = system.split("中的", 1)[1].split("。", 1)[0]
+        if en:
+            from ..i18n import translate
+
+            title = translate(title)
         preferred = [t for t in ("cns_assessment", "assess_biomarkers", "prognosis",
                                  "guideline_search") if t in tool_names]
         if preferred and not seen:
-            return self._calls(f"{title}：先核对相关信息。", (preferred[0], {}))
+            return self._calls(f"{title}: checking the relevant facts first." if en
+                               else f"{title}：先核对相关信息。", (preferred[0], {}))
         observed = next(iter(seen.values()), {}) if seen else {}
         summary = str((observed or {}).get("summary") or "")
+        if en:
+            report = {"report": f"Offline mock {title} opinion: no real specialist reasoning "
+                                "took place." + (f" Tool result: {summary}" if summary else ""),
+                      "recommendations": ["Connect a real model for substantive specialist "
+                                          "opinions"],
+                      "concerns": ["Offline mock: no real clinical reasoning"]}
+        else:
+            report = {"report": f"离线 Mock {title}意见：没有进行真实的专科推理。"
+                                + (f"工具结果：{summary}" if summary else ""),
+                      "recommendations": ["接入真实模型后由专科子智能体给出实质意见"],
+                      "concerns": ["离线 Mock：未做真实临床推理"]}
         return self._calls("", ("submit_report", {
-            "report": f"离线 Mock {title}意见：没有进行真实的专科推理。"
-                      + (f"工具结果：{summary}" if summary else ""),
-            "key_points": [summary] if summary else [],
-            "recommendations": ["接入真实模型后由专科子智能体给出实质意见"],
-            "concerns": ["离线 Mock：未做真实临床推理"],
-            "confidence": "low"}))
+            **report, "key_points": [summary] if summary else [], "confidence": "low"}))
 
     @staticmethod
-    def _mock_consult(reference: dict[str, Any]) -> dict[str, Any]:
+    def _mock_consult(reference: dict[str, Any], en: bool = False) -> dict[str, Any]:
+        if en:
+            from ..i18n import localize
+
+            return MockLLMClient._mock_consult_en(localize(reference))
         plan = reference.get("plan") or {}
         staging = reference.get("staging") or {}
         stage = staging.get("stage_group")
@@ -349,6 +393,47 @@ class MockLLMClient:
             "workup": list(plan.get("workup_needed") or []),
             "questions": questions,
             "warnings": ["离线 Mock：未做真实临床推理"],
+            "confidence": "low",
+        }
+
+    @staticmethod
+    def _mock_consult_en(reference: dict[str, Any]) -> dict[str, Any]:
+        """English twin of ``_mock_consult`` (deterministic strings already
+        localised through the shared dictionary)."""
+        plan = reference.get("plan") or {}
+        staging = reference.get("staging") or {}
+        stage = staging.get("stage_group")
+        options = [{"name": o.get("name") or "", "rationale": o.get("rationale") or "",
+                    "regimen_ids": list(o.get("regimen_ids") or []),
+                    "evidence": list(plan.get("trial_refs") or []) if i == 0 else [],
+                    "preferred": i == 0}
+                   for i, o in enumerate(plan.get("options") or [])]
+        lines = ["> Offline mock agent: no real model reasoning took place. It relays the "
+                 "governed pipeline's reference opinion to demonstrate tool calls and the "
+                 "hooks review. With a real model connected, the model leads the consult.",
+                 "", f"**Stage**: {stage or 'not staged'}"]
+        emergency = reference.get("emergency_plan")
+        if emergency:
+            lines += ["", "**Emergency actions**:"] + [
+                f"- {a}" for a in emergency.get("immediate_actions") or []]
+        if plan.get("summary"):
+            lines += ["", str(plan["summary"])]
+        if options:
+            lines += ["", "**Reference options**:"] + [
+                f"{i + 1}. {o['name']}" + (f" — {o['rationale']}" if o["rationale"] else "")
+                for i, o in enumerate(options)]
+        questions = list(reference.get("open_questions") or [])
+        if questions:
+            lines += ["", "**Still needed**:"] + [f"- {q}" for q in questions]
+        return {
+            "reply": "\n".join(lines),
+            "assessment": str(plan.get("summary") or ""),
+            "stage_group": stage, "tnm": staging.get("tnm"),
+            "intent": "emergency" if emergency else (plan.get("intent") or "undetermined"),
+            "options": options,
+            "workup": list(plan.get("workup_needed") or []),
+            "questions": questions,
+            "warnings": ["Offline mock: no real clinical reasoning"],
             "confidence": "low",
         }
 
