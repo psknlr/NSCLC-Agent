@@ -72,6 +72,7 @@ const ICONS = {
   moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>',
+  chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"/>',
 };
 function icon(name, cls) {
   return h("span", { class: cls || "", style: { display: "inline-flex" },
@@ -137,6 +138,9 @@ const STATUS = {
   blocked: ["bad", "安全拦截", "终审发现阻断级违规，方案不得交付", "x"],
   failed_closed: ["bad", "故障关闭", "运行异常，按安全默认关闭", "x"],
   emergency_action_plan: ["emergency", "肿瘤急症", "急症短路：固定安全处置脚本，永不经模型改写", "siren"],
+  agent_done: ["accent", "模型结论", "模型主导会诊 · 规则引擎复核仅供参考", "sparkle"],
+  agent_emergency: ["emergency", "急症提示", "急症筛查命中 · 模型已优先处理", "siren"],
+  agent_error: ["bad", "运行失败", "模型调用失败，可重试", "x"],
 };
 const statusMeta = (s) => STATUS[s] || ["neutral", s || "—", "", "info"];
 function statusPill(status) {
@@ -165,6 +169,7 @@ const Bridge = {
     if (msg.type === "progress") return Boot.step(msg.stage);
     if (msg.type === "ready") return Boot.done(msg.info, msg.build);
     if (msg.type === "fatal") return Boot.fatal(msg.error);
+    if (msg.type === "event") return Workspace.onEvent(msg.data);
     if (msg.type === "result") {
       const resolve = this.pending.get(msg.id);
       this.pending.delete(msg.id);
@@ -246,7 +251,7 @@ const Cases = {
   get(id) { return this.list.find((c) => c.id === id) || null; },
   current() { return (this.currentId && this.get(this.currentId)) || this.draft || this.newDraft(); },
   newDraft() {
-    this.draft = { id: uid(), title: "", created: Date.now(), updated: Date.now(), role: LS.get("nsclc.pref.role", DEFAULT_ROLE), dose: false, status: null, stage: null, messages: [], session: null };
+    this.draft = { id: uid(), title: "", created: Date.now(), updated: Date.now(), role: LS.get("nsclc.pref.role", DEFAULT_ROLE), dose: false, mode: defaultMode(), status: null, stage: null, messages: [], session: null };
     this.currentId = null;
     return this.draft;
   },
@@ -275,7 +280,10 @@ const Session = {
   boundId: null,
   async bind(c) {
     if (this.boundId === c.id) return;
-    if (c.session) await Bridge.call("chat_import", { data: c.session, role: c.role, allow_dose_planning: !!c.dose });
+    if (c.mode === "agent") {
+      if (c.session) await Bridge.call("agent_import", { data: c.session, role: c.role });
+      else await Bridge.call("agent_new", { role: c.role });
+    } else if (c.session) await Bridge.call("chat_import", { data: c.session, role: c.role, allow_dose_planning: !!c.dose });
     else await Bridge.call("chat_new", { role: c.role, allow_dose_planning: !!c.dose });
     this.boundId = c.id;
   },
@@ -289,7 +297,9 @@ function lastResult(c) {
   }
   return null;
 }
-const caseFacts = (c) => { const m = lastResult(c); return (m && m.payload.session_facts) || {}; };
+const caseFacts = (c) => { const m = lastResult(c); return (m && (m.payload.session_facts || m.payload.facts)) || {}; };
+const isAgent = (p) => !!(p && p.mode === "agent");
+function defaultMode() { return llmOn() && LS.get("nsclc.pref.mode", "agent") !== "governed" ? "agent" : "governed"; }
 
 /* ============================================================ fact display */
 
@@ -682,6 +692,223 @@ function renderTrace(res, onc, opts) {
     (onc.warnings || []).length ? h("div", null, h("h4", null, "告警"), fmtList(onc.warnings)) : null);
 }
 
+/* ============================================================ markdown */
+
+/** Minimal, safe Markdown → DOM (headings, lists, tables, quotes, code,
+ *  bold/italic/inline code). Text only ever lands in text nodes. */
+function inlineMd(text) {
+  const out = [];
+  const re = /(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*\s][^*]*\*)/g;
+  let last = 0; let m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const t = m[0];
+    if (t.startsWith("**") || t.startsWith("__")) out.push(h("strong", null, t.slice(2, -2)));
+    else if (t.startsWith("`")) out.push(h("code", null, t.slice(1, -1)));
+    else out.push(h("em", null, t.slice(1, -1)));
+    last = m.index + t.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+const LIST_RE = /^\s*([-*+•]|\d+[.)、])\s+/;
+function md(text) {
+  const root = h("div", { class: "md" });
+  const lines = friendly(String(text || "")).replace(/\r/g, "").split("\n");
+  const splitRow = (l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed) { i++; continue; }
+    if (/^\[[a-z_]+\]/.test(trimmed)) { i++; continue; }
+    if (trimmed.startsWith("```")) {
+      const buf = []; i++;
+      while (i < lines.length && !lines[i].trim().startsWith("```")) buf.push(lines[i++]);
+      i++; root.appendChild(h("pre", { class: "code-block" }, buf.join("\n"))); continue;
+    }
+    const head = line.match(/^(#{1,4})\s+(.*)$/);
+    if (head) { root.appendChild(h(`h${Math.min(6, head[1].length + 2)}`, null, inlineMd(head[2]))); i++; continue; }
+    if (/^([-*_]\s*){3,}$/.test(trimmed)) { root.appendChild(h("hr")); i++; continue; }
+    if (/^\|.*\|$/.test(trimmed) && i + 1 < lines.length && /^\|?\s*:?-{2,}/.test(lines[i + 1].trim())) {
+      const header = splitRow(line); i += 2;
+      const rows = [];
+      while (i < lines.length && /^\|.*\|$/.test(lines[i].trim())) rows.push(splitRow(lines[i++]));
+      root.appendChild(h("div", { class: "table-wrap md-table" }, h("table", null,
+        h("thead", null, h("tr", null, header.map((c) => h("th", null, inlineMd(c))))),
+        h("tbody", null, rows.map((r) => h("tr", null, r.map((c) => h("td", null, inlineMd(c)))))))));
+      continue;
+    }
+    if (/^\s*>/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ""));
+      root.appendChild(h("blockquote", null, md(buf.join("\n")))); continue;
+    }
+    if (LIST_RE.test(line)) {
+      const ordered = /^\s*\d/.test(line);
+      const list = h(ordered ? "ol" : "ul");
+      while (i < lines.length && LIST_RE.test(lines[i])) {
+        const indent = lines[i].match(/^\s*/)[0].length;
+        const li = h("li", { class: indent >= 2 ? "sub" : null }, inlineMd(lines[i].replace(LIST_RE, "")));
+        list.appendChild(li); i++;
+        while (i < lines.length && lines[i].trim() && !LIST_RE.test(lines[i]) && /^\s{2,}/.test(lines[i])) {
+          li.appendChild(h("br")); append(li, inlineMd(lines[i].trim())); i++;
+        }
+      }
+      root.appendChild(list); continue;
+    }
+    const buf = [];
+    while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|```|\s*>)/.test(lines[i]) && !LIST_RE.test(lines[i])
+      && !(/^\|.*\|$/.test(lines[i].trim()) && i + 1 < lines.length && /^\|?\s*:?-{2,}/.test(lines[i + 1].trim()))) buf.push(lines[i++]);
+    if (!buf.length) buf.push(lines[i++]);
+    const para = h("p", { class: buf[0].trim().startsWith("※") ? "note" : null });
+    buf.forEach((l, k) => { if (k) para.appendChild(h("br")); append(para, inlineMd(l)); });
+    root.appendChild(para);
+  }
+  return root;
+}
+
+/* ======================================================== agent mode UI */
+
+const TOOL_LABEL = {
+  record_case_facts: "更新病例笔记", stage_tnm: "分期引擎", screen_emergency: "急症筛查", assess_biomarkers: "驱动基因解析",
+  search_trials: "检索试验注册表", search_regimens: "检索方案库", regimen_dosing: "方案库参考剂量", check_indication: "适应证核对",
+  check_organ_function: "器官功能核对", cns_assessment: "脑转移分层", later_line_options: "后线序贯", protocol_sections: "临床路径章节",
+  guideline_search: "指南知识库", prognosis: "预后（人群）", interaction_check: "药物相互作用", rule_review: "规则引擎复核",
+  governed_reference: "受治理流水线参考", read_attachment: "读片 / 读报告", citation_verify: "引用核验", pubmed_search: "PubMed 检索",
+  submit_consult: "提交结论",
+};
+const TOOL_ICON = { stage_tnm: "staging", guideline_search: "kg", rule_review: "lab", governed_reference: "lab", screen_emergency: "siren",
+  record_case_facts: "pen", read_attachment: "image", search_trials: "doc", search_regimens: "consult", regimen_dosing: "consult" };
+function argSummary(name, a) {
+  a = a || {};
+  if (name === "stage_tnm") return [a.prefix || "c", a.t, a.n, a.m].filter(Boolean).join(" ");
+  if (name === "record_case_facts") return Object.keys(a.facts || {}).join("、");
+  if (a.regimen_ids) return [].concat(a.regimen_ids).join(", ");
+  if (a.regimen_id) return a.regimen_id;
+  if (a.query || a.stage || a.gene) return [a.query, a.stage, a.gene].filter(Boolean).join(" · ");
+  if (a.medications) return [].concat(a.medications).join("、");
+  if (a.options) return `${a.options.length} 个方案`;
+  if (a.kind) return a.kind;
+  const s = JSON.stringify(a);
+  return s === "{}" ? "" : s.slice(0, 80);
+}
+function stepItem(step, live) {
+  if (step.kind === "thinking") {
+    const text = String(step.text || "");
+    return h("div", { class: "step s-thinking" }, h("span", { class: "si" }, icon("sparkle")),
+      h("div", { class: "sb" }, h("div", { class: "sl" }, "思考"), h("div", { class: "st" }, text.length > 600 && !live ? `${text.slice(0, 600)}…` : text)));
+  }
+  if (step.kind === "message") {
+    return h("div", { class: "step s-note" }, h("span", { class: "si" }, icon("chat")), h("div", { class: "sb" }, h("div", { class: "st" }, step.text)));
+  }
+  if (step.kind === "tool") {
+    const pending = step.ok === undefined;
+    return h("div", { class: "step s-tool" + (pending ? " s-pending" : step.ok ? "" : " s-fail") },
+      h("span", { class: "si" }, pending ? h("span", { class: "spinner" }) : icon(TOOL_ICON[step.name] || "settings")),
+      h("div", { class: "sb" },
+        h("div", { class: "sl" }, TOOL_LABEL[step.name] || step.name, h("span", { class: "sa" }, argSummary(step.name, step.args)), step.ms !== undefined ? h("span", { class: "ms" }, `${step.ms} ms`) : null),
+        pending ? null : h("div", { class: "st" }, step.summary || "")));
+  }
+  if (step.kind === "review" || step.kind === "submit") {
+    const n = step.findings && step.findings.length !== undefined ? step.findings.length : step.findings;
+    return h("div", { class: "step s-review" }, h("span", { class: "si" }, icon("lab")),
+      h("div", { class: "sb" }, h("div", { class: "sl" }, step.kind === "submit" ? "提交结论 · 规则引擎复核" : "规则引擎复核"),
+        h("div", { class: "st" }, n ? `${n} 条参考意见${step.unanswered ? `，${step.unanswered} 条交回模型判断` : ""}` : "无规则意见")));
+  }
+  if (step.kind === "alert") {
+    return h("div", { class: "step s-alert" }, h("span", { class: "si" }, icon("siren")), h("div", { class: "sb" }, h("div", { class: "sl" }, "急症筛查命中"), h("div", { class: "st" }, (step.emergency.signals || []).join("、"))));
+  }
+  if (step.kind === "error" || step.kind === "limit") {
+    return h("div", { class: "step s-fail" }, h("span", { class: "si" }, icon("alert")), h("div", { class: "sb" }, h("div", { class: "st" }, step.text || step.message)));
+  }
+  return null;
+}
+function traceBlock(steps, live) {
+  const tools = steps.filter((s) => s.kind === "tool").length;
+  const thoughts = steps.filter((s) => s.kind === "thinking").length;
+  const body = h("div", { class: "timeline" }, steps.map((s) => stepItem(s, live)));
+  if (live) return h("div", { class: "trace live" }, body);
+  return h("details", { class: "trace" }, h("summary", null, icon("sparkle"), `推理与工具调用 · ${tools} 次工具调用${thoughts ? ` · ${thoughts} 段思考` : ""}`), body);
+}
+const DECISION = { accepted: ["ok", "已采纳"], overridden: ["warn", "保留方案 · 已说明理由"] };
+function reviewPanel(review) {
+  const findings = (review && review.findings) || [];
+  if (!findings.length) return h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "规则引擎复核"), h("div", { class: "metrics" }, h("span", { class: "metric ok" }, icon("lab"), "无规则意见 · 20 条规则已核对")));
+  const answers = Object.fromEntries((review.responses || []).filter((r) => r && r.rule_id).map((r) => [r.rule_id, r]));
+  return h("div", { class: "rx-sec" },
+    h("div", { class: "lbl" }, "规则引擎复核", h("span", { class: "chip" }, "参考意见 · 非硬约束")),
+    findings.map((f) => {
+      const a = answers[f.rule_id];
+      const d = a ? DECISION[a.decision] || ["", a.decision] : ["", "模型未回应"];
+      return h("div", { class: "finding" },
+        h("div", { class: "fh" }, h("span", { class: `sev ${f.severity}` }, f.severity === "block" ? "高" : "提示"), h("span", { class: "rule" }, f.rule_id), h("span", { class: `chip ${d[0]}` }, d[1])),
+        h("div", { class: "msg" }, f.message),
+        a && a.reason ? h("div", { class: "why" }, h("b", null, "模型理由："), a.reason) : null);
+    }));
+}
+function agentCard(p, m) {
+  const k = p.consult || {};
+  const engine = p.engine_stage || {};
+  const stage = k.stage_group || engine.stage_group;
+  const status = p.error ? "agent_error" : p.emergency ? "agent_emergency" : "agent_done";
+  const meta = statusMeta(status);
+  const rx = h("div", { class: "rx agent" });
+  const conf = { high: ["ok", "把握度 高"], moderate: ["", "把握度 中"], low: ["warn", "把握度 低"] }[k.confidence];
+  const tools = (p.steps || []).filter((s) => s.kind === "tool").length;
+  rx.appendChild(h("div", { class: "rx-top" },
+    h("div", { class: "rx-stage" }, h("div", { class: "lbl" }, "分期"), h("div", { class: "big" }, stage || "—"),
+      h("div", { class: "tnm" }, k.tnm || engine.tnm || ""),
+      engine.staged && k.stage_group && engine.stage_group && String(k.stage_group).toUpperCase() !== String(engine.stage_group).toUpperCase()
+        ? h("div", { class: "chip warn", style: { marginTop: "6px" } }, `引擎：${engine.stage_group}`) : null),
+    h("div", { class: `rx-status tone-${meta[0]}` },
+      h("div", { class: "st" }, h("span", { class: "g" }, icon(meta[3])), meta[1],
+        k.intent ? h("span", { class: "chip" }, { curative: "根治性", palliative: "姑息性", supportive: "支持治疗", emergency: "急症处置", undetermined: "待定" }[k.intent] || k.intent) : null,
+        conf ? h("span", { class: `chip ${conf[0]}` }, conf[1]) : null),
+      k.assessment ? h("div", { class: "d" }, k.assessment) : h("div", { class: "d" }, meta[2]),
+      h("div", { class: "metrics" }, h("span", { class: "metric" }, icon("sparkle"), `${p.model || "模型"} · ${p.llm_calls} 次推理`),
+        h("span", { class: "metric" }, `${tools} 次工具调用`), m.ms ? h("span", { class: "metric" }, `${(m.ms / 1000).toFixed(1)} s`) : null))));
+  if (p.emergency) {
+    rx.appendChild(h("div", { class: "rx-sec emergency" }, h("div", { class: "lbl" }, "急症筛查（标准处置路径，供参考）"),
+      fmtList((p.emergency.pathway || {}).immediate_actions || p.emergency.signals)));
+  }
+  const options = (k.options || []).filter((o) => o && o.name);
+  if (options.length) {
+    rx.appendChild(h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "模型推荐方案"),
+      options.map((o, i) => h("div", { class: "opt" }, h("span", { class: "n" + (o.preferred ? " pref" : "") }, o.preferred ? "★" : i + 1),
+        h("div", null, h("div", { class: "nm" }, o.name, o.preferred ? h("span", { class: "chip ok", style: { marginLeft: "8px" } }, "首选") : null),
+          o.rationale ? h("div", { class: "why" }, o.rationale) : null,
+          (o.regimen_ids || []).length || (o.evidence || []).length ? h("div", { class: "chips" },
+            (o.regimen_ids || []).map(regimenChip), (o.evidence || []).map((e) => (Store.catalog && Store.catalog.trials[e] ? trialChip(e) : h("span", { class: "chip" }, e)))) : null)))));
+  }
+  const workup = k.workup || [];
+  const warnings = k.warnings || [];
+  if (workup.length || warnings.length) {
+    rx.appendChild(h("div", { class: "rx-sec" },
+      workup.length ? h("div", null, h("div", { class: "lbl" }, "待完善检查"), h("div", { class: "todo" }, workup.map((w) => h("div", null, icon("alert"), h("span", null, w))))) : null,
+      warnings.length ? h("div", { style: { marginTop: workup.length ? "12px" : 0 } }, h("div", { class: "lbl" }, "注意事项"), fmtList(warnings)) : null));
+  }
+  rx.appendChild(reviewPanel(p.review));
+  return rx;
+}
+function openAgentReport(m) {
+  const p = m.payload;
+  const k = p.consult || {};
+  openDrawer({ title: "模型会诊详情", sub: [k.stage_group ? `分期 ${k.stage_group}` : null, p.model, new Date(m.ts).toLocaleString()].filter(Boolean).join(" · "), width: 960,
+    body: h("div", { class: "card" }, tabbed([
+      { id: "steps", label: "推理与工具", count: (p.steps || []).length, render: () => h("div", { class: "timeline full" }, (p.steps || []).map((s) => {
+        const item = stepItem(s, true);
+        if (item && s.kind === "tool" && s.args && Object.keys(s.args).length) item.querySelector(".sb").appendChild(h("details", null, h("summary", { class: "muted small" }, "参数"), jsonBlock(s.args)));
+        return item;
+      })) },
+      { id: "review", label: "规则复核", count: ((p.review || {}).findings || []).length, render: () => h("div", { class: "rx" }, reviewPanel(p.review)) },
+      { id: "facts", label: "病例笔记", render: () => h("div", { class: "stack" }, h("div", { class: "facts" }, factRows(p.facts || {}).map(([a, b]) => [h("div", { class: "k" }, a), h("div", { class: "v" }, b)])),
+        p.engine_stage ? h("div", { class: "muted small" }, `分期引擎：${p.engine_stage.staged ? `${p.engine_stage.tnm} → ${p.engine_stage.stage_group}` : p.engine_stage.refusal}`) : null) },
+      { id: "consult", label: "结构化结论", render: () => jsonBlock(k) },
+      { id: "raw", label: "原始 JSON", render: () => jsonBlock(p) },
+    ])) });
+}
+
 /* ================================================================ drawer */
 
 function openDrawer({ title, sub, width, body, foot }) {
@@ -879,13 +1106,42 @@ const Workspace = {
   text: "", whatif: false, panel: false, busy: false,
   pending: { images: [], reports: [] },
   dossier: LS.get("nsclc.ui.dossier", true),
-  ta: null,
+  ta: null, live: null, liveEl: null, thread: null,
+
+  /* Live agent progress (worker events arrive while the turn runs). */
+  onEvent(ev) {
+    if (!this.live) return;
+    const steps = this.live.steps;
+    if (ev.type === "llm_call") this.live.step = ev.step;
+    else if (ev.type === "thinking") steps.push({ kind: "thinking", text: ev.text });
+    else if (ev.type === "message") steps.push({ kind: "message", text: ev.text });
+    else if (ev.type === "tool_call") steps.push({ kind: "tool", name: ev.name, args: ev.args });
+    else if (ev.type === "tool_result") {
+      const s = [...steps].reverse().find((x) => x.kind === "tool" && x.name === ev.name && x.ok === undefined);
+      if (s) Object.assign(s, { ok: ev.ok, summary: ev.summary, ms: ev.ms });
+    } else if (ev.type === "review") steps.push({ kind: "review", findings: ev.findings, unanswered: ev.unanswered });
+    else if (ev.type === "alert") steps.push({ kind: "alert", emergency: ev.emergency });
+    else if (ev.type === "error") steps.push({ kind: "error", message: ev.message });
+    this.paintLive();
+  },
+  paintLive() {
+    const el = this.liveEl; if (!el || !this.live) return;
+    const thread = this.thread;
+    const nearBottom = thread && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 160;
+    clear(el);
+    const tools = this.live.steps.filter((x) => x.kind === "tool").length;
+    el.appendChild(h("div", { class: "thinking" }, h("span", { class: "dots" }, h("i"), h("i"), h("i")),
+      h("span", { class: "shimmer" }, `模型主导会诊中 · 第 ${this.live.step || 1} 步推理${tools ? ` · 已调用 ${tools} 个工具` : ""}…`)));
+    if (this.live.steps.length) el.appendChild(traceBlock(this.live.steps, true));
+    if (nearBottom) thread.scrollTop = thread.scrollHeight;
+  },
 
   reset() { this.text = ""; this.whatif = false; this.pending = { images: [], reports: [] }; },
 
   render() {
     const c = Cases.current();
     const hasTurns = c.messages.length > 0;
+    if (!hasTurns) c.mode = defaultMode(); /* an empty case follows the current settings */
     const root = h("section", { class: "ws" + (this.dossier && hasTurns ? "" : " no-dossier") });
     root.appendChild(this.bar(c));
     const inner = h("div", { class: "thread-inner" });
@@ -895,13 +1151,24 @@ const Workspace = {
     if (!hasTurns) inner.appendChild(this.welcome(composer));
     else {
       c.messages.forEach((m, i) => inner.appendChild(this.turn(m, c, i)));
-      if (this.busy) inner.appendChild(h("div", { class: "turn agent" }, logoMark("avatar"),
+      this.liveEl = null;
+      if (this.busy && c.mode === "agent" && this.live) {
+        this.liveEl = h("div", { class: "turn-body" });
+        inner.appendChild(h("div", { class: "turn agent" }, logoMark("avatar"), this.liveEl));
+        this.paintLive();
+      } else if (this.busy) inner.appendChild(h("div", { class: "turn agent" }, logoMark("avatar"),
         h("div", { class: "turn-body" }, h("div", { class: "thinking" }, h("span", { class: "dots" }, h("i"), h("i"), h("i")),
-          h("span", { class: "shimmer" }, llmOn() ? "模型推理中 · 分期与安全规则仍由确定性内核裁决…" : "正在会诊 · 急症筛查 → 分期 → 方案 → 安全终审…")))));
-      col.appendChild(h("div", { class: "dock" }, h("div", { class: "dock-inner" }, composer,
+          h("span", { class: "shimmer" }, llmOn() ? "模型辅助推理中 · 分期与安全规则由确定性内核裁决…" : "正在会诊 · 急症筛查 → 分期 → 方案 → 安全终审…")))));
+      const needsModel = c.mode === "agent" && !llmOn();
+      col.appendChild(h("div", { class: "dock" }, h("div", { class: "dock-inner" },
+        needsModel ? h("div", { class: "callout warn", style: { marginBottom: "10px" } }, icon("key"), h("div", { style: { flex: 1 } },
+          "这是模型主导的会诊，当前未接入模型（为安全起见，密钥默认只保存在当前页面内存中，刷新后需重新接入）。"),
+          h("button", { class: "btn sm", type: "button", onclick: () => { location.hash = "#/settings"; } }, "接入模型")) : null,
+        composer,
         h("div", { class: "disclaimer" }, "NSCLC-Agent 由 IMPF-AI 研发 · 仅供教学与研究，不构成医疗建议，治疗决定须由主治团队确认"))));
     }
     root.appendChild(h("div", { class: "ws-body" }, col, h("aside", { class: "dossier", "aria-label": "病例档案" }, this.dossierPanel(c))));
+    this.thread = thread;
     requestAnimationFrame(() => {
       /* Land on the latest exchange: bottom, unless that hides its prompt. */
       thread.scrollTop = thread.scrollHeight;
@@ -921,15 +1188,21 @@ const Workspace = {
     const turns = c.messages.filter((m) => m.role === "user").length;
     const roleSel = h("select", { class: "mini-select", title: "视角决定可见内容与剂量授权", "aria-label": "视角", onchange: (e) => this.setRole(c, e.target.value) },
       Object.entries(ROLE_LABEL).map(([v, l]) => h("option", { value: v, selected: c.role === v || null }, l)));
-    const dose = h("label", { class: "switch hide-narrow", title: "仅肿瘤科医师；全部闸门通过时由确定性方案库产出剂量草案，待签核" },
+    const dose = c.mode === "agent" ? null : h("label", { class: "switch hide-narrow", title: "仅肿瘤科医师；全部闸门通过时由确定性方案库产出剂量草案，待签核" },
       h("input", { type: "checkbox", checked: c.dose || null, disabled: c.role !== "oncologist" || null, onchange: (e) => this.setDose(c, e.target.checked) }), "剂量草案");
+    const modeCtl = c.messages.length
+      ? h("span", { class: `pill ${c.mode === "agent" ? "indigo" : ""} hide-narrow`, title: c.mode === "agent" ? "模型主导：自主推理与调用工具，规则仅供参考" : "受治理：确定性内核裁决分期、规则与放行" }, h("span", { class: "dot" }), c.mode === "agent" ? "模型主导" : "受治理")
+      : h("div", { class: "seg hide-narrow", role: "group", "aria-label": "会诊模式" },
+          h("button", { type: "button", class: c.mode === "agent" ? "on" : "", disabled: !llmOn() || null, title: llmOn() ? "模型主导：自主推理、调用工具，规则引擎复核仅供参考" : "需先在「模型接入」中接入模型", onclick: () => this.setMode("agent") }, "模型主导"),
+          h("button", { type: "button", class: c.mode !== "agent" ? "on" : "", title: "受治理：确定性内核裁决分期、规则与放行", onclick: () => this.setMode("governed") }, "受治理"));
     return h("header", { class: "ws-bar" },
       h("button", { class: "icon-btn ghost only-mobile", type: "button", title: "会诊记录", "aria-label": "打开会诊记录", onclick: toggleRail }, icon("menu")),
       h("div", { class: "ws-title" },
         h("div", { class: "t" }, c.title || "新会诊"),
-        h("div", { class: "s" }, last ? statusPill(last.payload.release_status) : null, turns ? `${turns} 轮` : "描述病例开始会诊", h("span", { class: "hide-narrow" }, `· ${ROLE_LABEL[c.role] || c.role}视角`))),
+        h("div", { class: "s" }, last ? statusPill(isAgent(last.payload) ? (last.payload.error ? "agent_error" : last.payload.emergency ? "agent_emergency" : "agent_done") : last.payload.release_status) : null,
+          turns ? `${turns} 轮` : "描述病例开始会诊", h("span", { class: "hide-narrow" }, `· ${ROLE_LABEL[c.role] || c.role}视角`))),
       h("span", { class: "spacer" }),
-      roleSel, dose,
+      modeCtl, roleSel, dose,
       h("button", { class: "icon-btn ghost", type: "button", title: "导入会诊文件", "aria-label": "导入会诊", onclick: () => this.importCase() }, icon("upload")),
       c.messages.length ? h("button", { class: "icon-btn ghost", type: "button", title: "导出本次会诊", "aria-label": "导出会诊", onclick: () => this.exportCase(c) }, icon("download")) : null,
       h("button", { class: "icon-btn ghost", type: "button", title: "病例档案", "aria-label": "病例档案", onclick: () => this.toggleDossier(c) }, icon("panel")));
@@ -937,13 +1210,20 @@ const Workspace = {
 
   welcome(composer) {
     const tone = (id) => (id === "emergency" ? ["siren", "emergency"] : id === "renal" || id === "cns_symptomatic" ? ["alert", "warn"] : ["consult", ""]);
+    const agent = Cases.current().mode === "agent";
+    const model = llmOn() ? `${Store.llm.llm.provider} · ${Store.llm.llm.model}` : "";
     return h("div", { class: "stack", style: { gap: "22px" } },
       h("div", { class: "welcome" }, logoMark(),
         h("h1", null, "今天会诊哪位患者？"),
-        h("p", null, "描述病例、补充检查结果或上传报告。NSCLC-Agent 完成确定性分期、循证方案与安全终审 —— 未通过终审的方案不会放行。"),
+        h("p", null, agent
+          ? `由 ${model} 主导会诊：自主思考、规划并调用分期引擎、试验库、方案库、指南知识库等 20 个临床工具；规则引擎的复核意见只作参考，由模型逐条判断。`
+          : "描述病例、补充检查结果或上传报告。NSCLC-Agent 完成确定性分期、循证方案与安全终审 —— 未通过终审的方案不会放行。"),
         h("div", { class: "trust" },
-          h("span", null, icon("cpu"), "浏览器内运行"), h("span", null, icon("lock"), "病例不离开本机"),
-          h("span", null, icon("lab"), `${(Store.info && Store.info.counts.rules) || 20} 条安全规则终审`), h("span", null, icon("staging"), "AJCC/UICC 第 9 版分期"))),
+          agent ? h("span", null, icon("sparkle"), `模型主导 · ${Store.llm.llm.model}`) : h("span", null, icon("cpu"), "浏览器内运行"),
+          llmOn() ? h("span", null, icon("lock"), `数据直连 ${Store.llm.llm.provider}，不经第三方服务器`) : h("span", null, icon("lock"), "病例不离开本机"),
+          agent ? h("span", null, icon("lab"), "规则复核 · 非硬约束") : h("span", null, icon("lab"), `${(Store.info && Store.info.counts.rules) || 20} 条安全规则终审`),
+          h("span", null, icon("staging"), "AJCC/UICC 第 9 版分期"))),
+      llmOn() ? null : h("div", { class: "callout" }, icon("sparkle"), h("div", null, "当前为确定性模式。在左下角「模型」中接入 Poe 或 MiniMax 后，会诊将由模型主导：自主推理、调用工具，规则仅作参考。")),
       composer,
       h("div", null,
         h("div", { class: "starters-title" }, "从典型病例开始"),
@@ -984,8 +1264,10 @@ const Workspace = {
         tool("form", "结构化录入", "用表单录入 TNM、驱动基因、器官功能、治疗史", () => openCaseForm(c)),
         tool("image", "影像", "上传 CT/MRI 影像（需视觉模型）", () => pick("images")),
         tool("doc", "报告", "上传病理/NGS/影像报告图片（需视觉模型）", () => pick("reports")),
-        tool("branch", "假设推演", hasBaseline ? "what-if：在当前病例上推演一个假设变化，不写入病例" : "需要先有一轮会诊结果", () => { this.whatif = !this.whatif; render(); }, this.whatif, !hasBaseline),
-        tool("users", "MDT 面板", llmOn() ? "召集多学科会诊面板" : "需在「模型接入」中接入模型", () => { this.panel = !this.panel; render(); }, this.panel && llmOn(), !llmOn()),
+        c.mode === "agent"
+          ? tool("branch", "假设推演", "让模型在不改变病例笔记的前提下推演一个假设", () => this.insert("【假设推演 · 不改变病例笔记】如果 "), false, !hasBaseline)
+          : tool("branch", "假设推演", hasBaseline ? "what-if：在当前病例上推演一个假设变化，不写入病例" : "需要先有一轮会诊结果", () => { this.whatif = !this.whatif; render(); }, this.whatif, !hasBaseline),
+        c.mode === "agent" ? null : tool("users", "MDT 面板", llmOn() ? "召集多学科会诊面板" : "需在「模型接入」中接入模型", () => { this.panel = !this.panel; render(); }, this.panel && llmOn(), !llmOn()),
         sendBtn));
   },
 
@@ -1000,14 +1282,30 @@ const Workspace = {
     const uploads = fromComposer ? { images: this.pending.images, reports: this.pending.reports } : { images: [], reports: [] };
     if (!text && !facts && !uploads.images.length && !uploads.reports.length) return;
     /* A structured submission or an example is always a real turn. */
-    const whatif = fromComposer && this.whatif && !!lastResult(c);
+    if (!c.messages.length) c.mode = defaultMode();
+    const agent = c.mode === "agent";
+    if (agent && !llmOn()) { toast("这是模型主导的会诊：请先在「模型接入」中接入模型，或新建一个受治理会诊。", true); return; }
+    const whatif = !agent && fromComposer && this.whatif && !!lastResult(c);
     Cases.commit(c);
     c.messages.push({ id: uid(), role: "user", ts: Date.now(), text: text || "（附件）", whatif, facts, attachments: [...uploads.images, ...uploads.reports].map((f) => f.name) });
     if (fromComposer) { this.text = ""; this.pending = { images: [], reports: [] }; }
     this.busy = true;
+    this.live = agent ? { steps: [], step: 1 } : null;
     Cases.touch(c); Cases.save(); render();
     try {
       await Session.bind(c);
+      if (agent) {
+        const out = await Bridge.timed("agent_turn", { message: text, facts }, uploads);
+        const r = out.result;
+        c.messages.push({ id: uid(), role: "agent", ts: Date.now(), whatif: false, ms: out.ms, payload: r });
+        const k = r.consult || {};
+        c.status = r.error ? "agent_error" : r.emergency ? "agent_emergency" : "agent_done";
+        c.stage = k.stage_group || (r.engine_stage && r.engine_stage.stage_group) || c.stage;
+        const f = r.facts || {};
+        c.title = [c.stage, keyDriver(f) || (f.histologic_category ? HIST[f.histologic_category] : "")].filter(Boolean).join(" · ") || c.title || text.slice(0, 18);
+        c.session = await Bridge.call("agent_export");
+        return;
+      }
       const out = whatif
         ? await Bridge.timed("chat_whatif", { description: text, facts })
         : await Bridge.timed("chat_turn", { message: text, facts, enable_panel: this.panel && llmOn() }, uploads);
@@ -1027,9 +1325,16 @@ const Workspace = {
       c.messages.push({ id: uid(), role: "error", ts: Date.now(), text: err.message });
       Session.invalidate();
     } finally {
-      this.busy = false;
+      this.busy = false; this.live = null;
       Cases.touch(c); Cases.save(); render();
     }
+  },
+
+  setMode(mode) {
+    if (mode === "agent" && !llmOn()) { toast("模型主导需要先接入模型"); location.hash = "#/settings"; return; }
+    LS.set("nsclc.pref.mode", mode);
+    toast(mode === "agent" ? "新会诊将由模型主导：自主推理与调用工具，规则仅作参考" : "新会诊使用受治理流水线：确定性内核裁决");
+    render();
   },
 
   runExample(e) {
@@ -1055,6 +1360,29 @@ const Workspace = {
     }
     const p = m.payload;
     const isLastAgent = c.messages.slice(idx + 1).every((x) => x.role !== "agent");
+    if (isAgent(p)) {
+      const k = p.consult || {};
+      const questions = k.questions || [];
+      return h("div", { class: "turn agent" }, logoMark("avatar"),
+        h("div", { class: "turn-body" },
+          h("div", { class: "turn-head" }, h("b", null, "NSCLC-Agent"), statusPill(p.error ? "agent_error" : p.emergency ? "agent_emergency" : "agent_done"),
+            h("span", { class: "chip trial" }, "模型主导"), h("span", { class: "muted small" }, timeAgo(m.ts))),
+          (p.steps || []).length ? traceBlock(p.steps, false) : null,
+          md(p.reply),
+          agentCard(p, m),
+          isLastAgent && questions.length ? h("div", null,
+            h("div", { class: "starters-title", style: { margin: "2px 2px 8px" } }, "智能体需要您补充"),
+            h("div", { class: "qs" }, questions.map((q) => h("button", { class: "q", type: "button", onclick: () => this.insert(`${q}\n答：`) },
+              icon("question"), h("span", null, q), h("span", { class: "go" }, "回答"))))) : null,
+          h("div", { class: "turn-actions" },
+            h("button", { class: "act", type: "button", onclick: () => openAgentReport(m) }, icon("doc"), "会诊详情"),
+            h("button", { class: "act", type: "button", onclick: () => copyText(p.reply) }, icon("copy"), "复制"),
+            h("button", { class: "act", type: "button", onclick: () => downloadJSON("nsclc-agent-turn.json", p) }, icon("download"), "JSON"))));
+    }
+    if (!p && m.text) {
+      return h("div", { class: "turn agent" }, logoMark("avatar"), h("div", { class: "turn-body" },
+        h("div", { class: "turn-head" }, h("b", null, "NSCLC-Agent"), h("span", { class: "muted small" }, timeAgo(m.ts))), md(m.text)));
+    }
     const onc = p && p.views && p.views.oncologist;
     const questions = p ? ((onc && onc.open_questions) || (p.views && p.views.patient && p.views.patient.questions_for_you) || []) : [];
     return h("div", { class: "turn agent" }, logoMark("avatar"),
@@ -1085,12 +1413,14 @@ const Workspace = {
   dossierPanel(c) {
     const inner = h("div", { class: "dossier-inner" });
     const m = lastResult(c);
-    inner.appendChild(h("h3", null, icon("consult"), "病例档案", m ? h("span", { style: { marginLeft: "auto" } }, statusPill(m.payload.release_status)) : null));
+    inner.appendChild(h("h3", null, icon("consult"), "病例档案", m ? h("span", { style: { marginLeft: "auto" } },
+      statusPill(isAgent(m.payload) ? (m.payload.error ? "agent_error" : m.payload.emergency ? "agent_emergency" : "agent_done") : m.payload.release_status)) : null));
     if (!m) {
       inner.appendChild(h("div", { class: "dossier-empty" }, icon("form"), "开始会诊后，智能体会在这里整理分期、关键事实、当前方案与待办。"));
       return inner;
     }
     const p = m.payload;
+    if (isAgent(p)) return this.agentDossier(c, m, inner);
     const onc = p.views && p.views.oncologist;
     const st = onc && onc.staging;
     const f = p.session_facts || {};
@@ -1116,6 +1446,38 @@ const Workspace = {
       h("div", { class: "k" }, "开始于"), h("div", { class: "v" }, new Date(c.created).toLocaleString()))));
     inner.appendChild(h("div", { class: "row" },
       h("button", { class: "btn sm", type: "button", onclick: () => openReport(m, c) }, icon("doc"), "完整报告"),
+      h("button", { class: "btn sm", type: "button", onclick: () => openCaseForm(c) }, icon("pen"), "编辑事实")));
+    return inner;
+  },
+
+  agentDossier(c, m, inner) {
+    const p = m.payload;
+    const k = p.consult || {};
+    const engine = p.engine_stage || {};
+    const f = p.facts || {};
+    const stage = k.stage_group || engine.stage_group;
+    if (stage || f.tnm) inner.appendChild(h("div", { class: "stage-tile" }, h("div", { class: "muted small" }, `分期 · 模型判断${engine.staged ? `（引擎：${engine.stage_group}）` : ""}`),
+      h("div", { class: "big" }, stage || "—"), h("div", { class: "tnm" }, k.tnm || engine.tnm || tnmText(f.tnm))));
+    const rows = factRows(f);
+    if (rows.length) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "病例笔记（模型维护）"), h("div", { class: "facts" }, rows.map(([a, b]) => [h("div", { class: "k" }, a), h("div", { class: "v" }, b)]))));
+    const options = (k.options || []).filter((o) => o && o.name);
+    if (options.length) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "模型推荐方案"),
+      h("div", { class: "todo" }, options.map((o, i) => h("div", null, h("b", { style: { color: "var(--accent)" } }, o.preferred ? "★" : `${i + 1}.`), h("span", null, o.name))))));
+    const todo = [...(k.workup || []), ...(k.questions || [])];
+    if (todo.length) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, `待办 · ${todo.length}`), h("div", { class: "todo" }, todo.slice(0, 8).map((t) => h("div", null, icon("alert"), h("span", null, t))))));
+    const findings = (p.review && p.review.findings) || [];
+    const answered = new Set(((p.review && p.review.responses) || []).map((r) => r && r.rule_id));
+    inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "规则引擎复核（参考）"),
+      h("div", { class: "metrics" }, h("span", { class: `metric ${findings.length ? "warn" : "ok"}` }, icon("lab"), findings.length ? `${findings.length} 条意见` : "无意见"),
+        findings.length ? h("span", { class: "metric" }, `模型已回应 ${findings.filter((x) => answered.has(x.rule_id)).length}`) : null,
+        h("span", { class: "metric" }, `${(p.steps || []).filter((s) => s.kind === "tool").length} 次工具调用`))));
+    inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "会诊"), h("div", { class: "facts" },
+      h("div", { class: "k" }, "模式"), h("div", { class: "v" }, "模型主导"),
+      h("div", { class: "k" }, "视角"), h("div", { class: "v" }, ROLE_LABEL[c.role] || c.role),
+      h("div", { class: "k" }, "模型"), h("div", { class: "v" }, p.model || "—"),
+      h("div", { class: "k" }, "开始于"), h("div", { class: "v" }, new Date(c.created).toLocaleString()))));
+    inner.appendChild(h("div", { class: "row" },
+      h("button", { class: "btn sm", type: "button", onclick: () => openAgentReport(m) }, icon("doc"), "会诊详情"),
       h("button", { class: "btn sm", type: "button", onclick: () => openCaseForm(c) }, icon("pen"), "编辑事实")));
     return inner;
   },
@@ -1146,7 +1508,7 @@ const Workspace = {
 
   exportCase(c) {
     downloadJSON(`nsclc-case-${(c.title || "untitled").replace(/[\s/·]+/g, "_")}.json`,
-      { format: "nsclc-agent-case/1", title: c.title, created: c.created, messages: c.messages, session: c.session });
+      { format: "nsclc-agent-case/1", title: c.title, created: c.created, mode: c.mode || "governed", messages: c.messages, session: c.session });
   },
   async importCase() {
     const [file] = await pickFile("application/json");
@@ -1157,7 +1519,11 @@ const Workspace = {
       const base = { id: uid(), created: Date.now(), updated: Date.now(), role: Cases.current().role || DEFAULT_ROLE, dose: false, status: null, stage: null };
       let c;
       if (data.format === "nsclc-agent-case/1") {
-        c = Object.assign(base, { title: data.title || "导入的会诊", messages: Array.isArray(data.messages) ? data.messages : [], session: data.session || null });
+        const mode = data.mode === "agent" || (data.session && data.session.format === "nsclc-agent-session/1") ? "agent" : "governed";
+        c = Object.assign(base, { title: data.title || "导入的会诊", mode, messages: Array.isArray(data.messages) ? data.messages : [], session: data.session || null });
+      } else if (data.format === "nsclc-agent-session/1") { /* a raw agent session (CLI `agent --session`) */
+        const messages = (data.turns || []).flatMap((t) => [{ id: uid(), role: "user", ts: Date.now(), text: t.message || "" }, { id: uid(), role: "agent", ts: Date.now(), text: t.reply || "" }]);
+        c = Object.assign(base, { title: "导入的会诊", mode: "agent", messages, session: data });
       } else if (Array.isArray(data.transcript) && Array.isArray(data.narrative)) { /* a raw session export (CLI / earlier builds) */
         const turns = data.transcript.filter((t) => t.kind !== "what_if");
         let k = 0;
@@ -1166,10 +1532,12 @@ const Workspace = {
           const text = whatif ? t.description || "（假设推演）" : turns.length === data.narrative.length ? data.narrative[k++] : "（历史轮次）";
           return [{ id: uid(), role: "user", ts: Date.now(), text, whatif }, { id: uid(), role: "agent", ts: Date.now(), whatif, text: t.reply || "" }];
         });
-        c = Object.assign(base, { title: "导入的会诊", messages, session: data });
+        c = Object.assign(base, { title: "导入的会诊", mode: "governed", messages, session: data });
       } else throw new Error("不是 NSCLC-Agent 会诊文件");
       const last = lastResult(c);
-      if (last) {
+      if (last && isAgent(last.payload)) {
+        c.status = "agent_done"; c.stage = (last.payload.consult || {}).stage_group || null;
+      } else if (last) {
         c.status = last.payload.release_status;
         const onc = last.payload.views && last.payload.views.oncologist;
         c.stage = onc && onc.staging && onc.staging.stage_group;
@@ -1410,9 +1778,10 @@ const Settings = {
     const r = await Bridge.call("configure_llm", Object.fromEntries(Object.entries(this.cfg).filter(([k]) => k !== "remember")));
     Store.llm = r;
     Session.invalidate(); /* the worker dropped its session along with the old clients */
-    try { if (this.cfg.remember) sessionStorage.setItem("nsclc-llm", JSON.stringify(this.cfg)); else sessionStorage.removeItem("nsclc-llm"); } catch (_) { /* storage unavailable */ }
+    /* Keys are kept only when asked; the key-less offline mock is always remembered for the tab. */
+    try { if (this.cfg.remember || this.cfg.provider === "mock") sessionStorage.setItem("nsclc-llm", JSON.stringify(this.cfg)); else sessionStorage.removeItem("nsclc-llm"); } catch (_) { /* storage unavailable */ }
     renderRail();
-    if (!silent) toast(r.llm.available ? `已接入 ${r.llm.provider} · ${r.llm.model}` : "已切换为确定性模式");
+    if (!silent) toast(r.llm.available ? `已接入 ${r.llm.provider} · ${r.llm.model} · 新会诊由模型主导` : "已切换为确定性模式");
     return r;
   },
   async restore() {
@@ -1432,7 +1801,14 @@ VIEWS.settings = () => {
   const drawOut = () => {
     const l = Store.llm || {};
     out.appendChild(h("div", { class: "card flat" }, h("div", { class: "card-head" }, h("h3", null, "当前状态")),
-      h("div", { class: "kv" }, h("div", { class: "k" }, "模式"), h("div", null, l.mode || "deterministic"),
+      h("div", { class: "kv" }, h("div", { class: "k" }, "新会诊模式"), h("div", null,
+          llmOn() ? h("div", { class: "seg" },
+            h("button", { type: "button", class: defaultMode() === "agent" ? "on" : "", onclick: () => { LS.set("nsclc.pref.mode", "agent"); render(); } }, "模型主导"),
+            h("button", { type: "button", class: defaultMode() !== "agent" ? "on" : "", onclick: () => { LS.set("nsclc.pref.mode", "governed"); render(); } }, "受治理"))
+            : "确定性（未接入模型）",
+          h("div", { class: "muted small", style: { marginTop: "6px" } }, llmOn()
+            ? (defaultMode() === "agent" ? "模型自主推理、规划并调用 20 个临床工具；规则引擎复核意见交回模型逐条判断，不作硬约束。" : "模型只能提议，分期、规则与放行由确定性内核裁决。")
+            : "接入模型后默认由模型主导会诊。")),
         h("div", { class: "k" }, "文本模型"), h("div", null, l.llm && l.llm.available ? `${l.llm.provider} · ${l.llm.model}` : "无"),
         h("div", { class: "k" }, "视觉模型"), h("div", null, l.vision && l.vision.provider !== "none" ? `${l.vision.provider} · ${l.vision.model}` : "无"))));
   };
@@ -1553,7 +1929,8 @@ function renderRail() {
   for (const [id, t] of Object.entries(TOOLS)) nav.appendChild(h("a", { href: `#/${id}`, class: route.tool === id ? "on" : null }, icon(t.icon), t.title));
   const mb = clear($("#model-btn"));
   mb.className = "model-btn" + (llmOn() ? " on" : "");
-  append(mb, [h("span", { class: "dot" }), h("span", { class: "lbl" }, h("span", { class: "muted" }, "模型"), h("b", null, llmOn() ? `${Store.llm.llm.provider} · ${Store.llm.llm.model}` : "确定性模式（无需密钥）"))]);
+  append(mb, [h("span", { class: "dot" }), h("span", { class: "lbl" }, h("span", { class: "muted" }, llmOn() ? (defaultMode() === "agent" ? "模型主导" : "模型 · 受治理") : "模型"),
+    h("b", null, llmOn() ? `${Store.llm.llm.provider} · ${Store.llm.llm.model}` : "确定性模式（点此接入模型）"))]);
 }
 function render() {
   renderRail();

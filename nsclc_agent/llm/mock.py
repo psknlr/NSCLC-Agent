@@ -73,6 +73,8 @@ class MockLLMClient:
             return self._reply(self._plan(user))
 
         tool_names = {t.name for t in (tools or [])}
+        if "submit_consult" in tool_names:
+            return self._agent(messages)
         if "ask_case_question" in tool_names:
             return self._interview(user)
 
@@ -191,6 +193,83 @@ class MockLLMClient:
                           "objective": "dose channel",
                           "depends_on": [tasks[-1]["task_id"]]})
         return json.dumps({"tasks": tasks}, ensure_ascii=False)
+
+    # ------------------------------------------------------------ agent mode
+    def _agent(self, messages: list[dict[str, Any]]) -> LLMResponse:
+        """Scripted agent-mode run: consult the governed pipeline, relay its
+        opinion through submit_consult, accept any rule review. Exercises the
+        real loop (tool call → observation → submit → review → resubmit)
+        while saying plainly that no clinical reasoning happened."""
+        starts = [i for i, m in enumerate(messages) if m.get("role") == "user"
+                  and not str(m.get("content") or "").startswith("[系统]")]
+        turn = messages[(starts[-1] + 1) if starts else 0:]
+        names: dict[str, str] = {}
+        seen: dict[str, Any] = {}
+        for message in turn:
+            for call in message.get("tool_calls") or []:
+                names[call.get("id", "")] = (call.get("function") or {}).get("name", "")
+            if message.get("role") == "tool":
+                name = names.get(message.get("tool_call_id", ""), "")
+                try:
+                    seen[name] = json.loads(message.get("content") or "{}")
+                except json.JSONDecodeError:
+                    seen[name] = {}
+        if "governed_reference" not in seen:
+            return LLMResponse(
+                text="先查看受治理流水线的参考意见。", provider=self.name,
+                model=self.model, finish_reason="tool_calls",
+                tool_calls=[ToolCall("governed_reference", {}, id="mock_gov_1")])
+        reference = (seen["governed_reference"] or {}).get("data") or {}
+        consult = self._mock_consult(reference)
+        review = seen.get("submit_consult") or {}
+        if review.get("status") == "review":
+            consult["rule_responses"] = [
+                {"rule_id": f.get("rule_id", ""), "decision": "accepted",
+                 "reason": "离线 Mock：直接采纳规则引擎的意见"}
+                for f in review.get("findings") or []]
+        return LLMResponse(
+            text="", provider=self.name, model=self.model,
+            finish_reason="tool_calls",
+            tool_calls=[ToolCall("submit_consult", consult,
+                                 id=f"mock_submit_{len(turn)}")])
+
+    @staticmethod
+    def _mock_consult(reference: dict[str, Any]) -> dict[str, Any]:
+        plan = reference.get("plan") or {}
+        staging = reference.get("staging") or {}
+        stage = staging.get("stage_group")
+        options = [{"name": o.get("name") or "", "rationale": o.get("rationale") or "",
+                    "regimen_ids": list(o.get("regimen_ids") or []),
+                    "evidence": list(plan.get("trial_refs") or []) if i == 0 else [],
+                    "preferred": i == 0}
+                   for i, o in enumerate(plan.get("options") or [])]
+        lines = ["> 离线 Mock 智能体：没有进行真实的模型推理。以下直接转述受治理流水线"
+                 "的参考意见，用来演示工具调用与规则复核流程。接入真实模型后由模型主导会诊。",
+                 "", f"**分期**：{stage or '未能分期'}"]
+        emergency = reference.get("emergency_plan")
+        if emergency:
+            lines += ["", "**急症处置**："] + [f"- {a}" for a in
+                                          emergency.get("immediate_actions") or []]
+        if plan.get("summary"):
+            lines += ["", str(plan["summary"])]
+        if options:
+            lines += ["", "**参考方案**："] + [
+                f"{i + 1}. {o['name']}" + (f" — {o['rationale']}" if o["rationale"] else "")
+                for i, o in enumerate(options)]
+        questions = list(reference.get("open_questions") or [])
+        if questions:
+            lines += ["", "**还需要了解**："] + [f"- {q}" for q in questions]
+        return {
+            "reply": "\n".join(lines),
+            "assessment": str(plan.get("summary") or ""),
+            "stage_group": stage, "tnm": staging.get("tnm"),
+            "intent": "emergency" if emergency else (plan.get("intent") or "undetermined"),
+            "options": options,
+            "workup": list(plan.get("workup_needed") or []),
+            "questions": questions,
+            "warnings": ["离线 Mock：未做真实临床推理"],
+            "confidence": "low",
+        }
 
     def _reply(self, text: str) -> LLMResponse:
         return LLMResponse(

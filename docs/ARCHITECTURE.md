@@ -36,7 +36,31 @@ architecture).
 Dependencies flow strictly downward. `staging/` and `knowledge/` depend on
 nothing above them; `agents/` composes; `runner.py` orchestrates.
 
-## 2. Control-plane invariants
+## 2. Two modes
+
+Since v0.9.0 the harness runs in one of two modes:
+
+* **Agent mode** (`nsclc_agent/agentic/`, the default once a model is
+  connected): the model LEADS. `AgentSession` runs a ReAct loop in which
+  the model decides what to call, how often and when it is done; it keeps
+  structured case notes and submits a structured consult through
+  `submit_consult`. The deterministic kernel is its toolbox
+  (`AgentToolbox`, 20 tools over the staging engine, registries, gates,
+  CNS/sequencing modules, guideline KG, prognosis, interactions, vision
+  readers) and its second opinion: `rule_review` and `governed_reference`
+  on request, plus one mandatory-but-advisory review round on submission
+  in which the rule-engine findings (and any disagreement with the AJCC-9
+  engine's stage) go back to the model, which revises or answers each with
+  a reason. Nothing is blocked, rewritten or withheld; the findings and the
+  model's answers are shown side by side, and every thought (when the
+  provider exposes it), tool call and review round is streamed and kept.
+  The emergency screen runs on every message and is put in front of the
+  model, not in place of it. A session file still grants no authority.
+* **Governed mode** (the only mode without a model, selectable with one):
+  the invariants below are hard guarantees — the model proposes, the
+  control plane disposes.
+
+## 3. Control-plane invariants (governed mode)
 
 1. **The stage is never the model's.** Only `StagingAgent` writes
    `state.staging`, and it only ever writes what the symbolic engine
@@ -420,7 +444,7 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     a module Pyodide does not ship (`ssl`, `sqlite3`…) at module level
     — a test runs the package with those imports poisoned.
 
-## 3. LLM containment table
+## 4. LLM containment table (governed mode)
 
 | Capability | Model may | Model may not |
 |---|---|---|
@@ -435,7 +459,7 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
 | Chat | extract allowlisted facts from a turn; polish a released reply | set sign-off/guard keys; overwrite the record from free text; rephrase the emergency script; introduce dose numerics (polish discarded); add clinical content |
 | Doses | nothing | anything |
 
-## 4. The safety rule engine
+## 5. The safety rule engine
 
 Twelve deterministic rules run over (engine staging, structured facts, parsed
 plan): `N3_NO_SURGERY`, `DRIVER_EXCLUDES_PERIOP_IO`, `EGFR_III_CONSOLIDATION`
@@ -450,7 +474,7 @@ These are the rules the v0.1 prompts stated in prose and hoped for; here the
 critic executes them on every run, including the deterministic path's own
 output (the rule-mode planner must satisfy its own rule engine — tested).
 
-## 5. Evidence and citations
+## 6. Evidence and citations
 
 Ledger grades: `observed_fact` < `pathology_confirmed` /
 `deterministic_staging` / `registered_trial` / `guideline_or_label` /
@@ -460,7 +484,7 @@ offline; PMIDs and foreign NCTs verify live only when the operator sets
 `NSCLC_AGENT_ONLINE=1`. The CriticAgent verifies every `trial_refs` entry and
 requires a regimen-bearing plan to cite releasable ledger evidence.
 
-## 6. Run loop
+## 7. Run loop
 
 ```
 run_case → IntakeAgent (emergency screen; sets risk_mode; closes negated axes)
@@ -476,7 +500,7 @@ Checkpoints per node; `resume_run` reopens unfinished work so new facts
 (biomarker results, answered questions) move a run forward — but a
 failed-closed run stays failed closed.
 
-## 7. Testing strategy
+## 8. Testing strategy
 
 - `test_staging.py` — the stage table + the refusal table (both are contract).
 - `test_rules.py` — every rule, both directions (fires + stays silent).

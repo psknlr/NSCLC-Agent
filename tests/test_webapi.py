@@ -52,7 +52,7 @@ def test_info_counts_and_rules():
     assert counts["rules"] >= 20 and counts["regimens"] >= 40
     assert counts["audit_probes"] > 0 and counts["golden_cases"] > counts["audit_probes"]
     assert "OPTION_DRUG_UNBOUND" in info["rule_ids"]
-    assert info["llm"]["mode"] == "deterministic"
+    assert info["llm"]["mode"] == "governed"
     assert set(info["providers"]) >= {"poe", "minimax", "azure", "mock", "none"}
 
 
@@ -142,7 +142,7 @@ def test_configure_llm_validation_and_modes():
     assert not call("configure_llm", provider="openrouter")["ok"]
 
     mock = ok("configure_llm", provider="mock")
-    assert mock["llm"]["available"] and mock["mode"].startswith("model")
+    assert mock["llm"]["available"] and mock["mode"] == "agent"
     assert ok("ping_llm")["ok"] is True
 
     poe = ok("configure_llm", provider="poe", api_key="x")
@@ -157,7 +157,7 @@ def test_configure_llm_validation_and_modes():
     assert webapi._STATE["llm"].base_url == "https://api.minimaxi.com/v1"
 
     none = ok("configure_llm", provider="none")
-    assert none["mode"] == "deterministic"
+    assert none["mode"] == "governed"
     assert ok("ping_llm") == {"ok": False, "error": "no provider configured"}
 
 

@@ -29,6 +29,8 @@ from .render import render
 _STATE: dict[str, Any] = {
     "llm": None, "vision": None, "llm_config": {"provider": "none"},
     "session": None, "last_state": None, "last_role": "patient",
+    #: "agent" (model-led) | "governed" (deterministic control plane).
+    "mode": "governed", "agent": None,
 }
 
 _RELEASED = ("treatment_recommendation", "draft_for_tumor_board",
@@ -178,6 +180,21 @@ def configure_llm(provider: str = "none", api_key: str = "", model: str = "",
     _STATE["vision"] = vision_client
     _STATE["llm_config"] = {"provider": provider}
     _STATE["session"] = None  # a session is bound to its clients
+    _STATE["agent"] = None
+    # A connected model leads by default; without one only the governed
+    # pipeline can run.
+    _STATE["mode"] = "agent" if _STATE["llm"] else "governed"
+    return _describe_llms()
+
+
+def set_mode(mode: str) -> dict[str, Any]:
+    """Switch between model-led agent mode and the governed pipeline."""
+    mode = str(mode or "").strip().lower()
+    if mode not in ("agent", "governed"):
+        raise ValueError("mode must be 'agent' or 'governed'")
+    if mode == "agent" and not _STATE["llm"]:
+        raise LLMError("agent mode needs a configured model")
+    _STATE["mode"] = mode
     return _describe_llms()
 
 
@@ -201,7 +218,7 @@ def _describe_llms() -> dict[str, Any]:
         "llm": describe_client(llm) if llm else {"provider": "none",
                                                  "available": False},
         "vision": describe_client(vision) if vision else {"provider": "none"},
-        "mode": "model-assisted (governed)" if llm else "deterministic",
+        "mode": _STATE["mode"],
     }
 
 
@@ -338,6 +355,65 @@ def _turn_payload(session: Any, result: Any, *,
     return payload
 
 
+# ------------------------------------------------------------- agent mode
+
+def agent_new(role: str = "oncologist") -> dict[str, Any]:
+    """Start a model-led consultation (the model leads; the deterministic
+    kernel is its toolbox and second opinion)."""
+    from .agentic import AgentSession
+
+    _STATE["agent"] = AgentSession(_STATE["llm"], role=_role(role),
+                                   vision_llm=_STATE["vision"], on_event=_emit)
+    return {"role": _STATE["agent"].role, "turns": 0, "mode": "agent"}
+
+
+def agent_turn(message: str = "", facts: dict[str, Any] | None = None,
+               images: list[str] | None = None,
+               reports: list[str] | None = None) -> dict[str, Any]:
+    if _STATE["agent"] is None:
+        agent_new()
+    session = _STATE["agent"]
+    result = session.turn(message, facts=facts or None, images=images or None,
+                          reports=reports or None)
+    payload = result.to_dict()
+    payload.update({"role": session.role, "turns": len(session.turns),
+                    "provider": getattr(_STATE["llm"], "name", "")})
+    return payload
+
+
+def agent_export() -> dict[str, Any]:
+    if _STATE["agent"] is None:
+        raise RuntimeError("no agent session")
+    return _STATE["agent"].to_dict()
+
+
+def agent_import(data: dict[str, Any], role: str = "oncologist") -> dict[str, Any]:
+    """Resume a model-led consultation; authority (role) comes from this
+    call, never from the file."""
+    from .agentic import AgentSession
+
+    session = AgentSession.load(data, _STATE["llm"], role=_role(role),
+                                vision_llm=_STATE["vision"], on_event=_emit)
+    _STATE["agent"] = session
+    return {"role": session.role, "turns": len(session.turns),
+            "facts": session.facts, "mode": "agent"}
+
+
+def _emit(event: dict[str, Any]) -> None:
+    """Stream an agent event to the page while the turn is still running
+    (the worker forwards it; natively this is a no-op)."""
+    from .platform_caps import IN_BROWSER
+
+    if not IN_BROWSER:
+        return
+    try:
+        import js  # type: ignore[import-not-found]
+
+        js.agentEvent(json.dumps(event, ensure_ascii=False, default=str))
+    except Exception:  # noqa: BLE001 - progress is best effort
+        pass
+
+
 # --------------------------------------------------------------- knowledge
 
 def kg_info() -> dict[str, Any]:
@@ -466,6 +542,8 @@ _API: dict[str, Callable[..., Any]] = {
     "stage": stage, "run_case": run_case, "export_last": export_last,
     "chat_new": chat_new, "chat_turn": chat_turn, "chat_whatif": chat_whatif,
     "chat_export": chat_export, "chat_import": chat_import,
+    "set_mode": set_mode, "agent_new": agent_new, "agent_turn": agent_turn,
+    "agent_export": agent_export, "agent_import": agent_import,
     "kg_info": kg_info, "kg_search": kg_search, "kg_get": kg_get,
     "audit_plan": audit_plan, "golden_cases": golden_cases,
     "run_eval": run_eval,

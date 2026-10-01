@@ -755,6 +755,100 @@ def cmd_llm_check(args) -> int:
     return rc
 
 
+def cmd_agent(args) -> int:
+    """Model-led consultation: the model reasons, calls tools and decides;
+    the deterministic kernel is its toolbox and an advisory reviewer."""
+    from .agentic import AgentSession
+
+    try:
+        llm = build_client(getattr(args, "llm_provider", None) or None,
+                           model=getattr(args, "llm_model", None) or None)
+        vision = build_vision_client(
+            provider=getattr(args, "vision_provider", None) or None)
+    except LLMError as exc:
+        print(f"LLM configuration error: {exc}", file=sys.stderr)
+        return 2
+    if not getattr(llm, "available", False):
+        print("agent mode needs a model: set NSCLC_LLM_PROVIDER (poe, "
+              "minimax, azure, litellm or mock) or pass --llm-provider",
+              file=sys.stderr)
+        return 2
+
+    def show(event: dict) -> None:
+        if args.json or args.quiet:
+            return
+        kind = event.get("type")
+        if kind == "tool_call":
+            print(f"  → {event['name']}({json.dumps(event.get('args') or {}, ensure_ascii=False)[:120]})",
+                  file=sys.stderr)
+        elif kind == "tool_result":
+            print(f"    {'✓' if event.get('ok') else '✗'} {event.get('summary')}",
+                  file=sys.stderr)
+        elif kind == "thinking":
+            print(f"  · 思考：{str(event.get('text'))[:200]}", file=sys.stderr)
+        elif kind == "review":
+            print(f"  ⚖ 规则复核：{len(event.get('findings') or [])} 条参考意见",
+                  file=sys.stderr)
+        elif kind == "alert":
+            print(f"  ⚠ 急症筛查：{', '.join(event['emergency']['signals'])}",
+                  file=sys.stderr)
+
+    session_path = Path(args.session) if args.session else None
+    role = args.role or "oncologist"
+    if session_path and session_path.exists():
+        try:
+            session = AgentSession.load(
+                json.loads(session_path.read_text(encoding="utf-8")), llm,
+                role=role, vision_llm=vision, on_event=show)
+        except (ValueError, json.JSONDecodeError) as exc:
+            print(f"cannot resume {session_path}: {exc}", file=sys.stderr)
+            return 2
+    else:
+        session = AgentSession(llm, role=role, vision_llm=vision, on_event=show)
+    facts = json.loads(args.facts) if args.facts else None
+
+    def one_turn(text: str, turn_facts=None) -> int:
+        result = session.turn(text, facts=turn_facts,
+                              images=_expand_image_args(args.image),
+                              reports=_expand_image_args(args.report))
+        if session_path:
+            session_path.write_text(json.dumps(session.to_dict(),
+                                               ensure_ascii=False, indent=2),
+                                    encoding="utf-8")
+        if args.json:
+            print(json.dumps(result.to_dict(), ensure_ascii=False, default=str))
+        else:
+            print(result.reply)
+            review = result.review
+            if review["findings"]:
+                print("\n— 规则引擎参考意见（非硬约束）：")
+                answers = {r.get("rule_id"): r for r in review["responses"]}
+                for f in review["findings"]:
+                    a = answers.get(f["rule_id"])
+                    verdict = (f"{a.get('decision')}：{a.get('reason', '')}"
+                               if a else "未回应")
+                    print(f"  [{f['severity']}] {f['rule_id']} — {verdict}")
+        return 1 if result.error else 0
+
+    if args.message:
+        rc = 0
+        for i, text in enumerate(args.message):
+            rc = max(rc, one_turn(text, facts if i == 0 else None))
+        return rc
+    print("NSCLC-Agent 模型主导会诊（IMPF-AI）。输入病例或问题，空行退出。", file=sys.stderr)
+    first = True
+    while True:
+        try:
+            text = input("你> ").strip()
+        except EOFError:
+            break
+        if not text:
+            break
+        one_turn(text, facts if first else None)
+        first = False
+    return 0
+
+
 def _add_llm_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--llm-provider", help="azure|poe|minimax|litellm|mock")
     parser.add_argument("--llm-model")
@@ -964,6 +1058,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--golden", help="Golden case directory")
     p.add_argument("--out", help="Write the full report JSON here")
     p.set_defaults(func=cmd_eval)
+
+    p = sub.add_parser(
+        "agent",
+        help="Model-led consultation: the model reasons and calls tools; "
+             "rules are advisory")
+    _add_llm_flags(p)
+    p.add_argument("--message", action="append",
+                   help="scripted turn (repeatable); omit for a REPL")
+    p.add_argument("--facts", help="structured facts JSON for the first turn")
+    p.add_argument("--role", choices=["oncologist", "patient", "researcher"])
+    p.add_argument("--session", help="session file to resume and save")
+    p.add_argument("--image", action="append", help="imaging file(s) for the turn")
+    p.add_argument("--report", action="append", help="report image(s) for the turn")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--quiet", action="store_true", help="no live tool timeline")
+    p.set_defaults(func=cmd_agent)
 
     p = sub.add_parser("llm-check", help="Show configured backends")
     _add_llm_flags(p)
