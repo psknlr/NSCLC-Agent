@@ -49,6 +49,8 @@ def build(out: Path) -> dict:
         shutil.rmtree(out)
     shutil.copytree(WEB, out, ignore=shutil.ignore_patterns(
         "build.py", "__pycache__", "*.pyc"))
+    # One localisation dictionary for Python and the browser.
+    shutil.copyfile(PACKAGE / "i18n" / "en.json", out / "assets" / "i18n-en.json")
     package = pack_package()
     (out / "nsclc_agent.zip").write_bytes(package)
     meta = {

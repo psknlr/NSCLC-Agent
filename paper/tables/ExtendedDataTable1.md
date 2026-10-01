@@ -1,0 +1,13 @@
+**Extended Data Table 1 | Gold-standard evaluation of the governed pipeline**
+
+| Metric | Cases (k/n) | Proportion, % (95% CI) |
+|---|---|---|
+| Staging accuracy | 40/40 | 100.0 (91.2–100.0) |
+| Routing accuracy | 11/11 | 100.0 (71.5–100.0) |
+| Regimen accuracy | 35/35 | 100.0 (90.0–100.0) |
+| Safety-clean rate | 42/42 | 100.0 (91.6–100.0) |
+| Unsafe-release rate | 0/35 | 0.0 (0.0–10.0) |
+| Error taxonomy, all classes | 0 errors | — |
+
+The set has 70 cases: 42 end-to-end pipeline cases and 28 audit probes (deliberately unsafe plans given directly to the rule engine). Unsafe-release rate counts audit probes (0/28) and withholding pipeline cases (0/7).
+95% CI, exact Clopper–Pearson interval. Cases were written by the developers; dual clinician adjudication is pending (70 of 70 unadjudicated).

@@ -41,12 +41,19 @@ class AgentDefinition:
     tools: tuple[str, ...]
     max_steps: int = 8
     builtin: bool = True
+    title_en: str = ""
+    description_en: str = ""
 
-    def to_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "title": self.title,
-                "description": self.description, "prompt": self.prompt,
-                "tools": list(self.tools), "max_steps": self.max_steps,
-                "builtin": self.builtin}
+    def label(self, lang: str = "zh") -> str:
+        return (self.title_en or self.title) if lang == "en" else self.title
+
+    def to_dict(self, lang: str = "zh") -> dict[str, Any]:
+        en = lang == "en"
+        return {"name": self.name, "title": self.label(lang),
+                "description": (self.description_en or self.description) if en
+                else self.description,
+                "prompt": self.prompt, "tools": list(self.tools),
+                "max_steps": self.max_steps, "builtin": self.builtin}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentDefinition":
@@ -58,7 +65,9 @@ class AgentDefinition:
                    prompt=str(data.get("prompt") or "")[:6000],
                    tools=tuple(str(t) for t in data.get("tools") or ()),
                    max_steps=max(2, min(int(data.get("max_steps") or 8), 16)),
-                   builtin=False)
+                   builtin=False,
+                   title_en=str(data.get("title_en") or "")[:40],
+                   description_en=str(data.get("description_en") or "")[:400])
 
 
 _COMMON = """你是 NSCLC-Agent 多学科会诊（MDT）中的{title}。主诊智能体把一个具体问题交给你。
@@ -73,41 +82,62 @@ BUILTIN_AGENTS: tuple[AgentDefinition, ...] = (
         "解读影像与分期描述符：T/N/M 判定、淋巴结分站、远处转移与脑转移评估、分期引擎核对、读片。",
         "关注：T 大小与侵犯、N 分站（9 版 N2a/N2b）、M 分类（M1c1/M1c2）、需要补做的影像检查（PET-CT、脑 MRI、EBUS 等）。",
         ("stage_tnm", "cns_assessment", "read_attachment", "protocol_sections",
-         "guideline_search")),
+         "guideline_search"),
+        title_en="Radiologist",
+        description_en="Imaging and staging descriptors: T/N/M, nodal stations, distant and "
+                       "brain metastases, staging-engine check, image reading."),
     AgentDefinition(
         "pathology", "病理与分子病理科医师",
         "组织学分型、驱动基因报告解读（变异类别、阴阳性、检测充分性）、PD-L1、是否需要扩展 NGS 或再活检。",
         "关注：组织学是否明确；驱动基因逐个判定（阳性/阴性/未检/失败）；EGFR 变异类别；检测平台与充分性；建议补检项目。",
-        ("assess_biomarkers", "guideline_search", "search_trials")),
+        ("assess_biomarkers", "guideline_search", "search_trials"),
+        title_en="Pathologist (molecular)",
+        description_en="Histology, driver reports (variant class, positive/negative, test "
+                       "adequacy), PD-L1, and whether broader NGS or re-biopsy is needed."),
     AgentDefinition(
         "thoracic_surgery", "胸外科医师",
         "可切除性与可手术性、围术期（新辅助/辅助/围术期）策略、手术禁忌。",
         "关注：可切除性（单站/多站 N2、N3）、可耐受手术（肺功能、PS）、围术期方案的人群边界与驱动基因影响。",
         ("stage_tnm", "check_indication", "protocol_sections", "search_trials",
-         "guideline_search", "check_organ_function")),
+         "guideline_search", "check_organ_function"),
+        title_en="Thoracic surgeon",
+        description_en="Resectability and operability, perioperative (neoadjuvant / "
+                       "adjuvant / perioperative) strategy, contraindications to surgery."),
     AgentDefinition(
         "radiation_oncology", "放疗科医师",
         "根治性放化疗、巩固治疗、SBRT、寡转移局部治疗、脑转移 SRS/WBRT。",
         "关注：根治性 cCRT 的适应证与巩固方案选择、寡转移局部治疗、脑转移局部治疗时机；不给出放疗剂量分割的具体处方。",
         ("protocol_sections", "search_trials", "cns_assessment", "guideline_search",
-         "check_indication")),
+         "check_indication"),
+        title_en="Radiation oncologist",
+        description_en="Definitive chemoradiotherapy, consolidation, SBRT, local therapy for "
+                       "oligometastases, SRS / WBRT for brain metastases."),
     AgentDefinition(
         "medical_oncology", "肿瘤内科医师",
         "全身治疗选择：靶向、免疫、化疗、ADC；一线与后线序贯；耐药机制。",
         "关注：驱动基因导向的一线选择、免疫适应证（PD-L1、驱动阴性）、进展后的序贯与耐药机制、方案的适应证核对。",
         ("search_regimens", "check_indication", "later_line_options", "search_trials",
-         "guideline_search", "regimen_dosing", "prognosis", "assess_biomarkers")),
+         "guideline_search", "regimen_dosing", "prognosis", "assess_biomarkers"),
+        title_en="Medical oncologist",
+        description_en="Systemic therapy: targeted, immunotherapy, chemotherapy, ADCs; first "
+                       "and later lines; resistance mechanisms."),
     AgentDefinition(
         "pharmacy", "临床药师",
         "剂量参考、器官功能调整、药物相互作用、毒性监测。",
         "关注：方案库参考剂量（须核对说明书与本院方案）、肾/肝功能与 QTc、合并用药相互作用、监测要点。",
         ("regimen_dosing", "check_organ_function", "interaction_check",
-         "search_regimens")),
+         "search_regimens"),
+        title_en="Clinical pharmacist",
+        description_en="Reference dosing, organ-function adjustments, drug interactions, "
+                       "toxicity monitoring."),
     AgentDefinition(
         "evidence", "循证医学研究员",
         "检索并核实试验与指南证据：入组人群、主要结果、证据等级、地区指南差异。",
         "关注：关键试验的入组人群是否覆盖本例、结果与局限、NCCN/ESMO/CSCO 推荐差异；引用必须来自工具结果。",
-        ("search_trials", "guideline_search", "citation_verify", "pubmed_search")),
+        ("search_trials", "guideline_search", "citation_verify", "pubmed_search"),
+        title_en="Evidence researcher",
+        description_en="Finds and verifies trial and guideline evidence: populations, main "
+                       "results, evidence level, regional guideline differences."),
 )
 
 
@@ -135,7 +165,8 @@ class SubAgentRunner:
                  parallel: bool = False, temperature: float = 0.2,
                  max_tokens: int = 4000, instructions: str = "",
                  post_tool: Callable[[str, dict[str, Any], dict[str, Any]], str | None]
-                 | None = None) -> None:
+                 | None = None, language: str = "zh") -> None:
+        self.language = language
         self.llm = llm
         self.clinical = clinical
         self.definitions = {d.name: d for d in definitions}
@@ -169,7 +200,7 @@ class SubAgentRunner:
                              "description": "anything the specialist needs beyond the case notes"}},
                 ["agent", "task"]),
             handler=self.delegate, category="delegation", parallel_safe=True,
-            label="请专科会诊")
+            label="Specialist consult" if self.language == "en" else "请专科会诊")
 
     def delegate(self, agent: str, task: str, context: str = "") -> dict[str, Any]:
         definition = self.definitions.get(str(agent))
@@ -180,6 +211,10 @@ class SubAgentRunner:
         system = _COMMON.format(title=definition.title) + "\n\n" + definition.prompt
         if self.instructions:
             system += "\n\n【机构规范与用户偏好】\n" + self.instructions
+        if self.language == "en":
+            from .prompts import LANGUAGE_DIRECTIVE_EN
+
+            system += LANGUAGE_DIRECTIVE_EN
         user = (f"【主诊智能体的问题】{task}\n\n"
                 + (f"【补充背景】{context}\n\n" if context else "")
                 + "【当前病例笔记】" + json.dumps(self.case_notes(), ensure_ascii=False,
@@ -195,7 +230,7 @@ class SubAgentRunner:
             return {"status": "accepted"}, True
 
         self.emit({"type": "subagent_start", "agent": definition.name,
-                   "title": definition.title, "task": task})
+                   "title": definition.label(self.language), "task": task})
         try:
             loop = run_loop(
                 self.llm, messages, toolset, emit=self.emit, terminal=terminal,
@@ -220,11 +255,13 @@ class SubAgentRunner:
         self.emit({"type": "subagent_end", "agent": definition.name, "ok": True,
                    "confidence": report.get("confidence")})
         tools_used = [s["name"] for s in loop.steps if s.get("kind") == "tool"]
+        title = definition.label(self.language)
+        sep = ": " if self.language == "en" else "："
         return {"ok": True,
-                "summary": f"{definition.title}：" + str(report.get("report") or "")[:120],
-                "data": {"specialist": definition.title, **report,
+                "summary": title + sep + str(report.get("report") or "")[:120],
+                "data": {"specialist": title, **report,
                          "tools_used": tools_used},
-                "_ui": {"specialist": definition.name, "title": definition.title,
+                "_ui": {"specialist": definition.name, "title": title,
                         "report": report, "children": loop.steps}}
 
 

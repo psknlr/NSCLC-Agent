@@ -1,6 +1,9 @@
 """Oncologic emergency screen: negation scope, escalation, action plan."""
 
+import pytest
+
 from nsclc_agent.safety import emergencies
+from nsclc_agent.safety.emergencies import screen
 
 
 def _screen(text):
@@ -60,3 +63,30 @@ def test_action_plan_shape():
     assert plan["risk_judgement"] == "oncologic_emergency"
     assert plan["signals"] and plan["immediate_actions"]
     assert plan["do_not"] and plan["escalate_if"]
+
+
+# ---------------------------------------------------------------- English screen
+# (the English UI makes English narratives first-class input)
+
+@pytest.mark.parametrize("text,signal", [
+    ("sudden massive hemoptysis that will not stop", "massive_hemoptysis"),
+    ("Febrile neutropenia on chemotherapy", "febrile_neutropenia"),
+    ("fever 38.5 two days after chemotherapy", "febrile_neutropenia"),
+    ("neutropenic fever", "febrile_neutropenia"),
+    ("spinal cord compression", "cord_compression"),
+    ("superior vena cava obstruction", "svc_syndrome"),
+])
+def test_english_emergencies_escalate(text, signal):
+    assert signal in [h["signal_id"] for h in screen(text).hard_hits]
+
+
+def test_english_negation_must_precede_the_symptom():
+    assert screen("denies hemoptysis").negated == ["massive_hemoptysis"]
+    assert screen("patient has not had any hemoptysis").negated == ["massive_hemoptysis"]
+    assert not screen("massive hemoptysis that is not controlled").negated
+
+
+def test_chemotherapy_is_not_a_third_party_cue():
+    """'che-mother-apy' once matched the third-party cue 'mother'."""
+    assert screen("massive hemoptysis during chemotherapy").hard_hits
+    assert not screen("my mother had massive hemoptysis").hard_hits

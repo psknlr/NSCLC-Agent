@@ -51,7 +51,14 @@ _READABLE_FORMATS = ("nsclc-agent-session/1", SESSION_FORMAT)
 
 _SYSTEM_PREFIX = "[系统]"
 _SUMMARY_PREFIX = "【此前会诊摘要"
-_NUDGE = "请调用 submit_consult 提交本轮结论（reply 可直接使用你刚才的回答）。"
+_NUDGE = {"zh": "请调用 submit_consult 提交本轮结论（reply 可直接使用你刚才的回答）。",
+          "en": "Please call submit_consult to submit this turn's conclusion (the reply can "
+                "reuse the answer you just gave)."}
+LANGUAGES = ("zh", "en")
+
+
+def _t(lang: str, zh: str, en: str) -> str:
+    return en if lang == "en" else zh
 
 
 @dataclass
@@ -77,6 +84,8 @@ class AgentConfig:
     mcp_servers: list[dict[str, Any]] = field(default_factory=list)
     #: Run read-only tool calls concurrently (None = when threads exist).
     parallel: bool | None = None
+    #: Language the clinician reads: "zh" or "en" (prompts, hooks, commands).
+    language: str = "zh"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "AgentConfig":
@@ -108,6 +117,7 @@ class AgentConfig:
             mcp_servers=[s for s in data.get("mcp_servers") or []
                          if isinstance(s, dict) and s.get("url")][:8],
             parallel=None if parallel is None else bool(parallel),
+            language=data.get("language") if data.get("language") in LANGUAGES else "zh",
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -193,7 +203,8 @@ class AgentSession:
                                     narrative=lambda: "\n".join(self.narrative))
         self.plan = Plan(on_change=lambda items: self._emit({"type": "plan",
                                                              "items": items}))
-        self.memory = MemoryNotes()
+        self.memory = MemoryNotes(language=self.config.language)
+        self.plan.language = self.config.language
         self.state: dict[str, Any] = {"evidence_seen": set(), "dosing_seen": set(),
                                       "emergency": None}
         self.usage = {"turns": 0, "calls": 0, "prompt": 0, "completion": 0,
@@ -212,6 +223,9 @@ class AgentSession:
         cfg = self.config
         self.parallel = THREADS_AVAILABLE if cfg.parallel is None else (
             cfg.parallel and THREADS_AVAILABLE)
+        self.lang = cfg.language
+        if hasattr(self, "plan"):
+            self.plan.language = self.memory.language = cfg.language
         self.hooks = HookRunner(builtin_hooks(), cfg.hooks)
         disabled = set(cfg.disabled_agents)
         definitions = {d.name: d for d in BUILTIN_AGENTS if d.name not in disabled}
@@ -263,20 +277,21 @@ class AgentSession:
     def _submit_tool(self) -> Tool:
         return Tool(SUBMIT_SPEC.name, SUBMIT_SPEC.description, SUBMIT_SPEC.parameters,
                     category="control", parallel_safe=False, terminal=True,
-                    label="提交会诊结论")
+                    label=_t(self.lang, "提交会诊结论", "Submit conclusion"))
 
     def _toolset(self) -> tuple[Toolset, SubAgentRunner | None]:
         mcp = self._mcp()
-        groups: list[list[Tool]] = [self.toolbox.as_tools(), [self.plan.tool()]]
+        groups: list[list[Tool]] = [self.toolbox.as_tools(lang=self.lang), [self.plan.tool()]]
         runner = None
         if self.config.subagents and self.definitions:
             runner = SubAgentRunner(
-                self.llm, Toolset.of(self.toolbox.as_tools(read_only=True), mcp),
+                self.llm, Toolset.of(self.toolbox.as_tools(read_only=True, lang=self.lang), mcp),
                 definitions=self.definitions, case_notes=lambda: self.facts,
                 emit=self._emit, cancelled=lambda: self._cancel,
                 parallel=self.parallel, temperature=self.config.temperature,
                 max_tokens=min(4000, self.config.max_tokens),
-                instructions=self.config.instructions, post_tool=self._post_tool)
+                instructions=self.config.instructions, post_tool=self._post_tool,
+                language=self.lang)
             groups.append([runner.tool()])
         groups += [[self.memory.tool()], mcp, [self._submit_tool()]]
         return Toolset.of(*groups), runner
@@ -286,7 +301,8 @@ class AgentSession:
         return {"role": "system",
                 "content": lead_prompt(self.role, roster=roster,
                                        mcp_tools=[t.name for t in self._mcp()],
-                                       instructions=self.config.instructions)}
+                                       instructions=self.config.instructions,
+                                       language=self.lang)}
 
     def _refresh_system(self) -> None:
         if self.messages and self.messages[0].get("role") == "system":
@@ -339,7 +355,7 @@ class AgentSession:
                 max_steps=self.config.max_steps,
                 temperature=self.config.temperature,
                 max_tokens=self.config.max_tokens, parallel=self.parallel,
-                cancelled=lambda: self._cancel, nudge=_NUDGE,
+                cancelled=lambda: self._cancel, nudge=_NUDGE[self.lang],
                 post_tool=self._post_tool, result=loop)
         except (Cancelled, KeyboardInterrupt):
             self._cancel = True
@@ -358,9 +374,13 @@ class AgentSession:
         consult = self._final_consult(state, loop)
         reply = str(consult.get("reply") or "").strip()
         if not reply:
-            reply = (f"本轮模型调用失败：{error}" if error else
-                     "（已停止）本轮会诊被中断。" if loop.stop == "cancelled" else
-                     "模型未提交结论（步数用尽）。请补充信息或重试。")
+            reply = (_t(self.lang, f"本轮模型调用失败：{error}",
+                        f"The model call failed this turn: {error}") if error else
+                     _t(self.lang, "（已停止）本轮会诊被中断。",
+                        "(Stopped) This turn was interrupted.") if loop.stop == "cancelled" else
+                     _t(self.lang, "模型未提交结论（步数用尽）。请补充信息或重试。",
+                        "The model did not submit a conclusion (step budget used up). "
+                        "Add information or try again."))
         responses = [r for r in consult.get("rule_responses") or [] if isinstance(r, dict)]
         answered = {str(r.get("rule_id")) for r in responses}
         review = {"findings": state.findings, "responses": responses,
@@ -402,7 +422,7 @@ class AgentSession:
         clinician (both shown in the trace)."""
         self.state["emergency"] = None
         ctx = {"message": message, "narrative": message, "facts": self.toolbox.facts,
-               "state": self.state}
+               "state": self.state, "lang": self.lang}
         contexts = []
         for hook, outcome in self.hooks.run("user_prompt_submit", ctx):
             if outcome.alert:
@@ -418,7 +438,8 @@ class AgentSession:
 
     def _post_tool(self, name: str, arguments: dict[str, Any],
                    out: dict[str, Any]) -> str | None:
-        ctx = {"tool": name, "args": arguments, "result": out, "state": self.state}
+        ctx = {"tool": name, "args": arguments, "result": out, "state": self.state,
+               "lang": self.lang}
         notes = [o.context for _h, o in self.hooks.run("post_tool_use", ctx) if o.context]
         return "\n".join(notes) or None
 
@@ -430,7 +451,7 @@ class AgentSession:
                     "error": "submit_consult needs a non-empty reply"}, False
         state.submission = consult
         ctx = {"consult": consult, "facts": self.toolbox.facts, "toolbox": self.toolbox,
-               "state": self.state, "role": self.role}
+               "state": self.state, "role": self.role, "lang": self.lang}
         findings: list[dict[str, Any]] = []
         seen: set[str] = set()
         for hook, outcome in self.hooks.run("stop", ctx):
@@ -453,10 +474,17 @@ class AgentSession:
             return {
                 "status": "review",
                 "findings": unanswered,
-                "instruction": "这是 hooks（规则引擎、分期一致性、引用/剂量溯源、急症优先）"
-                               "的复核意见，供你参考，不是硬约束。请逐条判断：采纳就修改"
-                               "方案；不采纳就在 rule_responses 写明临床理由。然后再次调用 "
-                               "submit_consult。",
+                "instruction": _t(
+                    self.lang,
+                    "这是 hooks（规则引擎、分期一致性、引用/剂量溯源、急症优先）"
+                    "的复核意见，供你参考，不是硬约束。请逐条判断：采纳就修改"
+                    "方案；不采纳就在 rule_responses 写明临床理由。然后再次调用 "
+                    "submit_consult。",
+                    "These are the hooks' review findings (rule engine, stage consistency, "
+                    "citation/dose provenance, emergency first). They are advisory, not hard "
+                    "constraints. Weigh each one: if you accept it, revise the plan; if not, "
+                    "give your clinical reason in rule_responses. Then call submit_consult "
+                    "again."),
             }, False
         return {"status": "accepted"}, True
 
@@ -552,7 +580,9 @@ class AgentSession:
             self.messages[0].get("role") == "system" else self._system()
         self.messages = [system, {"role": "user", "content": summary},
                          {"role": "assistant",
-                          "content": "好的，我已了解此前的会诊经过，会在此基础上继续。"},
+                          "content": _t(self.lang, "好的，我已了解此前的会诊经过，会在此基础上继续。",
+                                        "Understood — I have the earlier consult and will "
+                                        "continue from it.")},
                          *self.messages[cut:]]
         self.checkpoints = []
         self.compactions += 1
@@ -613,17 +643,17 @@ class AgentSession:
             "role": self.role, "turns": len(self.turns),
             "config": self.config.to_dict(), "parallel": self.parallel,
             "tools": toolset.describe(),
-            "agents": [d.to_dict() for d in self.definitions],
+            "agents": [d.to_dict(self.lang) for d in self.definitions],
             "subagents": self.config.subagents,
-            "hooks": self.hooks.describe(),
+            "hooks": self.hooks.describe(self.lang),
             "mcp": self.mcp_status,
             "plan": copy.deepcopy(self.plan.items),
             "usage": dict(self.usage), "context": self.context(),
             "checkpoints": [{"turn": c["turn"], "message": c["message"][:120]}
                             for c in self.checkpoints],
             "instructions": self.config.instructions,
-            "builtin_agents": [d.to_dict() for d in BUILTIN_AGENTS],
-            "commands": listing(),
+            "builtin_agents": [d.to_dict(self.lang) for d in BUILTIN_AGENTS],
+            "commands": listing(self.lang),
         }
 
     def local_command(self, name: str, arg: str = "") -> dict[str, Any]:
@@ -633,58 +663,82 @@ class AgentSession:
         from .commands import listing
 
         name = str(name or "").strip().lower()
+        lang = self.lang
+        en = lang == "en"
         if name == "compact":
             data = self.compact()
-            text = (f"已压缩 {data['turns']} 轮早期会诊（{'模型撰写摘要' if data['by_model'] else '确定性摘要'}），"
-                    f"上下文 {data['before']} → {data['after']} tokens。"
-                    if data.get("ok") else data.get("reason", "无需压缩"))
+            if not data.get("ok"):
+                text = _t(lang, data.get("reason", "无需压缩"), "Nothing to compact yet.")
+            elif en:
+                text = (f"Compacted {data['turns']} earlier turn(s) "
+                        f"({'model-written summary' if data['by_model'] else 'deterministic summary'}); "
+                        f"context {data['before']} → {data['after']} tokens.")
+            else:
+                text = (f"已压缩 {data['turns']} 轮早期会诊（{'模型撰写摘要' if data['by_model'] else '确定性摘要'}），"
+                        f"上下文 {data['before']} → {data['after']} tokens。")
         elif name == "rewind":
             target = None
             if str(arg).strip():
                 try:
                     target = int(str(arg).strip()) - 1
                 except ValueError as exc:
-                    raise ValueError("用法：/rewind [轮次]，例如 /rewind 2") from exc
+                    raise ValueError(_t(lang, "用法：/rewind [轮次]，例如 /rewind 2",
+                                        "Usage: /rewind [turn], e.g. /rewind 2")) from exc
             data = self.rewind(target)
-            text = f"已回退到第 {data['turn'] + 1} 轮之前（撤销 {data['removed']} 轮）。"
+            text = _t(lang, f"已回退到第 {data['turn'] + 1} 轮之前（撤销 {data['removed']} 轮）。",
+                      f"Rewound to before turn {data['turn'] + 1} ({data['removed']} turn(s) undone).")
         elif name == "usage":
             ctx = self.context()
-            data = {"usage": dict(self.usage), "context": ctx}
-            text = (f"模型调用 {self.usage['calls']} 次（其中专科子智能体 "
-                    f"{self.usage['subagent_calls']} 次），输入 {self.usage['prompt']} / "
-                    f"输出 {self.usage['completion']} tokens；上下文约 {ctx['tokens']} / "
-                    f"{ctx['window']} tokens（{ctx['ratio']:.0%}），已压缩 {self.compactions} 次。")
+            u = self.usage
+            data = {"usage": dict(u), "context": ctx}
+            text = _t(lang,
+                      f"模型调用 {u['calls']} 次（其中专科子智能体 {u['subagent_calls']} 次），"
+                      f"输入 {u['prompt']} / 输出 {u['completion']} tokens；上下文约 {ctx['tokens']} / "
+                      f"{ctx['window']} tokens（{ctx['ratio']:.0%}），已压缩 {self.compactions} 次。",
+                      f"{u['calls']} model calls ({u['subagent_calls']} by specialist sub-agents), "
+                      f"{u['prompt']} prompt / {u['completion']} completion tokens; context about "
+                      f"{ctx['tokens']} / {ctx['window']} tokens ({ctx['ratio']:.0%}); compacted "
+                      f"{self.compactions} time(s).")
         elif name == "agents":
-            data = {"agents": [d.to_dict() for d in self.definitions],
+            data = {"agents": [d.to_dict(lang) for d in self.definitions],
                     "enabled": self.config.subagents}
-            text = ("专科子智能体" + ("" if self.config.subagents else "（已停用）") + "：\n"
-                    + "\n".join(f"- **{d.title}** `{d.name}` — {d.description}"
-                                for d in self.definitions))
+            head = _t(lang, "专科子智能体" + ("" if self.config.subagents else "（已停用）") + "：",
+                      "Specialist sub-agents" + ("" if self.config.subagents else " (off)") + ":")
+            text = head + "\n" + "\n".join(
+                f"- **{a['title']}** `{a['name']}` — {a['description']}" for a in data["agents"])
         elif name == "tools":
             toolset, _ = self._toolset()
             data = {"tools": toolset.describe()}
-            text = "可调用的工具：\n" + "\n".join(
-                f"- `{t['name']}`（{t['label']}，{t['category']}）" for t in data["tools"])
+            text = _t(lang, "可调用的工具：", "Tools the agent can call:") + "\n" + "\n".join(
+                f"- `{t['name']}`（{t['label']}，{t['category']}）" if not en else
+                f"- `{t['name']}` ({t['label']}, {t['category']})" for t in data["tools"])
         elif name == "hooks":
-            data = {"hooks": self.hooks.describe()}
-            text = "Hooks（均为参考意见，不是硬约束）：\n" + "\n".join(
+            data = {"hooks": self.hooks.describe(lang)}
+            text = _t(lang, "Hooks（均为参考意见，不是硬约束）：",
+                      "Hooks (all advisory, never hard constraints):") + "\n" + "\n".join(
                 f"- {'✓' if h['enabled'] else '✗'} **{h['title']}** `{h['name']}` "
                 f"[{h['event']}] — {h['description']}" for h in data["hooks"])
         elif name == "memory":
             data = {"instructions": self.config.instructions,
                     "proposals": list(self.memory.proposals)}
-            text = ("已载入的机构规范与用户偏好：\n\n" + self.config.instructions
-                    if self.config.instructions.strip() else "尚未载入记忆（NSCLC.md / 记忆面板）。")
+            if self.config.instructions.strip():
+                text = _t(lang, "已载入的机构规范与用户偏好：",
+                          "Loaded institution protocols and preferences:") + \
+                    "\n\n" + self.config.instructions
+            else:
+                text = _t(lang, "尚未载入记忆（NSCLC.md / 记忆面板）。",
+                          "No memory loaded yet (NSCLC.md / the Memory panel).")
             if self.memory.proposals:
-                text += "\n\n本次会诊中智能体提议记住：\n" + "\n".join(
+                text += _t(lang, "\n\n本次会诊中智能体提议记住：\n",
+                           "\n\nProposed by the agent in this consult:\n") + "\n".join(
                     f"- {p}" for p in self.memory.proposals)
         elif name == "help":
-            data = {"commands": listing()}
-            text = "命令：\n" + "\n".join(
+            data = {"commands": listing(lang)}
+            text = _t(lang, "命令：", "Commands:") + "\n" + "\n".join(
                 f"- `/{c['name']}{(' ' + c['args']) if c['args'] else ''}` — {c['description']}"
                 for c in data["commands"])
         else:
-            raise ValueError(f"/{name} 不是本地命令")
+            raise ValueError(_t(lang, f"/{name} 不是本地命令", f"/{name} is not a local command"))
         return {"command": name, "text": text, "data": data}
 
     # ------------------------------------------------------- serialization
@@ -780,17 +834,21 @@ def runtime_catalog(config: AgentConfig | dict[str, Any] | None = None) -> dict[
             continue
         if custom.name not in disabled:
             agents[custom.name] = custom
-    tools = Toolset.of(toolbox.as_tools(), [Plan().tool(), MemoryNotes().tool()]).describe()
+    lang = cfg.language
+    tools = Toolset.of(toolbox.as_tools(lang=lang),
+                       [Plan(language=lang).tool(), MemoryNotes(language=lang).tool()]).describe()
     if cfg.subagents and agents:
-        tools.append({"name": "delegate", "category": "delegation", "label": "请专科会诊",
+        tools.append({"name": "delegate", "category": "delegation",
+                      "label": _t(lang, "请专科会诊", "Specialist consult"),
                       "description": "Delegate a focused question to a specialist sub-agent"})
-    tools.append({"name": SUBMIT_TOOL, "category": "control", "label": "提交会诊结论",
+    tools.append({"name": SUBMIT_TOOL, "category": "control",
+                  "label": _t(lang, "提交会诊结论", "Submit conclusion"),
                   "description": "Submit the consult conclusion (terminal)"})
     return {"role": None, "turns": 0, "config": cfg.to_dict(), "tools": tools,
-            "agents": [d.to_dict() for d in agents.values()],
-            "builtin_agents": [d.to_dict() for d in BUILTIN_AGENTS],
+            "agents": [d.to_dict(lang) for d in agents.values()],
+            "builtin_agents": [d.to_dict(lang) for d in BUILTIN_AGENTS],
             "subagents": cfg.subagents,
-            "hooks": HookRunner(builtin_hooks(), cfg.hooks).describe(),
+            "hooks": HookRunner(builtin_hooks(), cfg.hooks).describe(lang),
             "mcp": [], "plan": [], "usage": {}, "context": {},
             "checkpoints": [], "instructions": cfg.instructions,
-            "commands": listing()}
+            "commands": listing(lang)}

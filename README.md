@@ -7,7 +7,7 @@
 > 内容寻址的记录/重放日志，以及模型驱动的规划、ReAct 工具循环、主动问诊与
 > 多学科会诊。
 
-**两种会诊模式（v1.0.0）**
+**两种会诊模式（v1.1.0 · 中文 / English）**
 
 * **模型主导（agent，接入模型后的默认）**：一个按主流智能体架构（Claude Code / Grok CLI /
   Codex / OpenAI Agents SDK）构建的**智能体运行时**——主诊智能体自主思考、用 `update_plan`
@@ -47,6 +47,9 @@
   **回退**（病例笔记、计划、证据台账一并恢复，原输入放回输入框）；右栏显示上下文占用。
 * **智能体页**：专科子智能体开关与自定义专科、Hooks 开关、记忆（机构规范与偏好）、MCP 服务器
   （测试连接）、运行预算与命令表。
+* **中 / EN 一键切换**（左下角）：整个界面实时切换为英文（不刷新页面、不丢失已接入的模型），
+  智能体随之用英文思考与作答，Hooks 复核意见、命令输出、会诊计划与示例病例同步切换；受治理流水线
+  的确定性输出（回复框架、问诊问题、状态说明）在显示层译为英文。选择记在本机。
 * **受治理会诊**（未接入模型时，或在顶部切换）：每一轮都是一次完整的受治理运行，
   回复下方是**会诊卡**——确定性分期、放行状态、推荐方案（方案库 + 试验锚点）、待完善检查、
   终审拦截原因；智能体的追问可一键「回答」。
@@ -721,6 +724,35 @@ tools: prognosis, check_organ_function, interaction_check
 受治理模式的全部硬约束原样保留（见下文「架构」）。会诊文件依旧不授予任何权限：视角与运行配置
 来自调用方，系统提示每轮重建；导入时病例笔记与检查点重新校验。
 
+### 中英双语与论文图表（v1.1.0）
+
+**双语。** 中文与英文共用一份显示词典 `nsclc_agent/i18n/en.json`（1,020 个短语、54 条语序规则）。
+网页与 Python 用同一套规则翻译，规则依次为：整句精确匹配、数字语序规则、子串短语替换、双语标签取英文半句。
+翻译只在显示层进行，临床内核本身不改动。模型输出与医生输入始终原样显示，不经过翻译。英文模式下：
+- 系统提示词会追加 “Output language” 指令，主诊与各专科子智能体都用英文书写；
+- Hooks 复核意见、斜杠命令、会诊计划摘要与 Mock 模型都输出英文。
+
+命令行用 `--lang en` 开启英文模式。
+
+**英文急症筛查修复（安全相关）。** 支持英文输入后，在英文表述上发现两处急症漏检：
+- 否定词不分位置都会生效：“massive hemoptysis that will not stop” 被误判为否定。现在英文否定词必须位于症状之前才算否定（NegEx 风格）。
+- “che**mother**apy” 含有 “mother”，于是凡是提到化疗的英文分句都被当作“他人病史”而忽略。第三方与假设线索现在按整词匹配。
+
+两处均已修复，同时补充了常见英文急症表述，以及“发热 + 化疗”同句即触发的规则。中文行为不变。
+修复后金标准评测仍为 70/70，不安全放行仍为 0/35。
+
+**论文图表（`paper/`）。** 全部图表都由脚本复现，所有数值均来自运行本仓库，没有手工填写的数字：
+- **Fig. 1** 系统与知识底座；
+- **Fig. 2** AJCC/UICC 第 9 版分期矩阵（含拒绝）与金标准精确 95% 置信区间；
+- **Fig. 3** Hooks 缺陷注入实验：35 例放行方案 × 7 类缺陷全部检出，无缺陷基线 2/35；
+- **Fig. 4** 专科并行的耗时，以及上下文压缩；
+- **Extended Data Fig. 1**；
+- 4 张三线表（可编辑 Word / LaTeX / Markdown）；
+- 图注见 `paper/legends.md`，按 Nature 规范自检的报告见 `paper/QC.md`。
+
+图表规格：183 mm 双栏，文字 5–7 pt，Okabe–Ito 色盲安全配色，矢量 PDF 保留可编辑文字。
+当前环境没有 Arial，图中字体用的是度量完全一致的 Liberation Sans；在装有 Arial 的机器上重跑 `make_figures.py` 即会自动换成 Arial。
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -832,6 +864,7 @@ nsclc_agent/
   perception/  imaging.py 读片(词表校验/归一化交叉核对/拒绝文本模型)
   tools/       base.py Broker+熔断 · registry.py 11个工具 · retrieval.py 实连检索
   agents/      toolloop.py ReAct · planner.py · panel.py MDT · critic.py · catalog.py
+  i18n/        显示层本地化：en.json 共享词典（网页与 Python 同一规则）
   agentic/     模型主导的智能体运行时：session.py 编排 · loop.py 统一循环 · tools.py
                toolbox.py 20个临床工具 · planning.py · subagents.py 7位专科 · hooks.py
                memory.py 记忆/压缩 · commands.py 斜杠命令 · mcp.py · prompts.py · terminal.py
@@ -845,15 +878,16 @@ nsclc_agent/
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   eval/run_eval.py 错误分类学评测 · eval/adjudication.py 双医师裁定台账
   schemas.py · skills.py · case.py · cli.py
-tests/         652 个用例，全离线    eval/       70 例金标准 + 指标
+tests/         674 个用例，全离线    eval/       70 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
+paper/       论文图表：analysis.py → make_figures.py / make_tables.py / qc.py
 ```
 
 ## 测试与评测
 
 ```bash
 pip install pytest
-python -m pytest -q            # 652 passed，全离线
+python -m pytest -q            # 674 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 70/70：分期40/40 路由11/11 方案35/35
                                # 安全42/42 · unsafe_release_rate 0/35 · 分类学全零

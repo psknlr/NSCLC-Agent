@@ -1,0 +1,113 @@
+{
+ "guidelines": [
+  {
+   "id": "GV_NCCN_2026V5",
+   "label": "NCCN NSCLC 5.2026 (US)",
+   "recommendations": 1466
+  },
+  {
+   "id": "GV_CSCO_NSCLC",
+   "label": "CSCO NSCLC 2025 (CN)",
+   "recommendations": 702
+  },
+  {
+   "id": "GV_CN_TCM_2023",
+   "label": "CN integrated TCM-WM 2023 (CN)",
+   "recommendations": 240
+  },
+  {
+   "id": "GV_ESMO_2025_EARLY_LA",
+   "label": "ESMO early/LA 2025 (EU)",
+   "recommendations": 194
+  },
+  {
+   "id": "GV_ESMO_2023_DRIVER_NEG",
+   "label": "ESMO non-oncogene 2023 (EU)",
+   "recommendations": 184
+  },
+  {
+   "id": "GV_ESMO_2023_DRIVER_POS",
+   "label": "ESMO oncogene-addicted 2023 (EU)",
+   "recommendations": 174
+  }
+ ],
+ "topics": [
+  [
+   "systemic_treatment",
+   1289
+  ],
+  [
+   "molecular_testing",
+   332
+  ],
+  [
+   "radiotherapy",
+   326
+  ],
+  [
+   "diagnosis",
+   206
+  ],
+  [
+   "staging",
+   195
+  ],
+  [
+   "surgery",
+   179
+  ],
+  [
+   "tcm_treatment",
+   171
+  ],
+  [
+   "supportive_care",
+   135
+  ],
+  [
+   "surveillance",
+   93
+  ],
+  [
+   "multidisciplinary_review",
+   12
+  ],
+  [
+   "treatment",
+   12
+  ],
+  [
+   "screening",
+   4
+  ],
+  [
+   "prevention",
+   3
+  ],
+  [
+   "imaging",
+   1
+  ],
+  [
+   "multidisciplinary_care",
+   1
+  ],
+  [
+   "prognostication",
+   1
+  ]
+ ],
+ "kg_total": 2960,
+ "kg_clusters": 147,
+ "assets": {
+  "Trials (registry)": 39,
+  "Regimens (library)": 40,
+  "Indication predicates": 40,
+  "Safety rules": 20,
+  "Interview axes": 18,
+  "Clinical tools": 20,
+  "Specialist sub-agents": 7,
+  "Hooks": 8,
+  "Gold-standard cases": 70
+ }
+}

@@ -59,8 +59,9 @@ def load_instructions(cwd: Path | None = None, home: Path | None = None) -> str:
 class MemoryNotes:
     """Proposals the agent makes with ``remember`` (the clinician saves them)."""
 
-    def __init__(self) -> None:
+    def __init__(self, language: str = "zh") -> None:
         self.proposals: list[str] = []
+        self.language = language
 
     def remember(self, note: str, scope: str = "preference") -> dict[str, Any]:
         note = str(note or "").strip()[:500]
@@ -68,7 +69,8 @@ class MemoryNotes:
             return {"ok": False, "summary": "empty note", "data": {"error": "empty"}}
         self.proposals.append(note)
         return {"ok": True,
-                "summary": f"提议记住（{scope}）：{note[:60]}",
+                "summary": (f"proposed for memory ({scope}): {note[:60]}"
+                            if self.language == "en" else f"提议记住（{scope}）：{note[:60]}"),
                 "data": {"status": "proposed — the clinician decides whether to save it"},
                 "_ui": {"memory": note}}
 
@@ -84,7 +86,7 @@ class MemoryNotes:
                  "scope": {"type": "string", "enum": ["preference", "protocol", "formulary"]}},
                 ["note"]),
             handler=self.remember, category="memory", parallel_safe=False,
-            label="提议写入记忆")
+            label="Propose for memory" if self.language == "en" else "提议写入记忆")
 
 
 COMPACT_PROMPT = """你是会诊记录压缩器。把下面的多轮会诊记录压缩成一份供主诊智能体继续工作的摘要（中文，Markdown 要点）：

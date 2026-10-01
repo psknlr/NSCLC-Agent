@@ -1,0 +1,345 @@
+{
+ "rows": [
+  {
+   "text": "双腿无力加重，今天尿潴留",
+   "expected": "cord_compression",
+   "condition": "Positive",
+   "lang": "zh",
+   "hits": [
+    "cord_compression"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "New leg weakness and urinary retention",
+   "expected": "cord_compression",
+   "condition": "Positive",
+   "lang": "en",
+   "hits": [
+    "cord_compression"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "Spinal cord compression suspected on exam",
+   "expected": "cord_compression",
+   "condition": "Positive",
+   "lang": "en",
+   "hits": [
+    "cord_compression"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "面部肿胀，颈静脉怒张",
+   "expected": "svc_syndrome",
+   "condition": "Positive",
+   "lang": "zh",
+   "hits": [
+    "svc_syndrome"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "Facial swelling with distended neck veins",
+   "expected": "svc_syndrome",
+   "condition": "Positive",
+   "lang": "en",
+   "hits": [
+    "svc_syndrome"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "Superior vena cava obstruction on CT",
+   "expected": "svc_syndrome",
+   "condition": "Positive",
+   "lang": "en",
+   "hits": [
+    "svc_syndrome"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "突然大咯血不止",
+   "expected": "massive_hemoptysis",
+   "condition": "Positive",
+   "lang": "zh",
+   "hits": [
+    "massive_hemoptysis"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "Sudden massive hemoptysis that will not stop",
+   "expected": "massive_hemoptysis",
+   "condition": "Positive",
+   "lang": "en",
+   "hits": [
+    "massive_hemoptysis"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "Coughing up a cup of blood",
+   "expected": "massive_hemoptysis",
+   "condition": "Positive",
+   "lang": "en",
+   "hits": [
+    "massive_hemoptysis"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "喘鸣，不能平卧伴气促",
+   "expected": "airway_obstruction",
+   "condition": "Positive",
+   "lang": "zh",
+   "hits": [
+    "airway_obstruction"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "Stridor at rest",
+   "expected": "airway_obstruction",
+   "condition": "Positive",
+   "lang": "en",
+   "hits": [
+    "airway_obstruction"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "化疗后发烧39度",
+   "expected": "febrile_neutropenia",
+   "condition": "Positive",
+   "lang": "zh",
+   "hits": [
+    "febrile_neutropenia"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "Fever 38.5 two days after chemotherapy",
+   "expected": "febrile_neutropenia",
+   "condition": "Positive",
+   "lang": "en",
+   "hits": [
+    "febrile_neutropenia"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "Febrile neutropenia on chemotherapy",
+   "expected": "febrile_neutropenia",
+   "condition": "Positive",
+   "lang": "en",
+   "hits": [
+    "febrile_neutropenia"
+   ],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "没有咯血",
+   "expected": null,
+   "condition": "Negated",
+   "lang": "zh",
+   "hits": [],
+   "negated": [
+    "massive_hemoptysis"
+   ],
+   "correct": true
+  },
+  {
+   "text": "否认双腿无力",
+   "expected": null,
+   "condition": "Negated",
+   "lang": "zh",
+   "hits": [],
+   "negated": [
+    "cord_compression"
+   ],
+   "correct": true
+  },
+  {
+   "text": "无发热",
+   "expected": null,
+   "condition": "Negated",
+   "lang": "zh",
+   "hits": [],
+   "negated": [
+    "febrile_neutropenia"
+   ],
+   "correct": true
+  },
+  {
+   "text": "No hemoptysis",
+   "expected": null,
+   "condition": "Negated",
+   "lang": "en",
+   "hits": [],
+   "negated": [
+    "massive_hemoptysis"
+   ],
+   "correct": true
+  },
+  {
+   "text": "Denies leg weakness or urinary retention",
+   "expected": null,
+   "condition": "Negated",
+   "lang": "en",
+   "hits": [],
+   "negated": [
+    "cord_compression"
+   ],
+   "correct": true
+  },
+  {
+   "text": "No fever since chemotherapy",
+   "expected": null,
+   "condition": "Negated",
+   "lang": "en",
+   "hits": [],
+   "negated": [
+    "febrile_neutropenia"
+   ],
+   "correct": true
+  },
+  {
+   "text": "Patient has not had any hemoptysis",
+   "expected": null,
+   "condition": "Negated",
+   "lang": "en",
+   "hits": [],
+   "negated": [
+    "massive_hemoptysis"
+   ],
+   "correct": true
+  },
+  {
+   "text": "我父亲当时大咯血",
+   "expected": null,
+   "condition": "Third party",
+   "lang": "zh",
+   "hits": [],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "My mother had massive hemoptysis",
+   "expected": null,
+   "condition": "Third party",
+   "lang": "en",
+   "hits": [],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "如果出现大咯血怎么办",
+   "expected": null,
+   "condition": "Hypothetical",
+   "lang": "zh",
+   "hits": [],
+   "negated": [],
+   "correct": true
+  },
+  {
+   "text": "What if I get massive hemoptysis",
+   "expected": null,
+   "condition": "Hypothetical",
+   "lang": "en",
+   "hits": [],
+   "negated": [],
+   "correct": true
+  }
+ ],
+ "groups": [
+  {
+   "condition": "Hypothetical",
+   "lang": "en",
+   "k": 1,
+   "n": 1,
+   "p": 1.0,
+   "lo": 0.025000000000000924,
+   "hi": 1.0
+  },
+  {
+   "condition": "Hypothetical",
+   "lang": "zh",
+   "k": 1,
+   "n": 1,
+   "p": 1.0,
+   "lo": 0.025000000000000924,
+   "hi": 1.0
+  },
+  {
+   "condition": "Negated",
+   "lang": "en",
+   "k": 4,
+   "n": 4,
+   "p": 1.0,
+   "lo": 0.3976353643835271,
+   "hi": 1.0
+  },
+  {
+   "condition": "Negated",
+   "lang": "zh",
+   "k": 3,
+   "n": 3,
+   "p": 1.0,
+   "lo": 0.2924017738212886,
+   "hi": 1.0
+  },
+  {
+   "condition": "Positive",
+   "lang": "en",
+   "k": 9,
+   "n": 9,
+   "p": 1.0,
+   "lo": 0.6637328831200586,
+   "hi": 1.0
+  },
+  {
+   "condition": "Positive",
+   "lang": "zh",
+   "k": 5,
+   "n": 5,
+   "p": 1.0,
+   "lo": 0.4781762498950197,
+   "hi": 1.0
+  },
+  {
+   "condition": "Third party",
+   "lang": "en",
+   "k": 1,
+   "n": 1,
+   "p": 1.0,
+   "lo": 0.025000000000000924,
+   "hi": 1.0
+  },
+  {
+   "condition": "Third party",
+   "lang": "zh",
+   "k": 1,
+   "n": 1,
+   "p": 1.0,
+   "lo": 0.025000000000000924,
+   "hi": 1.0
+  }
+ ]
+}

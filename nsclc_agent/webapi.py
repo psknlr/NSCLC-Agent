@@ -34,6 +34,8 @@ _STATE: dict[str, Any] = {
     #: Agent runtime settings (hooks, specialists, memory, MCP, budgets);
     #: survive model changes and new consults.
     "agent_config": {},
+    #: Display language of the page: "zh" | "en".
+    "lang": "zh",
 }
 
 _RELEASED = ("treatment_recommendation", "draft_for_tumor_board",
@@ -92,7 +94,9 @@ def info() -> dict[str, Any]:
 
 
 def examples() -> list[dict[str, Any]]:
-    return EXAMPLES
+    """Built-in cases; each carries an ``en`` twin (title, subtitle,
+    presentation, question) for the English page."""
+    return [{**e, "en": EXAMPLES_EN.get(e["id"], {})} for e in EXAMPLES]
 
 
 def catalog() -> dict[str, Any]:
@@ -360,13 +364,27 @@ def _turn_payload(session: Any, result: Any, *,
 
 # ------------------------------------------------------------- agent mode
 
+def set_language(lang: str = "zh") -> dict[str, Any]:
+    """Switch the clinician's language. The agent then writes in it (and
+    hooks, commands and summaries follow); display strings of the
+    deterministic kernel are localised by the page."""
+    from .i18n import LANGUAGES
+
+    lang = str(lang or "").strip().lower()
+    if lang not in LANGUAGES:
+        raise ValueError(f"language must be one of {', '.join(LANGUAGES)}")
+    _STATE["lang"] = lang
+    agent_configure({"language": lang})
+    return {"lang": lang}
+
+
 def agent_configure(config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Update the agent runtime settings (partial update); applies to the
     running consult too."""
     from .agentic import AgentConfig
 
-    merged = AgentConfig.from_dict({**_STATE["agent_config"],
-                                    **dict(config or {})}).to_dict()
+    merged = AgentConfig.from_dict({**_STATE["agent_config"], **dict(config or {}),
+                                    "language": _STATE["lang"]}).to_dict()
     _STATE["agent_config"] = merged
     if _STATE["agent"] is not None:
         _STATE["agent"].configure(merged)
@@ -410,21 +428,23 @@ def agent_command(text: str) -> dict[str, Any]:
     send (``kind: "prompt"``); local ones run here (``kind: "local"``)."""
     from .agentic.commands import expand
 
-    out = expand(text)
+    lang = _STATE["lang"]
+    out = expand(text, lang)
     if out["kind"] != "local":
         return out
     if out["command"] == "clear":
         role = _STATE["agent"].role if _STATE["agent"] is not None else "oncologist"
         agent_new(role)
         return {"kind": "local", "command": "clear", "data": {},
-                "text": "已开始新会诊（记忆与设置保留）。"}
+                "text": "Started a new consult (memory and settings kept)." if lang == "en"
+                else "已开始新会诊（记忆与设置保留）。"}
     return {"kind": "local", **_agent().local_command(out["command"], out["arg"])}
 
 
 def agent_commands() -> list[dict[str, str]]:
     from .agentic.commands import listing
 
-    return listing()
+    return listing(_STATE["lang"])
 
 
 def agent_rewind(turn: int | None = None) -> dict[str, Any]:
@@ -627,7 +647,7 @@ _API: dict[str, Callable[..., Any]] = {
     "agent_configure": agent_configure, "agent_command": agent_command,
     "agent_commands": agent_commands, "agent_rewind": agent_rewind,
     "agent_compact": agent_compact, "agent_info": agent_info,
-    "mcp_check": mcp_check,
+    "mcp_check": mcp_check, "set_language": set_language,
     "kg_info": kg_info, "kg_search": kg_search, "kg_get": kg_get,
     "audit_plan": audit_plan, "golden_cases": golden_cases,
     "run_eval": run_eval,
@@ -716,3 +736,48 @@ EXAMPLES: list[dict[str, Any]] = [
      "subtitle": "固定急症脚本短路，永不经模型改写",
      "case": {"presentation": "肺癌病史，突然大咯血不止，呼吸困难。"}},
 ]
+
+#: English twins of the built-in cases (same structured facts).
+EXAMPLES_EN: dict[str, dict[str, str]] = {
+    "iiib_egfr": {
+        "title": "IIIB unresectable · EGFR L858R",
+        "subtitle": "cCRT + osimertinib consolidation (LAURA), not durvalumab",
+        "presentation": "Multistation N2b; the MDT judged it unresectable. PET-CT and brain "
+                        f"MRI confirm M0. EGFR L858R. {_SCREEN}",
+        "question": "Definitive treatment and consolidation?"},
+    "iv_pdl1_high": {
+        "title": "IVA · driver-negative · PD-L1 80%",
+        "subtitle": "Pembrolizumab monotherapy (KEYNOTE-024) + early palliative care",
+        "presentation": "Lung adenocarcinoma with a solitary adrenal metastasis; brain MRI "
+                        f"negative; NGS negative for all drivers. ECOG 1. {_SCREEN}"},
+    "iv_exon20": {
+        "title": "IV · EGFR exon 20 insertion",
+        "subtitle": "Variant ontology: amivantamab + chemotherapy (PAPILLON), not osimertinib",
+        "presentation": "Lung adenocarcinoma, adrenal metastasis, brain MRI negative. NGS: "
+                        f"EGFR exon 20 insertion. PD-L1 80%. {_SCREEN}"},
+    "post_osi": {
+        "title": "Progression on osimertinib · later lines",
+        "subtitle": "MARIPOSA-2 and the KEYNOTE-789 lesson; test resistance before choosing",
+        "presentation": "Lung adenocarcinoma progressing on first-line osimertinib; plasma "
+                        f"NGS at progression completed. Brain MRI negative. {_SCREEN}"},
+    "cns_symptomatic": {
+        "title": "Symptomatic untreated brain metastases",
+        "subtitle": "CNS-directed local therapy first; a systemic-only plan is stopped at audit",
+        "presentation": "Squamous cell carcinoma, multiple brain metastases with headache, "
+                        f"on steroids. {_SCREEN}"},
+    "renal": {
+        "title": "Renal impairment · CrCl 38",
+        "subtitle": "Organ gate: pemetrexed backbones removed, referred to MDT/pharmacy",
+        "presentation": "Lung adenocarcinoma, adrenal metastasis, brain MRI negative. "
+                        f"{_SCREEN}"},
+    "n3": {
+        "title": "IIIC · N3",
+        "subtitle": "No surgery for N3: definitive chemoradiotherapy + consolidation",
+        "presentation": "Contralateral mediastinal nodal metastasis (N3); PET-CT and brain MRI "
+                        f"M0. {_SCREEN}"},
+    "emergency": {
+        "title": "Emergency · massive hemoptysis",
+        "subtitle": "Fixed emergency script short-circuits; never rewritten by a model",
+        "presentation": "History of lung cancer; sudden massive hemoptysis that will not stop, "
+                        "with shortness of breath."},
+}

@@ -34,8 +34,16 @@ LEAD_PROMPT = """你是 NSCLC-Agent（IMPF-AI 研发），非小细胞肺癌多�
 当前对话视角：{role_text}"""
 
 
+#: Appended to every system prompt (lead and specialists) when the clinician
+#: works in English; the mock model keys on its heading too.
+LANGUAGE_DIRECTIVE_EN = """
+
+## Output language
+The clinician is working in English. Write everything they read in English: the reply, assessment, options and rationales, work-up, questions, warnings, plan items, memory proposals and specialist reports. Tool results and these instructions may be in Chinese; translate what you use."""
+
+
 def lead_prompt(role: str, *, roster: list[Any], mcp_tools: list[str],
-                instructions: str) -> str:
+                instructions: str, language: str = "zh") -> str:
     lines = [f"- {d.name}（{d.title}）：{d.description}" for d in roster] or ["（未启用）"]
     mcp = ""
     if mcp_tools:
@@ -44,5 +52,6 @@ def lead_prompt(role: str, *, roster: list[Any], mcp_tools: list[str],
     if instructions.strip():
         memory = ("\n## 机构规范与用户偏好（记忆，优先遵循）\n"
                   + instructions.strip()[:12000] + "\n")
-    return LEAD_PROMPT.format(roster="\n".join(lines), mcp=mcp, instructions=memory,
-                              role_text=ROLE_TEXT.get(role, ROLE_TEXT["patient"]))
+    prompt = LEAD_PROMPT.format(roster="\n".join(lines), mcp=mcp, instructions=memory,
+                                role_text=ROLE_TEXT.get(role, ROLE_TEXT["patient"]))
+    return prompt + (LANGUAGE_DIRECTIVE_EN if language == "en" else "")
