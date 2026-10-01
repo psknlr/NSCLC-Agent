@@ -276,12 +276,23 @@ def test_images_ride_one_turn_then_become_placeholders(tmp_path):
 
 
 def test_history_compaction_keeps_prompt_bounded():
-    session = AgentSession(Scripted(*[call("submit_consult", {"reply": "r" * 500}, cid=f"x{i}")
-                                      for i in range(4)]))
+    """Near the context window the older turns collapse into a summary
+    (deterministic fallback here: the scripted model has no script left
+    for the summary call)."""
+    class NoSummary(Scripted):
+        def chat(self, messages, **kw):
+            if "会诊记录压缩器" in str(messages[0]["content"]):
+                raise LLMError("summary unavailable")
+            return super().chat(messages, **kw)
+
+    session = AgentSession(NoSummary(*[call("submit_consult", {"reply": "r" * 500}, cid=f"x{i}")
+                                       for i in range(4)]),
+                           config={"context_window": 8000, "compact_at": 0.3})
     for i in range(4):
-        session.turn("病例描述" * 300)
-    session._compact_history(budget_chars=4000)
+        turn = session.turn("病例描述" * 300)
+    assert turn.compacted and turn.compacted["ok"]
     assert session.messages[1]["content"].startswith("【此前会诊摘要】")
+    assert session.context()["tokens"] < 8000
 
 
 def test_session_roundtrip_takes_no_authority_from_the_file():
@@ -311,7 +322,9 @@ def test_mock_agent_runs_the_real_loop():
     events = []
     turn = AgentSession(MockLLMClient(), on_event=events.append).turn(
         "68岁女性，肺腺癌 cT2bN2bM0，EGFR L858R，ALK阴性，不可切除，脑MRI阴性，无咯血。")
-    assert [s["name"] for s in turn.steps if s["kind"] == "tool"] == ["governed_reference"]
+    assert [s["name"] for s in turn.steps if s["kind"] == "tool"] == [
+        "update_plan", "governed_reference", "update_plan"]
+    assert turn.plan and all(i["status"] == "completed" for i in turn.plan)
     assert turn.consult["stage_group"] == "IIIB" and "离线 Mock" in turn.reply
     assert turn.consult["options"]
 
@@ -325,12 +338,13 @@ def test_mock_agent_accepts_rule_review():
                     {"id": "s", "type": "function", "function": {"name": "submit_consult", "arguments": "{}"}}]},
                 {"role": "tool", "tool_call_id": "g", "content": json.dumps({"data": {}})},
                 {"role": "tool", "tool_call_id": "s", "content": json.dumps(review)}]
-    from nsclc_agent.agentic.toolbox import TOOL_SPECS
+    from nsclc_agent.agentic.toolbox import SUBMIT_SPEC, TOOL_SPECS
 
-    response = mock.chat(messages, tools=list(TOOL_SPECS))
-    args = response.tool_calls[0].arguments
+    response = mock.chat(messages, tools=[*TOOL_SPECS, SUBMIT_SPEC])
+    args = response.tool_calls[-1].arguments
+    assert response.tool_calls[-1].name == "submit_consult"
     assert args["rule_responses"] == [{"rule_id": "X", "decision": "accepted",
-                                       "reason": "离线 Mock：直接采纳规则引擎的意见"}]
+                                       "reason": "离线 Mock：直接采纳 hooks 的复核意见"}]
 
 
 def _api(name, **payload):

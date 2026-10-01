@@ -10,6 +10,7 @@ skeleton, and it cannot read images (its imaging answer says so).
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .base import LLMResponse, ToolCall, ToolSpec
@@ -69,12 +70,19 @@ class MockLLMClient:
                 "contradictions": [],
             }, ensure_ascii=False))
 
+        if "会诊记录压缩器" in system_text:
+            # Honest compaction: an excerpt, labelled as such.
+            excerpt = str(user or "")[-1500:]
+            return self._reply("- 离线 Mock：以下为逐轮摘录，未做模型压缩\n" + excerpt)
+
         if "plan the task graph" in system_text:
             return self._reply(self._plan(user))
 
         tool_names = {t.name for t in (tools or [])}
+        if "submit_report" in tool_names:
+            return self._specialist(messages, tool_names)
         if "submit_consult" in tool_names:
-            return self._agent(messages)
+            return self._agent(messages, tool_names)
         if "ask_case_question" in tool_names:
             return self._interview(user)
 
@@ -195,43 +203,116 @@ class MockLLMClient:
         return json.dumps({"tasks": tasks}, ensure_ascii=False)
 
     # ------------------------------------------------------------ agent mode
-    def _agent(self, messages: list[dict[str, Any]]) -> LLMResponse:
-        """Scripted agent-mode run: consult the governed pipeline, relay its
-        opinion through submit_consult, accept any rule review. Exercises the
-        real loop (tool call → observation → submit → review → resubmit)
-        while saying plainly that no clinical reasoning happened."""
+    @staticmethod
+    def _current_turn(messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any], set[str]]:
+        """(latest clinician message, observations by tool name, tools
+        called) for the current turn of an agent loop."""
         starts = [i for i, m in enumerate(messages) if m.get("role") == "user"
                   and not str(m.get("content") or "").startswith("[系统]")]
+        user = messages[starts[-1]].get("content") if starts else ""
+        if isinstance(user, list):
+            user = " ".join(p.get("text", "") for p in user if isinstance(p, dict))
         turn = messages[(starts[-1] + 1) if starts else 0:]
         names: dict[str, str] = {}
         seen: dict[str, Any] = {}
+        called: set[str] = set()
         for message in turn:
             for call in message.get("tool_calls") or []:
-                names[call.get("id", "")] = (call.get("function") or {}).get("name", "")
+                name = (call.get("function") or {}).get("name", "")
+                names[call.get("id", "")] = name
+                called.add(name)
             if message.get("role") == "tool":
                 name = names.get(message.get("tool_call_id", ""), "")
                 try:
                     seen[name] = json.loads(message.get("content") or "{}")
                 except json.JSONDecodeError:
                     seen[name] = {}
+        return str(user or ""), seen, called
+
+    def _calls(self, text: str, *calls: tuple[str, dict[str, Any]]) -> LLMResponse:
+        self._seq = getattr(self, "_seq", 0) + 1
+        return LLMResponse(
+            text=text, provider=self.name, model=self.model,
+            finish_reason="tool_calls",
+            tool_calls=[ToolCall(name, args, id=f"mock_{self._seq}_{i}")
+                        for i, (name, args) in enumerate(calls)])
+
+    def _agent(self, messages: list[dict[str, Any]], tool_names: set[str]) -> LLMResponse:
+        """Scripted lead agent. It exercises the real runtime — plan,
+        parallel evidence calls, specialist delegation (when an MDT is
+        asked for), memory proposals, submit → hook review → resubmit —
+        while saying plainly that no clinical reasoning happened."""
+        user, seen, called = self._current_turn(messages)
+        # Only an explicit request convenes the MDT ("请 MDT", "/mdt"), not
+        # a case that merely mentions one ("MDT判定不可切除").
+        mdt = "delegate" in tool_names and (
+            "delegate" in user or re.search(r"请\s*(召集)?\s*(MDT|多学科)", user) is not None)
+        planning = "update_plan" in tool_names
+        steps = ["理解病例并核对分期", "参考受治理流水线意见"]
+        if mdt:
+            steps.append("多学科会诊：影像科、肿瘤内科")
+        steps.append("综合并提交结论")
+
+        def plan(done: int) -> dict[str, Any]:
+            return {"items": [{"content": c, "status": "completed" if i < done else
+                               "in_progress" if i == done else "pending"}
+                              for i, c in enumerate(steps)]}
+
+        if planning and "update_plan" not in called:
+            calls = [("update_plan", plan(0))]
+            if "remember" in tool_names and "记住" in user:
+                said = user.split("\n\n", 1)[0]
+                note = said.split("记住", 1)[1].strip(" ：:，,。")[:120] if "记住" in said else ""
+                if note:
+                    calls.append(("remember", {"note": note, "scope": "preference"}))
+            return self._calls("先制定会诊计划。", *calls)
         if "governed_reference" not in seen:
-            return LLMResponse(
-                text="先查看受治理流水线的参考意见。", provider=self.name,
-                model=self.model, finish_reason="tool_calls",
-                tool_calls=[ToolCall("governed_reference", {}, id="mock_gov_1")])
+            calls = [("governed_reference", {})]
+            if mdt:
+                calls += [("delegate", {"agent": "radiology",
+                                        "task": "核对分期描述符与需要补做的影像检查"}),
+                          ("delegate", {"agent": "medical_oncology",
+                                        "task": "评估全身治疗选择与驱动基因的影响"})]
+            return self._calls("并行调取参考意见" + ("并邀请专科会诊。" if mdt else "。"),
+                               *calls)
         reference = (seen["governed_reference"] or {}).get("data") or {}
         consult = self._mock_consult(reference)
+        if mdt:
+            consult["reply"] += "\n\n**专科意见**：已请影像科与肿瘤内科子智能体评估（离线 Mock 意见，见会诊轨迹）。"
         review = seen.get("submit_consult") or {}
         if review.get("status") == "review":
             consult["rule_responses"] = [
                 {"rule_id": f.get("rule_id", ""), "decision": "accepted",
-                 "reason": "离线 Mock：直接采纳规则引擎的意见"}
+                 "reason": "离线 Mock：直接采纳 hooks 的复核意见"}
                 for f in review.get("findings") or []]
-        return LLMResponse(
-            text="", provider=self.name, model=self.model,
-            finish_reason="tool_calls",
-            tool_calls=[ToolCall("submit_consult", consult,
-                                 id=f"mock_submit_{len(turn)}")])
+        calls = []
+        if planning and "submit_consult" not in seen:
+            calls.append(("update_plan", plan(len(steps))))
+        calls.append(("submit_consult", consult))
+        return self._calls("", *calls)
+
+    def _specialist(self, messages: list[dict[str, Any]], tool_names: set[str]) -> LLMResponse:
+        """Scripted MDT specialist: one real tool call, then a report that
+        says it is a mock."""
+        _user, seen, _called = self._current_turn(messages)
+        system = next((m.get("content") or "" for m in messages
+                       if m.get("role") == "system"), "")
+        title = "专科医师"
+        if "中的" in system:
+            title = system.split("中的", 1)[1].split("。", 1)[0]
+        preferred = [t for t in ("cns_assessment", "assess_biomarkers", "prognosis",
+                                 "guideline_search") if t in tool_names]
+        if preferred and not seen:
+            return self._calls(f"{title}：先核对相关信息。", (preferred[0], {}))
+        observed = next(iter(seen.values()), {}) if seen else {}
+        summary = str((observed or {}).get("summary") or "")
+        return self._calls("", ("submit_report", {
+            "report": f"离线 Mock {title}意见：没有进行真实的专科推理。"
+                      + (f"工具结果：{summary}" if summary else ""),
+            "key_points": [summary] if summary else [],
+            "recommendations": ["接入真实模型后由专科子智能体给出实质意见"],
+            "concerns": ["离线 Mock：未做真实临床推理"],
+            "confidence": "low"}))
 
     @staticmethod
     def _mock_consult(reference: dict[str, Any]) -> dict[str, Any]:

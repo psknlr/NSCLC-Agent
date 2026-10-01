@@ -215,47 +215,65 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
               "max_results": {"type": "integer", "minimum": 1,
                               "maximum": 10}}, ["query"]),
     ),
-    ToolSpec(
-        SUBMIT_TOOL,
-        "Submit your consult conclusion for this turn. Call exactly once when "
-        "you are done reasoning. `reply` is what the clinician reads (Chinese "
-        "unless they wrote in another language; Markdown allowed). If the "
-        "rule engine raises findings you will get them back once: revise, or "
-        "answer each in rule_responses, then submit again.",
-        _obj({
-            "reply": {"type": "string"},
-            "assessment": {"type": "string",
-                           "description": "one-paragraph clinical judgement"},
-            "stage_group": {"type": "string"},
-            "tnm": {"type": "string"},
-            "intent": {"type": "string",
-                       "enum": ["curative", "palliative", "supportive",
-                                "emergency", "undetermined"]},
-            "options": {"type": "array", "items": _obj({
-                "name": {"type": "string"},
-                "rationale": {"type": "string"},
-                "regimen_ids": {"type": "array", "items": {"type": "string"}},
-                "evidence": {"type": "array", "items": {"type": "string"},
-                             "description": "trial ids / rec ids / PMIDs"},
-                "preferred": {"type": "boolean"},
-            }, ["name"])},
-            "workup": {"type": "array", "items": {"type": "string"}},
-            "questions": {"type": "array", "items": {"type": "string"},
-                          "description": "what you still need to know"},
-            "warnings": {"type": "array", "items": {"type": "string"}},
-            "rule_responses": {"type": "array", "items": _obj({
-                "rule_id": {"type": "string"},
-                "decision": {"type": "string",
-                             "enum": ["accepted", "overridden"]},
-                "reason": {"type": "string"},
-            }, ["rule_id", "decision"])},
-            "confidence": {"type": "string",
-                           "enum": ["high", "moderate", "low"]},
-        }, ["reply"]),
-    ),
 )
 
 TOOL_NAMES = frozenset(spec.name for spec in TOOL_SPECS)
+
+#: The lead agent's terminal tool (intercepted by the loop).
+SUBMIT_SPEC = ToolSpec(
+SUBMIT_TOOL,
+    "Submit your consult conclusion for this turn. Call exactly once when "
+    "you are done reasoning. `reply` is what the clinician reads (Chinese "
+    "unless they wrote in another language; Markdown allowed). If the "
+    "rule engine raises findings you will get them back once: revise, or "
+    "answer each in rule_responses, then submit again.",
+    _obj({
+        "reply": {"type": "string"},
+        "assessment": {"type": "string",
+                       "description": "one-paragraph clinical judgement"},
+        "stage_group": {"type": "string"},
+        "tnm": {"type": "string"},
+        "intent": {"type": "string",
+                   "enum": ["curative", "palliative", "supportive",
+                            "emergency", "undetermined"]},
+        "options": {"type": "array", "items": _obj({
+            "name": {"type": "string"},
+            "rationale": {"type": "string"},
+            "regimen_ids": {"type": "array", "items": {"type": "string"}},
+            "evidence": {"type": "array", "items": {"type": "string"},
+                         "description": "trial ids / rec ids / PMIDs"},
+            "preferred": {"type": "boolean"},
+        }, ["name"])},
+        "workup": {"type": "array", "items": {"type": "string"}},
+        "questions": {"type": "array", "items": {"type": "string"},
+                      "description": "what you still need to know"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "rule_responses": {"type": "array", "items": _obj({
+            "rule_id": {"type": "string"},
+            "decision": {"type": "string",
+                         "enum": ["accepted", "overridden"]},
+            "reason": {"type": "string"},
+        }, ["rule_id", "decision"])},
+        "confidence": {"type": "string",
+                       "enum": ["high", "moderate", "low"]},
+    }, ["reply"]),
+)
+
+#: Timeline labels (clinician-facing).
+LABELS = {
+    "record_case_facts": "更新病例笔记", "stage_tnm": "分期引擎",
+    "screen_emergency": "急症筛查", "assess_biomarkers": "驱动基因解析",
+    "search_trials": "检索试验注册表", "search_regimens": "检索方案库",
+    "regimen_dosing": "方案库参考剂量", "check_indication": "适应证核对",
+    "check_organ_function": "器官功能核对", "cns_assessment": "脑转移分层",
+    "later_line_options": "后线序贯", "protocol_sections": "临床路径章节",
+    "guideline_search": "指南知识库", "prognosis": "预后（人群）",
+    "interaction_check": "药物相互作用", "rule_review": "规则引擎复核",
+    "governed_reference": "受治理流水线参考", "read_attachment": "读片 / 读报告",
+    "citation_verify": "引用核验", "pubmed_search": "PubMed 检索",
+}
+#: Tools that change session state run in call order.
+_STATEFUL = frozenset({"record_case_facts"})
 
 
 def _merge(base: dict[str, Any], over: dict[str, Any] | None) -> dict[str, Any]:
@@ -314,6 +332,21 @@ class AgentToolbox:
     @staticmethod
     def specs() -> list[ToolSpec]:
         return list(TOOL_SPECS)
+
+    def as_tools(self, *, read_only: bool = False) -> list[Any]:
+        """The clinical tools as runtime ``Tool`` objects (``read_only``
+        drops the case-note writer — specialists read, the lead writes)."""
+        from .tools import Tool
+
+        out = []
+        for spec in TOOL_SPECS:
+            if read_only and spec.name in _STATEFUL:
+                continue
+            out.append(Tool(spec.name, spec.description, spec.parameters,
+                            handler=self._impl[spec.name], category="clinical",
+                            parallel_safe=spec.name not in _STATEFUL,
+                            label=LABELS.get(spec.name, spec.name)))
+        return out
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         impl = self._impl.get(name)
@@ -548,6 +581,21 @@ class AgentToolbox:
                          "note": "advisory — weigh them, they do not bind you"}}
 
     def review_plan(self, consult: dict[str, Any]) -> list[dict[str, Any]]:
+        """Rule-engine findings plus stage consistency (advisory)."""
+        findings = self.rule_findings(consult)
+        stage = self.stage_finding(consult)
+        return findings + ([stage] if stage else [])
+
+    def stage_finding(self, consult: dict[str, Any]) -> dict[str, Any] | None:
+        engine = self.engine_stage() or {}
+        if engine.get("staged") and consult.get("stage_group") and \
+                str(consult["stage_group"]).upper() != str(engine["stage_group"]).upper():
+            return {"rule_id": "STAGE_DIFFERS_FROM_ENGINE", "severity": "warn",
+                    "message": f"模型分期为 {consult['stage_group']}；AJCC/UICC 第 9 版分期引擎"
+                               f"将 {engine.get('tnm')} 判为 {engine['stage_group']}"}
+        return None
+
+    def rule_findings(self, consult: dict[str, Any]) -> list[dict[str, Any]]:
         """Rule-engine findings for a consult (advisory, never blocking)."""
         from ..safety import rules
 
@@ -580,17 +628,8 @@ class AgentToolbox:
             "workup_needed": list(consult.get("workup") or []),
             "uncertainties": list(consult.get("warnings") or []),
         }
-        findings = [{"rule_id": v.rule_id, "severity": v.severity,
-                     "message": v.message}
-                    for v in rules.check_plan(staging, self.facts, plan)]
-        if engine.get("staged") and consult.get("stage_group") and \
-                str(consult["stage_group"]).upper() != str(engine["stage_group"]).upper():
-            findings.append({
-                "rule_id": "STAGE_DIFFERS_FROM_ENGINE", "severity": "warn",
-                "message": f"you staged {consult['stage_group']}; the AJCC-9 "
-                           f"engine reads {engine.get('tnm')} as "
-                           f"{engine['stage_group']}"})
-        return findings
+        return [{"rule_id": v.rule_id, "severity": v.severity, "message": v.message}
+                for v in rules.check_plan(staging, self.facts, plan)]
 
     def governed_reference(self) -> dict[str, Any]:
         from ..case import Case
@@ -654,9 +693,4 @@ class AgentToolbox:
         return self._tool(self.registry.pubmed_search(query, max_results=max_results))
 
 
-def compact(data: Any, limit: int = 6000) -> str:
-    """JSON for the model, bounded: long observations are cut, never dropped."""
-    text = json.dumps(data, ensure_ascii=False, default=str)
-    if len(text) <= limit:
-        return text
-    return text[:limit] + f'… [truncated {len(text) - limit} chars]'
+from .loop import compact  # noqa: E402,F401 - re-export (moved to the loop)
