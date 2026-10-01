@@ -347,10 +347,17 @@ function factRows(f) {
   }
   if (f.qtc_ms !== undefined) add("QTc", `${f.qtc_ms} ms`);
   if ((f.treatment_history || []).length) add("治疗史", h("div", null, f.treatment_history.map((e) => h("div", null, `${e.line ? `${e.line} 线 · ` : ""}${(e.agents || []).join(" + ")}${e.status ? ` · ${OUTCOME[e.status] || e.status}` : ""}`))));
-  if (f.progression_findings) add("进展期发现", Object.entries(f.progression_findings).filter(([, v]) => v).map(([k]) => k).join("、") || "无");
+  if (f.progression_ngs_done !== undefined) add("进展期 NGS", f.progression_ngs_done ? "已完成" : "未完成");
+  if (f.progression_findings) add("进展期发现", Object.entries(f.progression_findings).filter(([, v]) => v).map(([k]) => ({ met_amplification: "MET 扩增", c797s: "C797S", small_cell_transformation: "小细胞转化" }[k] || k)).join("、") || "无");
+  add("既往全身治疗", f.prior_systemic_therapy ? String(f.prior_systemic_therapy) : "");
+  if (f.bleeding_risk) add("出血风险", f.bleeding_risk.hemoptysis_history === true ? "有咯血史" : f.bleeding_risk.hemoptysis_history === false ? "无咯血史" : JSON.stringify(f.bleeding_risk));
+  if (f.b12_folate_started !== undefined) add("叶酸/B12", f.b12_folate_started ? "已开始" : "未开始");
+  add("吸烟史", f.smoking_history ? String(f.smoking_history) : "");
+  add("体重下降", f.weight_loss ? String(f.weight_loss) : "");
+  add("治疗目标", f.goals_of_care ? String(f.goals_of_care) : "");
   if ((f.medications || []).length) add("当前用药", f.medications.join("、"));
   if (f.comorbidities) add("合并症", Object.entries(f.comorbidities).filter(([, v]) => v).map(([k]) => k).join("、") || "无");
-  const known = new Set(["age", "sex", "tnm", "histologic_category", "driver_mutations", "pd_l1", "ecog_ps", "ngs_done", "resectability_category", "operable", "disease_extent", "cns_metastases", "organ_function", "qtc_ms", "treatment_history", "progression_findings", "medications", "comorbidities", "staging_system", "stage_group"]);
+  const known = new Set(["age", "sex", "tnm", "histologic_category", "driver_mutations", "pd_l1", "ecog_ps", "ngs_done", "resectability_category", "operable", "disease_extent", "cns_metastases", "organ_function", "qtc_ms", "treatment_history", "progression_ngs_done", "progression_findings", "prior_systemic_therapy", "bleeding_risk", "b12_folate_started", "smoking_history", "weight_loss", "goals_of_care", "medications", "comorbidities", "staging_system", "stage_group"]);
   for (const [k, v] of Object.entries(f)) if (!known.has(k) && !k.startsWith("_")) add(k, typeof v === "object" ? JSON.stringify(v).slice(0, 90) : String(v));
   return rows;
 }
