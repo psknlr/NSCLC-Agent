@@ -1,7 +1,8 @@
-/* NSCLC-Agent web app · IMPF-AI
- * Vanilla JS single-page app. The agent itself runs in worker.js (Pyodide);
- * this file only renders. Every value from the agent is inserted with
- * textContent — no HTML from data is ever parsed.
+/* NSCLC-Agent · IMPF-AI — the product.
+ * A consult workspace: describe a case, the agent (the unchanged Python
+ * package, running in worker.js under Pyodide) stages it, plans, audits and
+ * releases — or refuses. This file only renders; every value from the agent
+ * is inserted as text, never parsed as HTML.
  */
 "use strict";
 
@@ -15,7 +16,7 @@ function h(tag, attrs, ...children) {
       if (k === "class") el.className = v;
       else if (k === "style" && typeof v === "object") Object.assign(el.style, v);
       else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
-      else if (k === "html") el.innerHTML = v; /* static markup only (icons) */
+      else if (k === "html") el.innerHTML = v; /* static icon markup only */
       else if (v === true) el.setAttribute(k, "");
       else el.setAttribute(k, String(v));
     }
@@ -24,7 +25,7 @@ function h(tag, attrs, ...children) {
   return el;
 }
 function append(el, children) {
-  for (const c of children.flat(Infinity)) {
+  for (const c of [children].flat(Infinity)) {
     if (c === null || c === undefined || c === false) continue;
     el.appendChild(c instanceof Node ? c : document.createTextNode(String(c)));
   }
@@ -32,17 +33,31 @@ function append(el, children) {
 }
 function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
 const $ = (sel, root = document) => root.querySelector(sel);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
 const ICONS = {
-  home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',
-  consult: '<path d="M9 3h6l1 3H8z"/><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 12h6M9 16h4"/>',
-  chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"/>',
+  logo: '<path d="M12 3v7"/><path d="M12 10c-1.5 2-3 2.5-5 2.5"/><path d="M12 10c1.5 2 3 2.5 5 2.5"/><path d="M7 6.5C4.5 7.5 3 11 3 15c0 3 1.5 5 4 5 2 0 3.5-1.5 3.5-4V11"/><path d="M17 6.5c2.5 1 4 4.5 4 8.5 0 3-1.5 5-4 5-2 0-3.5-1.5-3.5-4V11"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  form: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
+  branch: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
+  back: '<path d="M15 6l-6 6 6 6"/>',
+  send: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  users: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/>',
+  question: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17v.01"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  cpu: '<rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 9h6v6H9zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
   staging: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   kg: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="7" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.2 7l7.4.3M7.2 8.2l3.8 7.6M16.9 9.2 13 15.8"/>',
   lab: '<path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/>',
   eval: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   about: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
+  consult: '<path d="M9 3h6l1 3H8z"/><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 12h6M9 16h4"/>',
   play: '<path d="M7 4.5v15l12-7.5z"/>',
   check: '<path d="M4 12.5l5 5L20 6.5"/>',
   alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17.5v.5"/>',
@@ -53,21 +68,23 @@ const ICONS = {
   upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v4h16v-4"/>',
   download: '<path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 20h16"/>',
   sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
-  send: '<path d="M4 12l16-8-6 16-2-7z"/>',
-  flask: '<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/>',
   moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>',
 };
 function icon(name, cls) {
   return h("span", { class: cls || "", style: { display: "inline-flex" },
     html: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg>` });
 }
+function logoMark(cls) {
+  return h("span", { class: cls || "brand-mark", html: `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS.logo}</svg>` });
+}
 
 function toast(text, bad) {
   const node = h("div", { class: "toast" + (bad ? " bad" : "") }, text);
   $("#toasts").appendChild(node);
-  setTimeout(() => node.remove(), bad ? 7000 : 3800);
+  setTimeout(() => node.remove(), bad ? 7000 : 3600);
 }
 function jsonBlock(value) { return h("pre", { class: "json" }, JSON.stringify(value, null, 2)); }
 function downloadJSON(name, value) {
@@ -75,40 +92,60 @@ function downloadJSON(name, value) {
   const a = h("a", { href: URL.createObjectURL(blob), download: name });
   document.body.appendChild(a); a.click(); a.remove();
 }
+function pickFile(accept, multiple) {
+  return new Promise((resolve) => {
+    const input = h("input", { type: "file", accept, multiple: multiple || null, style: { display: "none" } });
+    input.addEventListener("change", () => { resolve(Array.from(input.files || [])); input.remove(); });
+    document.body.appendChild(input); input.click();
+  });
+}
 function busy(button, label) {
   const original = Array.from(button.childNodes);
   button.disabled = true;
   clear(button); append(button, [h("span", { class: "spinner" }), label || "运行中…"]);
   return () => { button.disabled = false; clear(button); append(button, original); };
 }
-function empty(text, iconName) {
-  return h("div", { class: "empty" }, icon(iconName || "info"), h("div", null, text));
-}
+function empty(text, iconName) { return h("div", { class: "empty" }, icon(iconName || "info"), h("div", null, text)); }
 function fmtList(items) {
   if (!items || !items.length) return h("div", { class: "muted small" }, "无");
   return h("ul", { class: "list" }, items.map((x) => h("li", null, typeof x === "string" ? x : JSON.stringify(x))));
 }
+function timeAgo(ts) {
+  const s = Math.max(0, (Date.now() - ts) / 1000);
+  if (s < 60) return "刚刚";
+  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
+  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+/** Browser storage that never throws (private mode, quota, blocked). */
+const LS = {
+  get(key, fallback) { try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch (_) { return fallback; } },
+  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (_) { return false; } },
+};
 
 /* ================================================================ status */
 
 const STATUS = {
-  treatment_recommendation: ["ok", "已放行 · 循证治疗建议", "分期内、证据支撑、通过全部安全规则与终审", "check"],
-  draft_for_tumor_board: ["accent", "剂量草案 · 待 MDT/医师签核", "唯一含剂量的状态：确定性剂量通道且全部闸门通过", "doc"],
+  treatment_recommendation: ["ok", "已放行", "循证治疗建议 · 分期内、证据支撑、通过全部安全规则与终审", "check"],
+  draft_for_tumor_board: ["accent", "剂量草案", "待 MDT/医师签核 · 剂量来自确定性方案库", "doc"],
   approved_by_tumor_board: ["ok", "已签核", "MDT/医师已签核", "check"],
-  needs_more_information: ["warn", "需补充信息 · 方案为临时", "存在未完成的检查或问诊轴，补齐后再放行", "info"],
-  needs_staging_workup: ["warn", "需完成分期检查", "TNM 不完整或存在歧义，分期引擎拒绝猜测", "info"],
-  insufficient_evidence: ["neutral", "证据不足 · 未放行", "引用或主张未通过证据护栏", "info"],
-  blocked: ["bad", "安全规则拦截 · 未放行", "终审发现阻断级违规，方案不得交付", "x"],
+  needs_more_information: ["warn", "需补充信息", "方案为临时，补齐以下信息后再放行", "question"],
+  needs_staging_workup: ["warn", "需完成分期", "TNM 不完整或有歧义，分期引擎拒绝猜测", "staging"],
+  insufficient_evidence: ["neutral", "证据不足", "引用或主张未通过证据护栏，未放行", "info"],
+  blocked: ["bad", "安全拦截", "终审发现阻断级违规，方案不得交付", "x"],
   failed_closed: ["bad", "故障关闭", "运行异常，按安全默认关闭", "x"],
-  emergency_action_plan: ["emergency", "肿瘤急症 · 固定处置脚本", "急症短路：固定安全脚本，永不经模型改写", "siren"],
+  emergency_action_plan: ["emergency", "肿瘤急症", "急症短路：固定安全处置脚本，永不经模型改写", "siren"],
 };
+const statusMeta = (s) => STATUS[s] || ["neutral", s || "—", "", "info"];
 function statusPill(status) {
-  const meta = STATUS[status] || ["neutral", status];
+  const meta = statusMeta(status);
   const cls = { ok: "ok", accent: "accent", warn: "warn", neutral: "", bad: "bad", emergency: "bad" }[meta[0]];
   return h("span", { class: `pill ${cls}` }, h("span", { class: "dot" }), meta[1]);
 }
 function statusBanner(status, right) {
-  const meta = STATUS[status] || ["neutral", status, "", "info"];
+  const meta = statusMeta(status);
   return h("div", { class: `banner ${meta[0]}` },
     h("div", { class: "glyph" }, icon(meta[3])),
     h("div", null, h("div", { class: "t" }, meta[1]), h("div", { class: "d" }, meta[2])),
@@ -144,7 +181,6 @@ const Bridge = {
       this.worker.postMessage({ id, name, payload: payload || {}, uploads }, transfer);
     });
   },
-  /* result + elapsed */
   async timed(name, payload, uploads) {
     const t0 = performance.now();
     const result = await this.call(name, payload, uploads);
@@ -153,6 +189,8 @@ const Bridge = {
 };
 
 const Store = { info: null, build: null, catalog: null, examples: [], llm: null };
+const llmOn = () => !!(Store.llm && Store.llm.llm && Store.llm.llm.available);
+const visionOn = () => !!(Store.llm && Store.llm.vision && Store.llm.vision.provider !== "none");
 
 const Boot = {
   order: ["runtime", "package", "init"],
@@ -160,88 +198,199 @@ const Boot = {
     const idx = this.order.indexOf(stage);
     document.querySelectorAll("#boot-steps [data-step]").forEach((el) => {
       const i = this.order.indexOf(el.dataset.step);
-      el.classList.toggle("done", i < idx);
+      el.classList.toggle("done", i < idx || idx === -1);
       el.classList.toggle("on", i === idx);
-      el.querySelector(".mark").textContent = i < idx ? "✓" : i === idx ? "●" : "○";
+      el.querySelector(".mark").textContent = i < idx || idx === -1 ? "✓" : i === idx ? "●" : "○";
     });
+    $("#boot-bar").style.width = `${idx === -1 ? 100 : [18, 62, 86][idx]}%`;
   },
   async done(info, build) {
     Bridge.ready = true;
     Store.info = info; Store.build = build;
-    this.step("zz");
-    const pill = $("#runtime-pill");
-    pill.className = "pill ok"; clear(pill);
-    append(pill, [h("span", { class: "dot" }), "浏览器内运行 · 就绪"]);
-    pill.title = `${info.runtime} · v${info.version}`;
-    $("#side-version").textContent = `v${info.version} · 浏览器内运行`;
-    $("#foot-version").textContent = `v${info.version}`;
+    this.step("ready");
+    $("#side-version").textContent = `v${info.version}`;
     try {
       [Store.catalog, Store.examples] = await Promise.all([Bridge.call("catalog"), Bridge.call("examples")]);
       await Settings.restore();
-    } catch (err) { toast(`初始化数据失败：${err.message}`, true); }
-    updateModelPill(Store.info.llm);
-    $("#boot").classList.add("hide");
-    Router.render();
+    } catch (err) { toast(`初始化失败：${err.message}`, true); }
+    Cases.load();
+    render();
+    setTimeout(() => $("#boot").classList.add("hide"), 150);
   },
   fatal(error) {
     $("#boot-note").textContent = `运行时加载失败：${error}。请检查网络（需访问 cdn.jsdelivr.net）后刷新。`;
     $("#boot-note").style.color = "var(--bad)";
-    const pill = $("#runtime-pill"); pill.className = "pill bad"; clear(pill);
-    append(pill, [h("span", { class: "dot" }), "运行时加载失败"]);
   },
 };
 
-function updateModelPill(llm) {
-  const pill = $("#model-pill"); clear(pill);
-  const on = llm && llm.llm && llm.llm.available;
-  pill.className = "pill " + (on ? "indigo" : "");
-  append(pill, [h("span", { class: "dot" }), on ? `模型：${llm.llm.provider} · ${llm.llm.model}` : "确定性模式"]);
+/* ================================================================ cases */
+
+const DEFAULT_ROLE = "oncologist";
+const Cases = {
+  list: [], currentId: null, draft: null, warned: false,
+  load() {
+    this.list = LS.get("nsclc.cases.v1", []).filter((c) => c && c.id && Array.isArray(c.messages));
+    const id = (location.hash.match(/^#\/case\/([\w-]+)/) || [])[1];
+    if (id && this.get(id)) this.currentId = id;
+    else this.newDraft();
+  },
+  save() {
+    if (LS.set("nsclc.cases.v1", this.list)) return;
+    /* Quota: keep every message's text, but only each case's latest report. */
+    const slim = this.list.map((c) => {
+      const keep = lastResult(c);
+      return Object.assign({}, c, { messages: c.messages.map((m) => (m === keep || !m.payload ? m : Object.assign({}, m, { payload: undefined, text: m.payload.reply }))) });
+    });
+    if (!LS.set("nsclc.cases.v1", slim) && !this.warned) { this.warned = true; toast("本机存储已满：会诊记录未能保存，可在「模型接入」页清理本机记录。", true); }
+  },
+  get(id) { return this.list.find((c) => c.id === id) || null; },
+  current() { return (this.currentId && this.get(this.currentId)) || this.draft || this.newDraft(); },
+  newDraft() {
+    this.draft = { id: uid(), title: "", created: Date.now(), updated: Date.now(), role: LS.get("nsclc.pref.role", DEFAULT_ROLE), dose: false, status: null, stage: null, messages: [], session: null };
+    this.currentId = null;
+    return this.draft;
+  },
+  commit(c) { /* a draft becomes a case with its first message */
+    if (this.get(c.id)) return;
+    this.list.unshift(c); this.draft = null; this.currentId = c.id;
+    history.replaceState(null, "", `#/case/${c.id}`);
+  },
+  select(id) {
+    if (!this.get(id)) { this.newDraft(); return; }
+    this.currentId = id; this.draft = null;
+  },
+  remove(id) {
+    this.list = this.list.filter((c) => c.id !== id);
+    if (Session.boundId === id) Session.invalidate();
+    if (this.currentId === id) this.newDraft();
+    this.save();
+  },
+  touch(c) { c.updated = Date.now(); this.list.sort((a, b) => b.updated - a.updated); },
+};
+
+/** The worker holds ONE consultation session; bind it to the case on screen.
+ *  Authority (role, dose permission) always comes from the case settings
+ *  here, never from the stored session (same contract as the CLI). */
+const Session = {
+  boundId: null,
+  async bind(c) {
+    if (this.boundId === c.id) return;
+    if (c.session) await Bridge.call("chat_import", { data: c.session, role: c.role, allow_dose_planning: !!c.dose });
+    else await Bridge.call("chat_new", { role: c.role, allow_dose_planning: !!c.dose });
+    this.boundId = c.id;
+  },
+  invalidate() { this.boundId = null; },
+};
+
+function lastResult(c) {
+  for (let i = c.messages.length - 1; i >= 0; i--) {
+    const m = c.messages[i];
+    if (m.role === "agent" && m.payload && !m.whatif) return m;
+  }
+  return null;
+}
+const caseFacts = (c) => { const m = lastResult(c); return (m && m.payload.session_facts) || {}; };
+
+/* ============================================================ fact display */
+
+const HIST = { adenocarcinoma: "腺癌", squamous: "鳞癌", adenosquamous: "腺鳞癌", large_cell: "大细胞癌", nsclc_nos: "NSCLC-NOS" };
+const NEG_RE = /negative|阴性|wild|野生|not detected|未检出|无突变/i;
+const ROLE_LABEL = { oncologist: "肿瘤科医师", patient: "患者", researcher: "研究者" };
+const OUTCOME = { progression: "进展", response: "缓解", stable: "稳定", toxicity: "毒性停药" };
+
+function tnmText(tnm) {
+  if (!tnm || !(tnm.t || tnm.n || tnm.m)) return "";
+  return `${tnm.prefix || "c"}${tnm.t || "T?"} ${tnm.n || "N?"} ${tnm.m || "M?"}`;
+}
+function keyDriver(f) {
+  for (const [g, v] of Object.entries(f.driver_mutations || {})) if (v && !NEG_RE.test(String(v))) return `${g.toUpperCase()} ${String(v).slice(0, 18)}`;
+  return "";
+}
+function factChips(f) {
+  if (!f) return [];
+  const out = [];
+  if (f.tnm) out.push(tnmText(f.tnm));
+  if (f.histologic_category) out.push(HIST[f.histologic_category] || f.histologic_category);
+  for (const [g, v] of Object.entries(f.driver_mutations || {})) out.push(`${g.toUpperCase()} ${v}`);
+  if (f.pd_l1 && f.pd_l1.tps !== undefined) out.push(`PD-L1 ${f.pd_l1.tps}%`);
+  if (f.ecog_ps !== undefined) out.push(`ECOG ${f.ecog_ps}`);
+  if (f.cns_metastases && f.cns_metastases.status) out.push(f.cns_metastases.status === "present" ? "脑转移" : "无脑转移");
+  const crcl = f.organ_function && f.organ_function.renal && f.organ_function.renal.crcl_ml_min;
+  if (crcl !== undefined) out.push(`CrCl ${crcl}`);
+  for (const e of f.treatment_history || []) out.push(`${e.line ? `${e.line}线 ` : ""}${(e.agents || []).join("+")}${e.status ? ` ${OUTCOME[e.status] || e.status}` : ""}`);
+  return out.filter(Boolean).slice(0, 8);
+}
+function factRows(f) {
+  const rows = [];
+  const add = (k, v) => { if (v !== undefined && v !== null && v !== "") rows.push([k, v]); };
+  if (f.age || f.sex) add("患者", [f.age ? `${f.age} 岁` : "", { female: "女", male: "男" }[f.sex] || f.sex || ""].filter(Boolean).join(" · "));
+  if (f.tnm) add("TNM", h("span", { class: "mono" }, tnmText(f.tnm)));
+  add("组织学", f.histologic_category ? HIST[f.histologic_category] || f.histologic_category : "");
+  const drivers = Object.entries(f.driver_mutations || {});
+  if (drivers.length) add("驱动基因", h("div", null, drivers.map(([g, v]) => h("span", { class: "gene" + (NEG_RE.test(String(v)) ? " neg" : "") }, g.toUpperCase(), " ", String(v)))));
+  if (f.pd_l1) add("PD-L1", Object.entries(f.pd_l1).map(([k, v]) => `${k.toUpperCase()} ${v}%`).join(" · "));
+  if (f.ecog_ps !== undefined) add("ECOG", String(f.ecog_ps));
+  if (f.ngs_done !== undefined) add("广谱 NGS", f.ngs_done ? "已完成" : "未完成");
+  add("可切除性", { RESECTABLE: "可切除", UNRESECTABLE: "不可切除" }[f.resectability_category] || f.resectability_category);
+  if (f.operable !== undefined) add("可耐受手术", f.operable ? "是" : "否");
+  add("疾病范围", { OLIGOMETASTATIC: "寡转移", POLYMETASTATIC: "广泛转移" }[f.disease_extent] || f.disease_extent);
+  if (f.cns_metastases) {
+    const c = f.cns_metastases;
+    add("脑转移", [{ present: "有", absent: "无" }[c.status] || c.status, c.symptomatic === true ? "有症状" : c.symptomatic === false ? "无症状" : "",
+      c.treated === true ? "已局部治疗" : c.treated === false ? "未治疗" : "", c.leptomeningeal ? "软脑膜" : "", c.burden || ""].filter(Boolean).join(" · "));
+  }
+  if (f.organ_function) {
+    const o = f.organ_function; const parts = [];
+    if (o.renal && o.renal.crcl_ml_min !== undefined) parts.push(`CrCl ${o.renal.crcl_ml_min} mL/min`);
+    if (o.hepatic && o.hepatic.bilirubin_uln !== undefined) parts.push(`胆红素 ${o.hepatic.bilirubin_uln}×ULN`);
+    add("器官功能", parts.join(" · ") || JSON.stringify(o));
+  }
+  if (f.qtc_ms !== undefined) add("QTc", `${f.qtc_ms} ms`);
+  if ((f.treatment_history || []).length) add("治疗史", h("div", null, f.treatment_history.map((e) => h("div", null, `${e.line ? `${e.line} 线 · ` : ""}${(e.agents || []).join(" + ")}${e.status ? ` · ${OUTCOME[e.status] || e.status}` : ""}`))));
+  if (f.progression_findings) add("进展期发现", Object.entries(f.progression_findings).filter(([, v]) => v).map(([k]) => k).join("、") || "无");
+  if ((f.medications || []).length) add("当前用药", f.medications.join("、"));
+  if (f.comorbidities) add("合并症", Object.entries(f.comorbidities).filter(([, v]) => v).map(([k]) => k).join("、") || "无");
+  const known = new Set(["age", "sex", "tnm", "histologic_category", "driver_mutations", "pd_l1", "ecog_ps", "ngs_done", "resectability_category", "operable", "disease_extent", "cns_metastases", "organ_function", "qtc_ms", "treatment_history", "progression_findings", "medications", "comorbidities", "staging_system", "stage_group"]);
+  for (const [k, v] of Object.entries(f)) if (!known.has(k) && !k.startsWith("_")) add(k, typeof v === "object" ? JSON.stringify(v).slice(0, 90) : String(v));
+  return rows;
 }
 
-/* ================================================================ router */
+/* ============================================================ reply text */
 
-const ROUTES = [
-  { id: "home", label: "概览", icon: "home", section: "工作台", title: "概览", sub: "证据治理 · 分期确定 · 安全终审" },
-  { id: "consult", label: "会诊工作台", icon: "consult", section: "工作台", title: "会诊工作台", sub: "单次完整受治理运行：分期 → 路由 → 方案 → 终审 → 放行" },
-  { id: "chat", label: "多轮会诊", icon: "chat", section: "工作台", title: "多轮会诊", sub: "累积事实、方案指纹复用、假设推演（what-if）" },
-  { id: "staging", label: "分期引擎", icon: "staging", section: "临床引擎", title: "TNM 分期引擎", sub: "AJCC/UICC 第 9 版 · 唯一分期权威 · 歧义即拒绝" },
-  { id: "kg", label: "指南知识图谱", icon: "kg", section: "临床引擎", title: "指南知识图谱", sub: "六部指南 2,960 条推荐 · 机器抽取、默认未经临床复核" },
-  { id: "lab", label: "安全网实验室", icon: "lab", section: "安全与评测", title: "安全网实验室", sub: "把构造的方案直接交给规则引擎 — 审计探针同款调用" },
-  { id: "eval", label: "评测看板", icon: "eval", section: "安全与评测", title: "金标准评测看板", sub: "临床错误分类学 · 该拦未拦率（unsafe release rate）" },
-  { id: "settings", label: "模型接入", icon: "settings", section: "系统", title: "模型接入", sub: "Poe · MiniMax · Azure OpenAI · 离线 Mock — 密钥只在本页内存中" },
-  { id: "about", label: "关于", icon: "about", section: "系统", title: "关于", sub: "IMPF-AI 研发" },
-];
-
-const Router = {
-  current() {
-    const id = (location.hash || "#/home").replace(/^#\/?/, "").split("?")[0];
-    return ROUTES.find((r) => r.id === id) || ROUTES[0];
-  },
-  go(id) { location.hash = `#/${id}`; },
-  buildNav() {
-    const nav = $("#nav"); const mobile = $("#mobile-nav");
-    let section = "";
-    for (const r of ROUTES) {
-      if (r.section !== section) { section = r.section; nav.appendChild(h("div", { class: "nav-label" }, section)); }
-      nav.appendChild(h("a", { href: `#/${r.id}`, "data-route": r.id }, icon(r.icon), r.label));
-      mobile.appendChild(h("a", { href: `#/${r.id}`, "data-route": r.id }, icon(r.icon), r.label));
+function friendly(text) {
+  return String(text)
+    .replace(/详见 oncologist 视图 guideline_context/g, "详见完整报告「指南」")
+    .replace(/详见 prognosis 输出/g, "详见完整报告「预后」");
+}
+function formatReply(text) {
+  const root = h("div", { class: "reply" });
+  let list = null; let listTag = "";
+  const flush = () => { if (list) root.appendChild(list); list = null; listTag = ""; };
+  friendly(text || "").split("\n").forEach((raw, i) => {
+    const line = raw.trim();
+    if (!line) { flush(); return; }
+    if (/^\[[a-z_]+\]/.test(line)) { flush(); return; } /* status footer: the pill already says it */
+    const bullet = line.match(/^[•·-]\s*(.+)$/);
+    const ordered = line.match(/^(\d+)[.、]\s*(.+)$/);
+    if (bullet || ordered) {
+      const tag = bullet ? "ul" : "ol";
+      if (listTag !== tag) { flush(); list = h(tag); listTag = tag; }
+      list.appendChild(h("li", null, bullet ? bullet[1] : ordered[2]));
+      return;
     }
-  },
-  render() {
-    const route = this.current();
-    document.querySelectorAll("[data-route]").forEach((a) => a.classList.toggle("active", a.dataset.route === route.id));
-    $("#page-title").textContent = route.title;
-    $("#page-sub").textContent = route.sub;
-    document.title = `${route.title} · NSCLC-Agent · IMPF-AI`;
-    const view = clear($("#view"));
-    if (!Bridge.ready) { view.appendChild(empty("运行时加载中…", "info")); return; }
-    const renderer = VIEWS[route.id];
-    try { append(view, [renderer()]); } catch (err) { view.appendChild(empty(`渲染失败：${err.message}`, "alert")); console.error(err); }
-    window.scrollTo({ top: 0 });
-  },
-};
+    flush();
+    let cls = null;
+    if (line.startsWith("※")) cls = "note";
+    else if (line.startsWith("⚠")) cls = "emerg";
+    else if (line.startsWith("【")) cls = "warnline";
+    else if (i === 0 && line.startsWith("分期")) cls = "lead";
+    root.appendChild(h("p", { class: cls }, line));
+  });
+  flush();
+  return root;
+}
 
-/* ================================================================ result */
+/* ================================================================ chips */
 
 function regimenChip(rid) {
   const r = Store.catalog && Store.catalog.regimens[rid];
@@ -252,54 +401,133 @@ function trialChip(tid) {
   return h("span", { class: "chip trial", title: t ? `${t.name}\n${(t.results || []).join("\n")}\n${t.source || ""}` : tid }, tid);
 }
 
-function renderResult(res, ms) {
+/* ======================================================= consult card */
+
+function consultCard(p, m) {
+  const onc = p.views && p.views.oncologist;
+  if (!onc) return patientCard(p);
+  const meta = statusMeta(p.release_status);
+  const rx = h("div", { class: "rx" + (m.whatif ? " whatif" : "") });
+  const st = onc.staging || {};
+  const plan = onc.treatment_plan || {};
+  const violations = p.violations || [];
+  const blocks = violations.filter((v) => v.severity === "block");
+  const emergency = p.release_status === "emergency_action_plan";
+
+  const metrics = h("div", { class: "metrics" },
+    emergency ? null : h("span", { class: `metric ${blocks.length ? "bad" : "ok"}` }, icon(blocks.length ? "x" : "lab"),
+      blocks.length ? `阻断 ${blocks.length}` : `终审通过 · ${(Store.info && Store.info.counts.rules) || 20} 条规则`),
+    violations.length - blocks.length ? h("span", { class: "metric warn" }, `警示 ${violations.length - blocks.length}`) : null,
+    (p.claims || []).length ? h("span", { class: "metric" }, `主张 ${p.claims.length}`) : null,
+    (p.evidence || []).length ? h("span", { class: "metric" }, `证据 ${p.evidence.length}`) : null,
+    m.ms ? h("span", { class: "metric" }, `${m.ms} ms`) : null,
+    p.llm_calls ? h("span", { class: "metric" }, icon("sparkle"), `模型 ${p.llm_calls}`) : null);
+
+  rx.appendChild(h("div", { class: "rx-top" },
+    h("div", { class: "rx-stage" },
+      h("div", { class: "lbl" }, "分期"),
+      h("div", { class: "big" }, st.stage_group || "—"),
+      h("div", { class: "tnm" }, st.tnm || (st.stage_group ? "" : "未分期"))),
+    h("div", { class: `rx-status tone-${meta[0]}` },
+      h("div", { class: "st" }, h("span", { class: "g" }, icon(meta[3])), meta[1], m.whatif ? h("span", { class: "chip trial" }, "假设情景") : null),
+      h("div", { class: "d" }, meta[2]),
+      metrics)));
+
+  if (emergency && onc.emergency_plan) {
+    const e = onc.emergency_plan;
+    rx.appendChild(h("div", { class: "rx-sec" }, h("div", { class: "emerg-grid" },
+      h("div", null, h("div", { class: "lbl" }, "立即处置"), fmtList(e.immediate_actions)),
+      h("div", null, h("div", { class: "lbl" }, "不要做"), fmtList(e.do_not)),
+      h("div", null, h("div", { class: "lbl" }, "升级条件"), fmtList(e.escalate_if)))));
+    return rx;
+  }
+  const options = plan.options || [];
+  if (options.length) {
+    rx.appendChild(h("div", { class: "rx-sec" },
+      h("div", { class: "lbl" }, p.released ? "推荐方案" : "候选方案", p.released ? null : h("span", { class: "chip warn" }, "未放行 · 仅供医师审阅"),
+        plan.intent ? h("span", { class: "chip" }, { curative: "根治性", palliative: "姑息性" }[plan.intent] || plan.intent) : null,
+        plan.mdt_referral ? h("span", { class: "chip warn" }, "建议 MDT") : null),
+      options.map((o, i) => h("div", { class: "opt" },
+        h("span", { class: "n" }, i + 1),
+        h("div", null, h("div", { class: "nm" }, o.name),
+          o.rationale ? h("div", { class: "why" }, o.rationale) : null,
+          (o.regimen_ids || []).length ? h("div", { class: "chips" }, o.regimen_ids.map(regimenChip)) : null)))));
+  }
+  const workup = plan.workup_needed || [];
+  const trials = plan.trial_refs || [];
+  if (trials.length || workup.length) {
+    rx.appendChild(h("div", { class: "rx-sec" },
+      trials.length ? h("div", null, h("div", { class: "lbl" }, "循证锚点"), h("div", { class: "chips" }, trials.map(trialChip))) : null,
+      workup.length ? h("div", { style: { marginTop: trials.length ? "12px" : 0 } }, h("div", { class: "lbl" }, "待完善检查"),
+        h("div", { class: "todo" }, workup.map((w) => h("div", null, icon("alert"), h("span", null, w))))) : null));
+  }
+  if (blocks.length) {
+    rx.appendChild(h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "终审拦截原因"),
+      blocks.map((v) => h("div", { class: "violation" }, h("span", { class: "sev block" }, "BLOCK"),
+        h("div", null, h("div", { class: "rule" }, v.rule_id), h("div", { class: "msg" }, v.message))))));
+  }
+  return rx;
+}
+
+function patientCard(p) {
+  const v = p.views && p.views.patient;
+  if (!v) return null;
+  const meta = statusMeta(p.release_status);
+  const rx = h("div", { class: "rx" });
+  rx.appendChild(h("div", { class: "rx-sec" }, h("div", { class: `rx-status tone-${meta[0]}`, style: { padding: 0 } },
+    h("div", { class: "st" }, h("span", { class: "g" }, icon(meta[3])), meta[1]),
+    h("div", { class: "d" }, v.release_status_explained || meta[2]))));
+  if ((v.options || []).length) {
+    rx.appendChild(h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "可与医生讨论的方案"),
+      v.options.map((o, i) => h("div", { class: "opt" }, h("span", { class: "n" }, i + 1),
+        h("div", null, h("div", { class: "nm" }, o.name), o.rationale ? h("div", { class: "why" }, o.rationale) : null)))));
+  }
+  if ((v.next_tests || []).length) rx.appendChild(h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "下一步检查"), fmtList(v.next_tests)));
+  if (v.note) rx.appendChild(h("div", { class: "rx-sec muted small" }, v.note));
+  return rx;
+}
+
+/* ====================================================== full report */
+
+function renderResult(res, ms, opts) {
   const onc = (res.views && res.views.oncologist) || null;
   const patient = res.views && res.views.patient;
   const wrap = h("div", { class: "stack" });
   wrap.appendChild(statusBanner(res.release_status, ms ? `${ms} ms · 浏览器内` : null));
-
-  const emergency = (onc && onc.emergency_plan) || (patient && patient.emergency_plan);
-  if (res.release_status === "emergency_action_plan" && emergency) {
-    wrap.appendChild(h("div", { class: "card" },
-      h("div", { class: "card-head" }, icon("siren"), h("h3", null, "急症处置（固定安全脚本）")),
-      h("div", { class: "grid cols-3" },
-        h("div", null, h("div", { class: "muted small" }, "立即处置"), fmtList(emergency.immediate_actions)),
-        h("div", null, h("div", { class: "muted small" }, "不要做"), fmtList(emergency.do_not)),
-        h("div", null, h("div", { class: "muted small" }, "升级条件"), fmtList(emergency.escalate_if)))));
-    return wrap;
-  }
-
   if (!onc) {
     wrap.appendChild(renderPatientView(patient));
     wrap.appendChild(h("div", { class: "callout" }, icon("info"), h("div", null,
-      "患者角色的运行只返回患者视图（与命令行同一契约）。切换为「肿瘤科医师」角色可查看分期、证据台账与安全审计。")));
+      "患者视角只返回患者视图（与命令行同一契约）。在顶部把视角切换为「肿瘤科医师」可查看分期、证据台账与安全审计。")));
     return wrap;
   }
-
+  if (res.release_status === "emergency_action_plan" && onc.emergency_plan) {
+    const e = onc.emergency_plan;
+    wrap.appendChild(h("div", { class: "card" },
+      h("div", { class: "card-head" }, icon("siren"), h("h3", null, "急症处置（固定安全脚本）")),
+      h("div", { class: "grid cols-3" },
+        h("div", null, h("div", { class: "muted small" }, "立即处置"), fmtList(e.immediate_actions)),
+        h("div", null, h("div", { class: "muted small" }, "不要做"), fmtList(e.do_not)),
+        h("div", null, h("div", { class: "muted small" }, "升级条件"), fmtList(e.escalate_if)))));
+    return wrap;
+  }
   const plan = onc.treatment_plan || {};
   const staging = onc.staging || {};
-  const top = h("div", { class: "grid cols-2" });
-  top.appendChild(h("div", { class: "card" },
-    h("div", { class: "card-head" }, h("h3", null, "分期（确定性引擎）"), h("span", { class: "sub" }, staging.edition || "")),
-    staging.stage_group
-      ? h("div", null,
-          h("div", { class: "stage-big" }, staging.stage_group, h("small", null, staging.tnm || "")),
-          h("div", { class: "kv", style: { marginTop: "14px" } },
-            h("div", { class: "k" }, "路由模块"), h("div", null, (onc.routing || {}).module_key || "—"),
-            h("div", { class: "k" }, "风险模式"), h("div", null, res.risk_mode || "routine")),
-          (staging.migration_notes || []).length ? h("div", { style: { marginTop: "10px" } },
-            h("div", { class: "muted small" }, "版本迁移注记"), fmtList(staging.migration_notes)) : null)
-      : h("div", { class: "muted" }, "未分期 — TNM 不完整或被引擎拒绝（歧义不猜）")));
-  top.appendChild(h("div", { class: "card" },
-    h("div", { class: "card-head" }, h("h3", null, "方案概要"),
-      h("div", { class: "right" }, plan.intent ? h("span", { class: "chip" }, plan.intent) : null,
-        plan.mdt_referral ? h("span", { class: "chip warn" }, "MDT 转诊") : null)),
-    h("div", null, plan.summary || "—"),
-    (plan.trial_refs || []).length ? h("div", { style: { marginTop: "12px" } },
-      h("div", { class: "muted small", style: { marginBottom: "6px" } }, "试验锚点"),
-      h("div", { class: "chips" }, plan.trial_refs.map(trialChip))) : null));
-  wrap.appendChild(top);
-
+  wrap.appendChild(h("div", { class: "grid cols-2" },
+    h("div", { class: "card" },
+      h("div", { class: "card-head" }, h("h3", null, "分期（确定性引擎）"), h("span", { class: "sub" }, staging.edition || "")),
+      staging.stage_group
+        ? h("div", null,
+            h("div", { class: "stage-big" }, staging.stage_group, h("small", null, staging.tnm || "")),
+            h("div", { class: "kv", style: { marginTop: "14px" } },
+              h("div", { class: "k" }, "路由模块"), h("div", null, (onc.routing || {}).module_key || "—"),
+              h("div", { class: "k" }, "风险模式"), h("div", null, res.risk_mode || "routine")),
+            (staging.migration_notes || []).length ? h("div", { style: { marginTop: "10px" } }, h("div", { class: "muted small" }, "版本迁移注记"), fmtList(staging.migration_notes)) : null)
+        : h("div", { class: "muted" }, "未分期 — TNM 不完整或被引擎拒绝（歧义不猜）")),
+    h("div", { class: "card" },
+      h("div", { class: "card-head" }, h("h3", null, "方案概要"),
+        h("div", { class: "right" }, plan.intent ? h("span", { class: "chip" }, plan.intent) : null, plan.mdt_referral ? h("span", { class: "chip warn" }, "MDT 转诊") : null)),
+      h("div", null, plan.summary || "—"),
+      (plan.trial_refs || []).length ? h("div", { style: { marginTop: "12px" } }, h("div", { class: "chips" }, plan.trial_refs.map(trialChip))) : null)));
   const options = plan.options || [];
   wrap.appendChild(h("div", { class: "card" },
     h("div", { class: "card-head" }, h("h3", null, "治疗选项"), h("span", { class: "sub" }, `${options.length} 项`),
@@ -307,22 +535,19 @@ function renderResult(res, ms) {
     options.length ? options.map((o, i) => h("div", { class: "option" },
       h("div", { class: "name" }, h("span", { class: "idx" }, i + 1), o.name),
       o.rationale ? h("div", { class: "why" }, o.rationale) : null,
-      (o.regimen_ids || []).length ? h("div", { class: "chips" }, o.regimen_ids.map(regimenChip)) : null))
-      : h("div", { class: "muted" }, "无选项")));
-
+      (o.regimen_ids || []).length ? h("div", { class: "chips" }, o.regimen_ids.map(regimenChip)) : null)) : h("div", { class: "muted" }, "无选项")));
   const violations = res.violations || [];
-  const tabs = [
+  wrap.appendChild(h("div", { class: "card" }, tabbed([
     { id: "detail", label: "方案细节", render: () => renderPlanDetail(plan, onc) },
     { id: "audit", label: "安全审计", count: violations.length, render: () => renderAudit(res) },
     { id: "evidence", label: "证据与主张", count: (res.claims || []).length, render: () => renderEvidence(res) },
-    { id: "indication", label: "适应证判定", render: () => renderIndications(res.indication_report) },
-    { id: "prognosis", label: "预后（人群）", render: () => renderPrognosis(onc.prognosis) },
-    { id: "kg", label: "指南 KG 上下文", render: () => renderGuidelineContext(onc.guideline_context) },
+    { id: "indication", label: "适应证", render: () => renderIndications(res.indication_report) },
+    { id: "prognosis", label: "预后", render: () => renderPrognosis(onc.prognosis) },
+    { id: "kg", label: "指南", render: () => renderGuidelineContext(onc.guideline_context) },
     { id: "patient", label: "患者视图", render: () => renderPatientView(patient) },
     { id: "dose", label: "剂量通道", render: () => renderDose(onc.dose_plan) },
-    { id: "trace", label: "执行轨迹", render: () => renderTrace(res, onc) },
-  ];
-  wrap.appendChild(h("div", { class: "card" }, tabbed(tabs)));
+    { id: "trace", label: "执行轨迹", render: () => renderTrace(res, onc, opts || {}) },
+  ])));
   return wrap;
 }
 
@@ -332,10 +557,7 @@ function tabbed(defs, initial) {
   let active = initial || defs[0].id;
   const draw = () => {
     clear(bar); clear(body);
-    for (const d of defs) {
-      bar.appendChild(h("button", { class: d.id === active ? "on" : "", onclick: () => { active = d.id; draw(); } },
-        d.label, d.count !== undefined ? h("span", { class: "count" }, d.count) : null));
-    }
+    for (const d of defs) bar.appendChild(h("button", { class: d.id === active ? "on" : "", onclick: () => { active = d.id; draw(); } }, d.label, d.count !== undefined ? h("span", { class: "count" }, d.count) : null));
     body.appendChild(defs.find((d) => d.id === active).render());
   };
   draw();
@@ -350,49 +572,38 @@ function renderPlanDetail(plan, onc) {
   if ((plan.provisional_regimens || []).length) blocks.appendChild(h("div", null, h("h4", null, "暂定方案（待补事实）"), jsonBlock(plan.provisional_regimens)));
   if (plan.organ_gates) {
     blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "器官功能闸门"),
-      (plan.organ_gates.failed || []).length ? h("div", { class: "chips", style: { marginBottom: "8px" } },
-        plan.organ_gates.failed.map((f) => h("span", { class: "chip block" }, `${f.gate}: ${f.note}`))) : h("div", { class: "muted small" }, "无不合格闸门"),
+      (plan.organ_gates.failed || []).length ? h("div", { class: "chips", style: { marginBottom: "8px" } }, plan.organ_gates.failed.map((f) => h("span", { class: "chip block" }, `${f.gate}: ${f.note}`))) : h("div", { class: "muted small" }, "无不合格闸门"),
       h("div", { class: "muted small", style: { marginTop: "6px" } }, "剂量通道开启前待补："), fmtList(plan.organ_gates.pending)));
   }
   if (plan.cns) {
     const rd = plan.cns.reading || {};
     const tri = (v) => (v === true ? "是" : v === false ? "否" : "未记录");
     blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "CNS 分层读数"),
-      h("div", { class: "kv" },
-        h("div", { class: "k" }, "状态"), h("div", null, rd.status || "未记录"),
-        h("div", { class: "k" }, "有症状"), h("div", null, tri(rd.symptomatic)),
-        h("div", { class: "k" }, "已局部治疗"), h("div", null, tri(rd.treated)),
-        h("div", { class: "k" }, "负荷"), h("div", null, rd.burden || "未记录"),
-        h("div", { class: "k" }, "软脑膜"), h("div", null, tri(rd.leptomeningeal)),
-        h("div", { class: "k" }, "来源"), h("div", null, rd.source || "—")),
+      h("div", { class: "kv" }, h("div", { class: "k" }, "状态"), h("div", null, rd.status || "未记录"), h("div", { class: "k" }, "有症状"), h("div", null, tri(rd.symptomatic)),
+        h("div", { class: "k" }, "已局部治疗"), h("div", null, tri(rd.treated)), h("div", { class: "k" }, "负荷"), h("div", null, rd.burden || "未记录"),
+        h("div", { class: "k" }, "软脑膜"), h("div", null, tri(rd.leptomeningeal))),
       (plan.cns.honest_notes || []).length ? h("div", { class: "muted small", style: { marginTop: "8px" } }, plan.cns.honest_notes.join(" ")) : null));
   }
   if (plan.sequencing) {
     blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "后线序贯"),
       h("div", { class: "kv" }, h("div", { class: "k" }, "当前线次"), h("div", null, h("strong", null, `第 ${plan.sequencing.line || "?"} 线`))),
-      (plan.sequencing.honest_notes || []).length ? h("div", { style: { marginTop: "8px" } },
-        h("div", { class: "muted small" }, "覆盖边界（如实声明）"), fmtList(plan.sequencing.honest_notes)) : null));
+      (plan.sequencing.honest_notes || []).length ? h("div", { style: { marginTop: "8px" } }, h("div", { class: "muted small" }, "覆盖边界（如实声明）"), fmtList(plan.sequencing.honest_notes)) : null));
   }
   if ((onc.open_questions || []).length) blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "待回答问题"), fmtList(onc.open_questions)));
-  const workup = onc.workup_plan && onc.workup_plan.steps;
-  if (workup && workup.length) blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "检查计划"), fmtList(workup.map((s) => `${s.gap || ""} → ${s.test || ""}`))));
   if ((onc.flags || []).length) blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "运行标记"), fmtList(onc.flags)));
   return blocks;
 }
-
 function renderAudit(res) {
   const v = res.violations || [];
   const issues = (res.issues || []).filter((i) => !v.some((x) => i.startsWith(x.rule_id)));
   return h("div", { class: "stack" },
-    h("div", { class: "row" }, h("span", { class: "muted small" }, "已运行检查："),
-      h("div", { class: "chips" }, (res.checks_run || []).map((c) => h("span", { class: "chip ok" }, c)))),
+    h("div", { class: "row" }, h("span", { class: "muted small" }, "已运行检查："), h("div", { class: "chips" }, (res.checks_run || []).map((c) => h("span", { class: "chip ok" }, c)))),
     v.length ? h("div", null, v.map((x) => h("div", { class: "violation" },
       h("span", { class: `sev ${x.severity}` }, x.severity === "block" ? "BLOCK" : "WARN"),
       h("div", null, h("div", { class: "rule" }, x.rule_id), h("div", { class: "msg" }, x.message)))))
       : h("div", { class: "callout" }, icon("check"), h("div", null, "规则引擎无违规 — 该方案通过全部确定性安全规则。")),
     issues.length ? h("div", null, h("h4", { style: { margin: "6px 0" } }, "终审其他发现（主张/引用护栏）"), fmtList(issues)) : null);
 }
-
 function renderEvidence(res) {
   const claims = res.claims || [];
   const evidence = res.evidence || [];
@@ -400,42 +611,35 @@ function renderEvidence(res) {
     h("h4", null, "主张 → 支持证据（逐主张蕴含）"),
     claims.length ? h("div", { class: "table-wrap" }, h("table", null,
       h("thead", null, h("tr", null, ["ID", "类型", "主张", "支持关系", "证据"].map((x) => h("th", null, x)))),
-      h("tbody", null, claims.map((c) => h("tr", null,
-        h("td", { class: "mono" }, c.claim_id), h("td", null, c.kind), h("td", null, c.text),
-        h("td", null, h("span", { class: "chip" }, c.support_relation)),
-        h("td", { class: "mono" }, (c.evidence_ids || []).join(", ") || "—")))))) : h("div", { class: "muted" }, "无主张"),
+      h("tbody", null, claims.map((c) => h("tr", null, h("td", { class: "mono" }, c.claim_id), h("td", null, c.kind), h("td", null, c.text),
+        h("td", null, h("span", { class: "chip" }, c.support_relation)), h("td", { class: "mono" }, (c.evidence_ids || []).join(", ") || "—")))))) : h("div", { class: "muted" }, "无主张"),
     h("h4", { style: { marginTop: "8px" } }, "证据台账（工具声明的证据等级）"),
     h("div", { class: "table-wrap" }, h("table", null,
       h("thead", null, h("tr", null, ["ID", "等级", "来源", "摘要", "可放行"].map((x) => h("th", null, x)))),
-      h("tbody", null, evidence.map((e) => h("tr", null,
-        h("td", { class: "mono" }, e.evidence_id), h("td", null, h("span", { class: "chip" }, e.level)),
-        h("td", null, e.source), h("td", null, e.summary),
-        h("td", null, h("span", { class: `chip ${e.releasable ? "ok" : "warn"}` }, e.releasable ? "是" : "否"))))))));
+      h("tbody", null, evidence.map((e) => h("tr", null, h("td", { class: "mono" }, e.evidence_id), h("td", null, h("span", { class: "chip" }, e.level)),
+        h("td", null, e.source), h("td", null, e.summary), h("td", null, h("span", { class: `chip ${e.releasable ? "ok" : "warn"}` }, e.releasable ? "是" : "否"))))))));
 }
-
 function renderIndications(report) {
   if (!report || !report.regimens) return empty("本次方案无方案级适应证判定");
   return h("div", { class: "stack" }, report.regimens.map((r) => h("div", { class: "option" },
-    h("div", { class: "name" }, regimenChip(r.regimen_id),
-      h("span", { class: `chip ${r.verdict === "eligible" ? "ok" : r.verdict === "ineligible" ? "block" : "warn"}` }, r.verdict)),
+    h("div", { class: "name" }, regimenChip(r.regimen_id), h("span", { class: `chip ${r.verdict === "eligible" ? "ok" : r.verdict === "ineligible" ? "block" : "warn"}` }, r.verdict)),
     (r.failed_conditions || []).length ? h("div", { class: "why" }, "不满足：", r.failed_conditions.join("；")) : null,
     (r.unknown_conditions || []).length ? h("div", { class: "why" }, "待补：", r.unknown_conditions.join("；")) : null)),
     report.note ? h("div", { class: "muted small" }, report.note) : null);
 }
-
 function renderPrognosis(p) {
   if (!p) return empty("无预后上下文（仅临床视图、仅有分期时提供）");
+  const os = p.five_year_os_percent_approx;
   return h("div", { class: "stack" },
     h("div", { class: "grid cols-3" },
-      h("div", { class: "stat" }, h("div", { class: "v" }, p.five_year_os_percent_approx !== null && p.five_year_os_percent_approx !== undefined ? `~${p.five_year_os_percent_approx}%` : "—"), h("div", { class: "k" }, `${p.stage_group} 期 5 年总生存（人群队列）`)),
+      h("div", { class: "stat" }, h("div", { class: "v" }, os !== null && os !== undefined ? `~${os}%` : "—"), h("div", { class: "k" }, `${p.stage_group} 期 5 年总生存（人群队列）`)),
       h("div", { class: "stat" }, h("div", { class: "v" }, (p.modifiers || []).length), h("div", { class: "k" }, "方向性预后因素")),
       h("div", { class: "stat" }, h("div", { class: "v", style: { fontSize: "15px" } }, p.classification_basis || "—"), h("div", { class: "k" }, "分类依据"))),
     h("div", { class: "callout warn" }, icon("alert"), h("div", null, "人群统计，不是个体预测；系统不为预后因素配数字权重。", p.cohort ? ` 来源：${p.cohort}` : "")),
     (p.modifiers || []).length ? jsonBlock(p.modifiers) : null);
 }
-
 function renderGuidelineContext(ctx) {
-  if (!ctx) return empty("无相关指南 KG 条目");
+  if (!ctx) return empty("无相关指南条目");
   const block = (label, items) => (items || []).length ? h("div", null, h("h4", { style: { margin: "4px 0 8px" } }, label),
     items.map((x) => h("div", { class: "option" }, h("div", { class: "name" }, h("span", { class: "chip" }, x.rec_id || ""), x.guideline || ""),
       h("div", { class: "why", style: { marginLeft: 0 } }, x.recommendation || JSON.stringify(x))))) : null;
@@ -443,7 +647,6 @@ function renderGuidelineContext(ctx) {
     h("div", { class: "callout warn" }, icon("alert"), h("div", null, ctx.note || "机器抽取、未经临床复核：仅供权衡。")),
     block("相关推荐", ctx.supporting), block("警示条目", ctx.cautions));
 }
-
 function renderPatientView(p) {
   if (!p) return empty("无患者视图");
   return h("div", { class: "stack" },
@@ -454,78 +657,58 @@ function renderPatientView(p) {
     (p.next_tests || []).length ? h("div", null, h("h4", { style: { margin: "6px 0" } }, "下一步检查"), fmtList(p.next_tests)) : null,
     p.note ? h("div", { class: "muted small" }, p.note) : null);
 }
-
 function renderDose(dose) {
   if (!dose) return h("div", { class: "stack" }, empty("未生成剂量草案"),
-    h("div", { class: "muted small" }, "剂量只在：肿瘤科医师角色 + 显式开启剂量规划 + 方案无补检/急症信号 + 全部闸门通过 时由确定性剂量库产出，状态为「剂量草案 · 待 MDT/医师签核」。"));
+    h("div", { class: "muted small" }, "剂量只在：肿瘤科医师视角 + 显式开启剂量草案 + 方案无补检/急症信号 + 全部闸门通过 时由确定性方案库产出，状态为「剂量草案 · 待 MDT/医师签核」。"));
   return h("div", { class: "stack" },
     h("div", { class: "callout warn" }, icon("alert"), h("div", null, "剂量草案 — 必须经 MDT/医师签核；数值来自确定性方案库，模型不得产出剂量。")),
     jsonBlock(dose));
 }
-
-function renderTrace(res, onc) {
+function renderTrace(res, onc, opts) {
   return h("div", { class: "grid cols-2" },
     h("div", null, h("h4", { style: { marginBottom: "8px" } }, "任务图"),
-      h("div", { class: "chips" }, (res.tasks || []).map((t) => h("span", { class: `chip ${t.status === "ok" ? "ok" : t.status.startsWith("skipped") ? "" : "warn"}` }, `${t.agent} · ${t.status}`)))),
+      h("div", { class: "chips" }, (res.tasks || []).map((t) => h("span", { class: `chip ${t.status === "ok" ? "ok" : String(t.status).startsWith("skipped") ? "" : "warn"}` }, `${t.agent} · ${t.status}`)))),
     h("div", null, h("h4", { style: { marginBottom: "8px" } }, "运行元数据"), jsonBlock(res.run_meta || {})),
     h("div", { style: { gridColumn: "1 / -1" } }, h("div", { class: "row" },
-      h("button", { class: "btn sm", onclick: async () => downloadJSON("nsclc-run.json", await Bridge.call("export_last")) }, icon("download"), "导出完整运行记录 JSON"),
-      h("span", { class: "muted small" }, "证据载荷、执行轨迹、预算 — 与 CLI 的审计输出同一对象"))),
+      opts.latest ? h("button", { class: "btn sm", onclick: async () => downloadJSON("nsclc-run.json", await Bridge.call("export_last")) }, icon("download"), "导出完整运行记录") : null,
+      h("button", { class: "btn sm", onclick: () => downloadJSON("nsclc-result.json", res) }, icon("download"), "导出本轮结果 JSON"))),
     (onc.warnings || []).length ? h("div", null, h("h4", null, "告警"), fmtList(onc.warnings)) : null);
 }
 
-/* ================================================================ views */
+/* ================================================================ drawer */
 
-const VIEWS = {};
+function openDrawer({ title, sub, width, body, foot }) {
+  const host = $("#drawer-host");
+  clear(host);
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  const close = () => {
+    host.classList.remove("open");
+    document.removeEventListener("keydown", onKey);
+    setTimeout(() => { if (!host.classList.contains("open")) clear(host); }, 260);
+  };
+  const drawer = h("div", { class: "drawer", role: "dialog", "aria-label": title },
+    h("div", { class: "drawer-head" }, h("div", { style: { minWidth: 0, flex: 1 } }, h("div", { class: "t" }, title), sub ? h("div", { class: "s" }, sub) : null),
+      h("button", { class: "icon-btn ghost", type: "button", title: "关闭", "aria-label": "关闭", onclick: () => close() }, icon("x"))),
+    h("div", { class: "drawer-body" }, body),
+    foot ? h("div", { class: "drawer-foot" }, foot) : null);
+  drawer.style.setProperty("--dw", `${width || 880}px`);
+  host.appendChild(h("div", { class: "drawer-backdrop", onclick: () => close() }));
+  host.appendChild(drawer);
+  document.addEventListener("keydown", onKey);
+  requestAnimationFrame(() => host.classList.add("open"));
+  return close;
+}
+function openReport(m, c) {
+  const p = m.payload; if (!p) return;
+  const onc = p.views && p.views.oncologist;
+  const stage = onc && onc.staging && onc.staging.stage_group;
+  const latest = c.messages.filter((x) => x.role === "agent").slice(-1)[0] === m && Session.boundId === c.id;
+  openDrawer({ title: m.whatif ? "假设情景 · 完整报告" : "完整会诊报告",
+    sub: [stage ? `分期 ${stage}` : null, statusMeta(p.release_status)[1], new Date(m.ts).toLocaleString()].filter(Boolean).join(" · "),
+    width: 960, body: renderResult(p, m.ms, { latest }) });
+}
 
-VIEWS.home = () => {
-  const i = Store.info || { counts: {} };
-  const c = i.counts || {};
-  const root = h("div", { class: "stack", style: { gap: "22px" } });
-  root.appendChild(h("section", { class: "hero" },
-    h("span", { class: "hero-badge" }, h("span", { class: "impf-dot" }), "IMPF-AI 研发 · v", i.version),
-    h("h2", null, "非小细胞肺癌 ", h("span", { class: "grad" }, "多学科决策智能体")),
-    h("p", null, "确定性 AJCC/UICC 第 9 版分期是唯一分期权威；每个方案都要过适应证谓词、器官功能闸门、逐主张证据蕴含与终审规则引擎，未通过就不放行。整个智能体以 WebAssembly 在您的浏览器内运行 — 无服务器，病例数据不离开本机。"),
-    h("div", { class: "hero-actions" },
-      h("button", { class: "btn primary", onclick: () => Router.go("consult") }, icon("play"), "开始会诊"),
-      h("button", { class: "btn ghost", onclick: () => Router.go("chat") }, icon("chat"), "多轮会诊"),
-      h("button", { class: "btn ghost", onclick: () => Router.go("eval") }, icon("eval"), "查看安全评测"))));
-
-  root.appendChild(h("div", { class: "grid cols-4" },
-    stat(c.rules, "确定性安全规则"), stat(c.regimens, "方案库（摘要无剂量）"),
-    stat(c.trials, "试验注册表条目"), stat(`${c.golden_cases}`, `金标准病例（${c.audit_probes} 个安全网探针）`)));
-
-  root.appendChild(h("div", { class: "card" },
-    h("div", { class: "card-head" }, h("h3", null, "受治理的执行流水线"), h("span", { class: "sub" }, "模型可以提议，确定性内核决定")),
-    h("div", { class: "pipeline" },
-      pipe("01", "问诊与急症筛查", "子句级否定；急症直接短路到固定脚本"),
-      pipe("02", "确定性分期", "第 9 版表 + 拒绝表；歧义不猜", true),
-      pipe("03", "路由与方案", "驱动本体、CNS 分层、后线序贯"),
-      pipe("04", "适应证与器官闸门", "40 条机器可执行人群声明", true),
-      pipe("05", "逐主张证据蕴含", "方案、人群、数字三层核对"),
-      pipe("06", "终审规则引擎", "20 条规则；阻断即不放行", true),
-      pipe("07", "放行状态机", "患者只见已放行内容"))));
-
-  const ex = h("div", { class: "grid cols-4" });
-  for (const e of Store.examples || []) {
-    ex.appendChild(h("button", { class: "example", onclick: () => { Consult.load(e); Router.go("consult"); Consult.autorun = true; } },
-      h("div", { class: "t" }, e.title), h("div", { class: "s" }, e.subtitle)));
-  }
-  root.appendChild(h("div", null,
-    h("div", { class: "section-title" }, "一键示例"),
-    h("div", { class: "section-sub" }, "每个示例覆盖一项独立的安全性质 — 点击后在会诊工作台完整运行。"), ex));
-
-  root.appendChild(h("div", { class: "grid cols-3" },
-    feature("staging", "分期是唯一权威", "模型可以查询分期，但无权改写本次运行的分期；N2 未分 a/b 等歧义直接拒绝并告诉您用哪项检查解决。"),
-    feature("lab", "规则引擎独立终审", "规划器和终审器各自执行同一份人群声明：变异类错配、驱动一线、N3 手术、CNS 未处理等都会被独立拦截。"),
-    feature("key", "密钥只在您的浏览器", "接入 Poe / MiniMax 时，请求从本页直接发往您选择的服务商；IMPF-AI 与 GitHub 都不会经手您的密钥或病例。")));
-  return root;
-};
-function stat(v, k) { return h("div", { class: "stat" }, h("div", { class: "v" }, v === undefined ? "—" : v), h("div", { class: "k" }, k)); }
-function pipe(n, t, d, gate) { return h("div", { class: "pipe-step" + (gate ? " gate" : "") }, h("div", { class: "n" }, n), h("div", { class: "t" }, t), h("div", { class: "d" }, d)); }
-function feature(ic, t, d) { return h("div", { class: "card" }, h("div", { class: "row", style: { marginBottom: "8px" } }, h("span", { class: "feature-ic" }, icon(ic)), h("h3", { style: { fontSize: "15px" } }, t)), h("div", { class: "muted" }, d)); }
-
-/* ---------------------------------------------------------------- consult */
+/* ============================================================ case form */
 
 const T_OPTIONS = ["", "Tis", "T1mi", "T1a", "T1b", "T1c", "T2a", "T2b", "T3", "T4", "TX"];
 const N_OPTIONS = ["", "N0", "N1", "N2a", "N2b", "N2", "N3", "NX"];
@@ -533,7 +716,6 @@ const M_OPTIONS = ["", "M0", "M1a", "M1b", "M1c1", "M1c2", "M1c", "MX"];
 const TRI = [["", "未记录"], ["true", "是"], ["false", "否"]];
 const GENES = ["egfr", "alk", "ros1", "ret", "met", "braf", "ntrk", "her2", "kras"];
 const DRIVER_HINTS = ["negative", "L858R", "exon 19 deletion", "exon 20 insertion", "G719X", "L858R + T790M", "EML4-ALK fusion", "CD74-ROS1 fusion", "KIF5B-RET fusion", "exon 14 skipping", "V600E", "G12C", "not tested", "阴性", "19外显子缺失"];
-
 const FACT_FIELDS = [
   { g: "临床", key: "histologic_category", label: "组织学", type: "select", options: [["", "未记录"], ["adenocarcinoma", "腺癌"], ["squamous", "鳞癌"], ["adenosquamous", "腺鳞癌"], ["large_cell", "大细胞癌"], ["nsclc_nos", "NSCLC-NOS"]] },
   { g: "临床", key: "ecog_ps", label: "ECOG PS", type: "int", options: [["", "未记录"], ["0", "0"], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"]] },
@@ -559,331 +741,457 @@ const FACT_FIELDS = [
   { g: "进展与耐药", key: "progression_findings.c797s", label: "C797S", type: "bool" },
   { g: "进展与耐药", key: "progression_findings.small_cell_transformation", label: "小细胞转化", type: "bool" },
 ];
-
 function getPath(obj, path) { return path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), obj); }
 function setPath(obj, path, value) {
   const keys = path.split("."); let o = obj;
   keys.slice(0, -1).forEach((k) => { if (!o[k] || typeof o[k] !== "object") o[k] = {}; o = o[k]; });
   o[keys[keys.length - 1]] = value;
 }
-function deletePath(obj, path) {
-  const keys = path.split("."); let o = obj;
-  for (const k of keys.slice(0, -1)) { if (!o || typeof o !== "object") return; o = o[k]; }
-  if (o && typeof o === "object") delete o[keys[keys.length - 1]];
-}
-function pruneEmpty(obj) {
-  for (const [k, v] of Object.entries(obj)) {
-    if (v && typeof v === "object" && !Array.isArray(v)) { pruneEmpty(v); if (!Object.keys(v).length) delete obj[k]; }
-  }
-  return obj;
-}
-
-const Consult = {
-  state: { t: "", n: "", m: "", prefix: "c", presentation: "", question: "", role: "oncologist", dose: false, panel: false, fields: {}, history: [], extra: "" },
-  result: null, ms: 0, autorun: false,
-  load(example) {
-    const c = example.case || {};
-    const facts = JSON.parse(JSON.stringify(c.facts || {}));
-    const fields = {};
-    for (const f of FACT_FIELDS) {
-      const v = getPath(facts, f.key);
-      if (v !== undefined) {
-        fields[f.key] = f.type === "list" && Array.isArray(v) ? v.join(", ") : String(v);
-        deletePath(facts, f.key);
-      }
-    }
-    const history = (facts.treatment_history || []).map((e) => ({ line: e.line || "", agents: (e.agents || []).join(", "), status: e.status || "" }));
-    delete facts.treatment_history;
-    pruneEmpty(facts);
-    Object.assign(this.state, { t: c.t || "", n: c.n || "", m: c.m || "", prefix: c.prefix || "c", presentation: c.presentation || "", question: c.question || "", fields, history, extra: Object.keys(facts).length ? JSON.stringify(facts, null, 2) : "" });
-    this.result = null;
-  },
-  facts() {
-    let facts = {};
-    for (const f of FACT_FIELDS) {
-      const raw = this.state.fields[f.key];
-      if (raw === undefined || raw === "") continue;
-      let value = raw;
-      if (f.type === "int") value = parseInt(raw, 10);
-      else if (f.type === "number") { value = Number(raw); if (Number.isNaN(value)) continue; }
-      else if (f.type === "bool" || f.type === "tri") value = raw === "true";
-      else if (f.type === "list") value = raw.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
-      setPath(facts, f.key, value);
-    }
-    const history = this.state.history.filter((e) => e.agents.trim()).map((e) => ({
-      line: e.line ? parseInt(e.line, 10) : undefined,
-      agents: e.agents.split(/[,，+]/).map((s) => s.trim()).filter(Boolean),
-      status: e.status || undefined,
-    }));
-    if (history.length) facts.treatment_history = history;
-    if (this.state.extra.trim()) {
-      const extra = JSON.parse(this.state.extra);
-      facts = deepMerge(facts, extra);
-    }
-    return facts;
-  },
-};
 function deepMerge(a, b) {
   const out = Object.assign({}, a);
-  for (const [k, v] of Object.entries(b || {})) {
-    out[k] = v && typeof v === "object" && !Array.isArray(v) && a[k] && typeof a[k] === "object" ? deepMerge(a[k], v) : v;
-  }
+  for (const [k, v] of Object.entries(b || {})) out[k] = v && typeof v === "object" && !Array.isArray(v) && a[k] && typeof a[k] === "object" ? deepMerge(a[k], v) : v;
   return out;
 }
-
 function selectEl(options, value, onchange) {
   return h("select", { onchange: (e) => onchange(e.target.value) },
     options.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o || "—"]; return h("option", { value: v, selected: String(v) === String(value) ? true : null }, l); }));
 }
 function inputEl(type, value, onchange, placeholder, list) {
-  return h("input", { type, value: value || "", placeholder: placeholder || "", list: list || null, oninput: (e) => onchange(e.target.value) });
+  return h("input", { type, value: value === undefined || value === null ? "" : value, placeholder: placeholder || "", list: list || null, oninput: (e) => onchange(e.target.value) });
+}
+function formState(facts) {
+  const tnm = facts.tnm || {};
+  const fields = {};
+  for (const f of FACT_FIELDS) {
+    const v = getPath(facts, f.key);
+    if (v !== undefined && v !== null) fields[f.key] = f.type === "list" && Array.isArray(v) ? v.join(", ") : String(v);
+  }
+  const history = (facts.treatment_history || []).map((e) => ({ line: e.line ? String(e.line) : "", agents: (e.agents || []).join(", "), status: e.status || "" }));
+  return { t: tnm.t || "", n: tnm.n || "", m: tnm.m || "", prefix: tnm.prefix || "c", fields, history, extra: "", narrative: "" };
+}
+const normHistory = (list) => list.filter((e) => e.agents.trim()).map((e) => ({
+  line: e.line ? parseInt(e.line, 10) : undefined, agents: e.agents.split(/[,，+]/).map((s) => s.trim()).filter(Boolean), status: e.status || undefined }));
+/** Only what the clinician CHANGED is sent — restating an unchanged value
+ *  would count as confirming it (e.g. a fact the report reader proposed). */
+function diffFacts(init, cur) {
+  const out = {};
+  if (["t", "n", "m", "prefix"].some((k) => (cur[k] || "") !== (init[k] || ""))) {
+    const tnm = {};
+    for (const k of ["t", "n", "m"]) if (cur[k]) tnm[k] = cur[k];
+    if (Object.keys(tnm).length) out.tnm = Object.assign(tnm, { prefix: cur.prefix || "c" });
+  }
+  for (const f of FACT_FIELDS) {
+    const raw = cur.fields[f.key] === undefined ? "" : cur.fields[f.key];
+    if (raw === "" || raw === (init.fields[f.key] === undefined ? "" : init.fields[f.key])) continue;
+    let value = raw;
+    if (f.type === "int") value = parseInt(raw, 10);
+    else if (f.type === "number") { value = Number(raw); if (Number.isNaN(value)) continue; }
+    else if (f.type === "bool" || f.type === "tri") value = raw === "true";
+    else if (f.type === "list") value = raw.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+    setPath(out, f.key, value);
+  }
+  const hCur = normHistory(cur.history);
+  if (hCur.length && JSON.stringify(hCur) !== JSON.stringify(normHistory(init.history))) out.treatment_history = hCur;
+  return cur.extra.trim() ? deepMerge(out, JSON.parse(cur.extra)) : out;
 }
 
-VIEWS.consult = () => {
-  const s = Consult.state;
-  const root = h("div", { class: "grid side" });
-  const left = h("div", { class: "stack" });
-  const resultHost = h("div", { class: "stack" });
-
-  const exRow = h("div", { class: "chips" }, (Store.examples || []).map((e) => h("button", { class: "btn sm", onclick: () => { Consult.load(e); Router.render(); } }, e.title)));
-  left.appendChild(h("div", { class: "card" },
-    h("div", { class: "card-head" }, h("h3", null, "病例输入"), h("span", { class: "sub" }, "结构化事实优先；叙述文本用于急症筛查与问诊")),
-    h("div", { class: "muted small", style: { marginBottom: "8px" } }, "载入示例："), exRow,
-    h("div", { class: "hr" }),
+function openCaseForm(c) {
+  const known = caseFacts(c);
+  const init = formState(known);
+  const cur = JSON.parse(JSON.stringify(init));
+  const fieldLabel = (text, control, key, cls) => {
+    const label = h("label", { class: "field" + (cls ? ` ${cls}` : "") }, text, control);
+    const mark = () => label.classList.toggle("changed", (cur.fields[key] || "") !== (init.fields[key] || ""));
+    control.addEventListener("input", mark); control.addEventListener("change", mark);
+    return label;
+  };
+  const body = h("div", { class: "stack" });
+  body.appendChild(h("div", { class: "callout" }, icon("info"), h("div", null,
+    Object.keys(known).length
+      ? "已按当前病例档案预填。只有您修改过的字段（蓝色描边）会提交 —— 未改动的值不会被当作「确认」；清空字段不会删除已记录的事实。"
+      : "填写已知信息即可，未填写的字段不会提交。TNM 由确定性引擎分期，N2 / M1c 未细分会被拒绝并提示所需检查。")));
+  body.appendChild(h("fieldset", null, h("legend", null, "分期与叙述"),
     h("div", { class: "form-grid" },
-      h("label", { class: "field" }, "T", selectEl(T_OPTIONS, s.t, (v) => (s.t = v))),
-      h("label", { class: "field" }, "N", selectEl(N_OPTIONS, s.n, (v) => (s.n = v))),
-      h("label", { class: "field" }, "M", selectEl(M_OPTIONS, s.m, (v) => (s.m = v))),
-      h("label", { class: "field" }, "前缀", selectEl([["c", "c（临床）"], ["p", "p（病理）"], ["yp", "yp（新辅助后）"]], s.prefix, (v) => (s.prefix = v))),
-      h("label", { class: "field span-4" }, "病情叙述", h("span", { class: "hint" }, "急症信号按子句级否定筛查；明确阴性的脑影像陈述会被识别"),
-        h("textarea", { oninput: (e) => (s.presentation = e.target.value), placeholder: "例：多站N2b，MDT判定不可切除。PET-CT+脑MRI确认M0。无咯血、无下肢无力、无发热。" }, s.presentation)),
-      h("label", { class: "field span-4" }, "临床问题（可选）", inputEl("text", s.question, (v) => (s.question = v), "例：根治性方案与巩固治疗？")))));
-
+      h("label", { class: "field" }, "T", selectEl(T_OPTIONS, cur.t, (v) => (cur.t = v))),
+      h("label", { class: "field" }, "N", selectEl(N_OPTIONS, cur.n, (v) => (cur.n = v))),
+      h("label", { class: "field" }, "M", selectEl(M_OPTIONS, cur.m, (v) => (cur.m = v))),
+      h("label", { class: "field" }, "前缀", selectEl([["c", "c（临床）"], ["p", "p（病理）"], ["yp", "yp（新辅助后）"]], cur.prefix, (v) => (cur.prefix = v))),
+      h("label", { class: "field span-4" }, "补充叙述（可选，随本次提交一起发送）", h("span", { class: "hint" }, "例：PET-CT+脑MRI 确认 M0；无咯血、无下肢无力"),
+        h("textarea", { rows: 2, oninput: (e) => (cur.narrative = e.target.value) })))));
   const groups = {};
   for (const f of FACT_FIELDS) (groups[f.g] = groups[f.g] || []).push(f);
-  const factCard = h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "结构化事实")));
-  factCard.appendChild(h("datalist", { id: "driver-hints" }, DRIVER_HINTS.map((d) => h("option", { value: d }))));
+  body.appendChild(h("datalist", { id: "driver-hints" }, DRIVER_HINTS.map((d) => h("option", { value: d }))));
   for (const [g, fields] of Object.entries(groups)) {
-    const fs = h("fieldset", { style: { marginBottom: "12px" } }, h("legend", null, g));
     const grid = h("div", { class: "form-grid" });
     for (const f of fields) {
-      const val = s.fields[f.key] || "";
-      const set = (v) => { s.fields[f.key] = v; };
+      const val = cur.fields[f.key] || "";
+      const set = (v) => { cur.fields[f.key] = v; };
       let control;
       if (f.type === "select" || f.type === "int") control = selectEl(f.options, val, set);
-      else if (f.type === "tri") control = selectEl(TRI, val, set);
-      else if (f.type === "bool") control = selectEl([["", "未记录"], ["true", "是"], ["false", "否"]], val, set);
+      else if (f.type === "tri" || f.type === "bool") control = selectEl(TRI, val, set);
       else if (f.type === "number") control = inputEl("number", val, set);
       else if (f.type === "driver") control = inputEl("text", val, set, "报告原文，如 L858R / negative", "driver-hints");
       else control = inputEl("text", val, set);
-      grid.appendChild(h("label", { class: "field" + (f.type === "list" ? " span-2" : "") }, f.label, control));
+      grid.appendChild(fieldLabel(f.label, control, f.key, f.type === "list" ? "span-2" : ""));
     }
-    fs.appendChild(grid);
-    factCard.appendChild(fs);
+    body.appendChild(h("fieldset", null, h("legend", null, g), grid));
   }
   const histHost = h("div", { class: "stack" });
   const drawHistory = () => {
     clear(histHost);
-    s.history.forEach((e, idx) => histHost.appendChild(h("div", { class: "form-grid" },
+    cur.history.forEach((e, idx) => histHost.appendChild(h("div", { class: "form-grid" },
       h("label", { class: "field" }, "线次", inputEl("number", e.line, (v) => (e.line = v))),
       h("label", { class: "field span-2" }, "药物（逗号分隔）", inputEl("text", e.agents, (v) => (e.agents = v), "osimertinib / carboplatin, pemetrexed")),
       h("label", { class: "field" }, "结局", h("div", { class: "row", style: { flexWrap: "nowrap" } },
         selectEl([["", "未记录"], ["progression", "进展"], ["response", "缓解"], ["stable", "稳定"], ["toxicity", "毒性停药"]], e.status, (v) => (e.status = v)),
-        h("button", { class: "icon-btn", title: "删除", onclick: () => { s.history.splice(idx, 1); drawHistory(); } }, icon("x")))))));
-    histHost.appendChild(h("button", { class: "btn sm", onclick: () => { s.history.push({ line: String(s.history.length + 1), agents: "", status: "" }); drawHistory(); } }, "+ 添加一线治疗"));
+        h("button", { class: "icon-btn", type: "button", title: "删除", onclick: () => { cur.history.splice(idx, 1); drawHistory(); } }, icon("x")))))));
+    histHost.appendChild(h("button", { class: "btn sm", type: "button", style: { alignSelf: "flex-start" }, onclick: () => { cur.history.push({ line: String(cur.history.length + 1), agents: "", status: "" }); drawHistory(); } }, icon("plus"), "添加一线治疗"));
   };
   drawHistory();
-  factCard.appendChild(h("fieldset", { style: { marginBottom: "12px" } }, h("legend", null, "治疗史（后线序贯只在「进展」时触发）"), histHost));
-  factCard.appendChild(h("label", { class: "field" }, "高级：附加事实 JSON（与上面合并，JSON 优先）",
-    h("textarea", { class: "code", oninput: (e) => (s.extra = e.target.value), placeholder: '{"prior_systemic_therapy": "carboplatin-pemetrexed"}' }, s.extra)));
-  left.appendChild(factCard);
-
-  const runBtn = h("button", { class: "btn primary", style: { width: "100%" } }, icon("play"), "运行完整会诊");
-  const run = async () => {
+  body.appendChild(h("fieldset", null, h("legend", null, "治疗史（后线序贯只在「进展」时触发）"), histHost));
+  body.appendChild(h("details", null, h("summary", { class: "muted small", style: { cursor: "pointer" } }, "高级：附加事实 JSON"),
+    h("label", { class: "field", style: { marginTop: "8px" } }, "与上面合并，JSON 优先",
+      h("textarea", { class: "code", oninput: (e) => (cur.extra = e.target.value), placeholder: '{"prior_systemic_therapy": "carboplatin-pemetrexed"}' }))));
+  const submit = h("button", { class: "btn primary", type: "button" }, icon("send"), "提交给智能体");
+  const close = openDrawer({ title: "结构化病例录入", sub: "确定性校验后并入会诊 · 未改动的字段不会提交", width: 760, body,
+    foot: [h("span", { class: "muted small", style: { marginRight: "auto" } }, "提交即运行一轮完整受治理会诊"),
+      h("button", { class: "btn", type: "button", onclick: () => close() }, "取消"), submit] });
+  submit.addEventListener("click", () => {
     let facts;
-    try { facts = Consult.facts(); } catch (err) { toast(`附加事实 JSON 无效：${err.message}`, true); return; }
-    const done = busy(runBtn, "受治理运行中…");
-    try {
-      const { result, ms } = await Bridge.timed("run_case", {
-        t: s.t, n: s.n, m: s.m, prefix: s.prefix, presentation: s.presentation, question: s.question,
-        facts, role: s.role, allow_dose_planning: s.dose, enable_panel: s.panel,
-      });
-      Consult.result = result; Consult.ms = ms;
-      clear(resultHost).appendChild(renderResult(result, ms));
-      resultHost.scrollIntoView({ behavior: "smooth", block: "start" });
-    } catch (err) { toast(`运行失败：${err.message}`, true); } finally { done(); }
-  };
-  runBtn.addEventListener("click", run);
+    try { facts = diffFacts(init, cur); } catch (err) { toast(`附加 JSON 无效：${err.message}`, true); return; }
+    const text = cur.narrative.trim();
+    if (!Object.keys(facts).length && !text) { toast("没有新增或修改的信息"); return; }
+    close();
+    Workspace.send({ text: text || "（结构化录入）", facts, structured: true });
+  });
+}
 
-  const right = h("div", { class: "stack", style: { position: "sticky", top: "84px" } },
-    h("div", { class: "card" },
-      h("div", { class: "card-head" }, h("h3", null, "运行设置")),
-      h("div", { class: "stack" },
-        h("label", { class: "field" }, "角色（决定可见内容与剂量授权）",
-          selectEl([["oncologist", "肿瘤科医师"], ["patient", "患者"], ["researcher", "研究者"]], s.role, (v) => (s.role = v))),
-        h("label", { class: "check" }, h("input", { type: "checkbox", checked: s.dose || null, onchange: (e) => (s.dose = e.target.checked) }), "开启剂量规划（仅医师）"),
-        h("label", { class: "check" }, h("input", { type: "checkbox", checked: s.panel || null, onchange: (e) => (s.panel = e.target.checked) }), "召集 MDT 会诊面板（需接入模型）"),
-        runBtn,
-        h("div", { class: "muted small" }, "当前：", (Store.llm && Store.llm.llm && Store.llm.llm.available) ? `模型辅助（${Store.llm.llm.provider}）` : "确定性模式（无需任何密钥）"))),
-    h("div", { class: "callout" }, icon("info"), h("div", null, "分期由确定性引擎计算，模型无权改写；方案须通过适应证、器官闸门、证据蕴含与终审后才会放行。")));
+/* ============================================================ workspace */
 
-  root.appendChild(h("div", { class: "stack" }, left, resultHost));
-  root.appendChild(right);
-  if (Consult.result) resultHost.appendChild(renderResult(Consult.result, Consult.ms));
-  if (Consult.autorun) { Consult.autorun = false; setTimeout(run, 50); }
-  return root;
-};
+const Workspace = {
+  text: "", whatif: false, panel: false, busy: false,
+  pending: { images: [], reports: [] },
+  dossier: LS.get("nsclc.ui.dossier", true),
+  ta: null,
 
-/* ---------------------------------------------------------------- chat */
+  reset() { this.text = ""; this.whatif = false; this.pending = { images: [], reports: [] }; },
 
-const Chat = { messages: [], last: null, role: "oncologist", dose: false, started: false, whatif: false, pending: { images: [], reports: [] } };
-
-VIEWS.chat = () => {
-  const root = h("div", { class: "grid side" });
-  const log = h("div", { class: "chat-log" });
-  const detailHost = h("div");
-  const draw = () => {
-    clear(log);
-    if (!Chat.messages.length) {
-      log.appendChild(h("div", { class: "empty" }, icon("chat"),
-        h("div", null, "用自然语言描述病例，例如："),
-        h("div", { class: "small" }, "“65岁男性，吸烟40包年，肺腺癌，cT2aN1M0，ECOG 1，EGFR阴性，PD-L1 60%，脑MRI阴性，无咯血无骨痛无头痛。”")));
+  render() {
+    const c = Cases.current();
+    const hasTurns = c.messages.length > 0;
+    const root = h("section", { class: "ws" + (this.dossier && hasTurns ? "" : " no-dossier") });
+    root.appendChild(this.bar(c));
+    const inner = h("div", { class: "thread-inner" });
+    const thread = h("div", { class: "thread" }, inner);
+    const col = h("div", { class: "thread-col" + (hasTurns ? "" : " is-empty") }, thread);
+    const composer = this.composer(c);
+    if (!hasTurns) inner.appendChild(this.welcome(composer));
+    else {
+      c.messages.forEach((m, i) => inner.appendChild(this.turn(m, c, i)));
+      if (this.busy) inner.appendChild(h("div", { class: "turn agent" }, logoMark("avatar"),
+        h("div", { class: "turn-body" }, h("div", { class: "thinking" }, h("span", { class: "dots" }, h("i"), h("i"), h("i")),
+          h("span", { class: "shimmer" }, llmOn() ? "模型推理中 · 分期与安全规则仍由确定性内核裁决…" : "正在会诊 · 急症筛查 → 分期 → 方案 → 安全终审…")))));
+      col.appendChild(h("div", { class: "dock" }, h("div", { class: "dock-inner" }, composer,
+        h("div", { class: "disclaimer" }, "NSCLC-Agent 由 IMPF-AI 研发 · 仅供教学与研究，不构成医疗建议，治疗决定须由主治团队确认"))));
     }
-    for (const m of Chat.messages) {
-      const bubble = h("div", { class: `msg ${m.role}${m.whatif ? " whatif" : ""}` }, m.text);
-      if (m.meta) {
-        bubble.appendChild(h("div", { class: "meta" }, statusPill(m.meta.release_status),
-          m.meta.plan_reused ? h("span", { class: "chip" }, "方案复用") : null,
-          m.meta.whatif ? h("span", { class: "chip trial" }, "假设推演 · 不写入会话") : null,
-          h("span", { class: "chip" }, `${m.meta.ms} ms`),
-          m.meta.llm_calls ? h("span", { class: "chip" }, `模型调用 ${m.meta.llm_calls}`) : null));
+    root.appendChild(h("div", { class: "ws-body" }, col, h("aside", { class: "dossier", "aria-label": "病例档案" }, this.dossierPanel(c))));
+    requestAnimationFrame(() => {
+      /* Land on the latest exchange: bottom, unless that hides its prompt. */
+      thread.scrollTop = thread.scrollHeight;
+      const users = inner.querySelectorAll(".turn.user");
+      const lastUser = users[users.length - 1];
+      if (lastUser) {
+        const top = lastUser.getBoundingClientRect().top - thread.getBoundingClientRect().top;
+        if (top < 0) thread.scrollTop += top - 16;
       }
-      if (m.attachments) bubble.appendChild(h("div", { class: "meta" }, m.attachments.map((a) => h("span", { class: "chip" }, icon("doc"), a))));
-      log.appendChild(bubble);
-    }
-    log.scrollTop = log.scrollHeight;
-  };
+      if (this.ta && !this.busy && window.matchMedia("(pointer: fine)").matches) this.ta.focus();
+    });
+    return root;
+  },
 
-  const input = h("textarea", { placeholder: "输入本轮信息或问题（Ctrl/⌘ + Enter 发送）…" });
-  const factsInput = h("textarea", { class: "code", style: { minHeight: "70px" }, placeholder: '可选：结构化确认事实 JSON，如 {"treatment_history":[{"line":1,"agents":["osimertinib"],"status":"progression"}]}' });
-  const attachList = h("div", { class: "attach-list" });
-  const drawAttach = () => {
-    clear(attachList);
-    for (const kind of ["images", "reports"]) Chat.pending[kind].forEach((f, i) => attachList.appendChild(h("span", { class: "chip" }, kind === "images" ? "影像" : "报告", "：", f.name,
-      h("button", { class: "btn sm ghost", style: { padding: "0 4px" }, onclick: () => { Chat.pending[kind].splice(i, 1); drawAttach(); } }, "×"))));
-  };
-  const picker = (kind) => h("input", { type: "file", accept: "image/*", multiple: true, style: { display: "none" }, onchange: async (e) => {
-    for (const file of e.target.files) Chat.pending[kind].push({ name: file.name, bytes: await file.arrayBuffer() });
-    e.target.value = ""; drawAttach();
-    if (!(Store.llm && Store.llm.vision && Store.llm.vision.provider !== "none")) toast("读片/读报告需要在「模型接入」中配置视觉模型（如 Poe · gemini-3.1-pro）。未配置时附件会被标记跳过。");
-  } });
-  const imgPick = picker("images"); const repPick = picker("reports");
-  const whatifToggle = h("label", { class: "check" }, h("input", { type: "checkbox", checked: Chat.whatif || null, onchange: (e) => (Chat.whatif = e.target.checked) }), "假设推演（what-if，不写入会话记忆）");
-  const sendBtn = h("button", { class: "btn primary" }, icon("send"), "发送");
+  bar(c) {
+    const last = lastResult(c);
+    const turns = c.messages.filter((m) => m.role === "user").length;
+    const roleSel = h("select", { class: "mini-select", title: "视角决定可见内容与剂量授权", "aria-label": "视角", onchange: (e) => this.setRole(c, e.target.value) },
+      Object.entries(ROLE_LABEL).map(([v, l]) => h("option", { value: v, selected: c.role === v || null }, l)));
+    const dose = h("label", { class: "switch hide-narrow", title: "仅肿瘤科医师；全部闸门通过时由确定性方案库产出剂量草案，待签核" },
+      h("input", { type: "checkbox", checked: c.dose || null, disabled: c.role !== "oncologist" || null, onchange: (e) => this.setDose(c, e.target.checked) }), "剂量草案");
+    return h("header", { class: "ws-bar" },
+      h("button", { class: "icon-btn ghost only-mobile", type: "button", title: "会诊记录", "aria-label": "打开会诊记录", onclick: toggleRail }, icon("menu")),
+      h("div", { class: "ws-title" },
+        h("div", { class: "t" }, c.title || "新会诊"),
+        h("div", { class: "s" }, last ? statusPill(last.payload.release_status) : null, turns ? `${turns} 轮` : "描述病例开始会诊", h("span", { class: "hide-narrow" }, `· ${ROLE_LABEL[c.role] || c.role}视角`))),
+      h("span", { class: "spacer" }),
+      roleSel, dose,
+      h("button", { class: "icon-btn ghost", type: "button", title: "导入会诊文件", "aria-label": "导入会诊", onclick: () => this.importCase() }, icon("upload")),
+      c.messages.length ? h("button", { class: "icon-btn ghost", type: "button", title: "导出本次会诊", "aria-label": "导出会诊", onclick: () => this.exportCase(c) }, icon("download")) : null,
+      h("button", { class: "icon-btn ghost", type: "button", title: "病例档案", "aria-label": "病例档案", onclick: () => this.toggleDossier(c) }, icon("panel")));
+  },
 
-  const send = async () => {
-    const text = input.value.trim();
-    let facts = null;
-    if (factsInput.value.trim()) { try { facts = JSON.parse(factsInput.value); } catch (err) { toast(`事实 JSON 无效：${err.message}`, true); return; } }
-    if (!text && !facts && !Chat.pending.images.length && !Chat.pending.reports.length) return;
-    const done = busy(sendBtn, "思考中…");
+  welcome(composer) {
+    const tone = (id) => (id === "emergency" ? ["siren", "emergency"] : id === "renal" || id === "cns_symptomatic" ? ["alert", "warn"] : ["consult", ""]);
+    return h("div", { class: "stack", style: { gap: "22px" } },
+      h("div", { class: "welcome" }, logoMark(),
+        h("h1", null, "今天会诊哪位患者？"),
+        h("p", null, "描述病例、补充检查结果或上传报告。NSCLC-Agent 完成确定性分期、循证方案与安全终审 —— 未通过终审的方案不会放行。"),
+        h("div", { class: "trust" },
+          h("span", null, icon("cpu"), "浏览器内运行"), h("span", null, icon("lock"), "病例不离开本机"),
+          h("span", null, icon("lab"), `${(Store.info && Store.info.counts.rules) || 20} 条安全规则终审`), h("span", null, icon("staging"), "AJCC/UICC 第 9 版分期"))),
+      composer,
+      h("div", null,
+        h("div", { class: "starters-title" }, "从典型病例开始"),
+        h("div", { class: "starters" }, (Store.examples || []).map((e) => {
+          const [ic, cls] = tone(e.id);
+          return h("button", { class: "starter", type: "button", onclick: () => this.runExample(e) },
+            h("span", { class: `ic ${cls}` }, icon(ic)), h("span", null, h("div", { class: "t" }, e.title), h("div", { class: "s" }, e.subtitle)));
+        }))),
+      h("div", { class: "disclaimer" }, "NSCLC-Agent 由 IMPF-AI 研发 · 仅供教学与研究，不构成医疗建议"));
+  },
+
+  composer(c) {
+    const ta = h("textarea", { rows: 1, "aria-label": "会诊输入", placeholder: this.whatif ? "描述假设变化，例如：如果 PD-L1 为 10% 会怎样？" : "描述病例或补充信息…  例：65岁男性，肺腺癌 cT2aN1M0，EGFR 阴性，PD-L1 60%，脑MRI阴性" });
+    ta.value = this.text;
+    const sendBtn = h("button", { class: "send", type: "button", title: "发送（Enter；Shift+Enter 换行）", "aria-label": "发送", disabled: !this.canSend() || null, onclick: () => this.send() }, icon("send"));
+    const grow = () => { ta.style.height = "auto"; ta.style.height = `${Math.min(ta.scrollHeight, 220)}px`; };
+    ta.addEventListener("input", () => { this.text = ta.value; grow(); sendBtn.disabled = !this.canSend(); });
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); this.send(); }
+    });
+    requestAnimationFrame(grow);
+    const hasBaseline = !!lastResult(c);
+    const attach = h("div", { class: "attach-list" });
+    for (const kind of ["images", "reports"]) this.pending[kind].forEach((f, i) => attach.appendChild(h("span", { class: "chip" }, icon(kind === "images" ? "image" : "doc"), f.name,
+      h("button", { type: "button", title: "移除", onclick: () => { this.pending[kind].splice(i, 1); render(); } }, "×"))));
+    const pick = async (kind) => {
+      const files = await pickFile("image/*", true);
+      for (const file of files) this.pending[kind].push({ name: file.name, bytes: await file.arrayBuffer() });
+      if (files.length && !visionOn()) toast("读片/读报告需要在「模型接入」中配置视觉模型（如 Poe · gemini-3.1-pro）；未配置时附件会被标记跳过。");
+      render();
+    };
+    const tool = (ic, label, title, onclick, on, disabled) => h("button", { class: "tool" + (on ? " on" : ""), type: "button", title, "aria-label": label, "aria-pressed": on ? "true" : null, disabled: disabled || null, onclick }, icon(ic), h("span", { class: "lbl" }, label));
+    this.ta = ta;
+    return h("div", { class: "composer" + (this.whatif ? " whatif" : "") },
+      attach.childNodes.length ? attach : null,
+      ta,
+      h("div", { class: "composer-tools" },
+        tool("form", "结构化录入", "用表单录入 TNM、驱动基因、器官功能、治疗史", () => openCaseForm(c)),
+        tool("image", "影像", "上传 CT/MRI 影像（需视觉模型）", () => pick("images")),
+        tool("doc", "报告", "上传病理/NGS/影像报告图片（需视觉模型）", () => pick("reports")),
+        tool("branch", "假设推演", hasBaseline ? "what-if：在当前病例上推演一个假设变化，不写入病例" : "需要先有一轮会诊结果", () => { this.whatif = !this.whatif; render(); }, this.whatif, !hasBaseline),
+        tool("users", "MDT 面板", llmOn() ? "召集多学科会诊面板" : "需在「模型接入」中接入模型", () => { this.panel = !this.panel; render(); }, this.panel && llmOn(), !llmOn()),
+        sendBtn));
+  },
+
+  canSend() { return !this.busy && !!(this.text.trim() || this.pending.images.length || this.pending.reports.length); },
+
+  async send(opts) {
+    if (this.busy) return;
+    const c = Cases.current();
+    const fromComposer = !opts;
+    const text = (fromComposer ? this.text : opts.text || "").trim();
+    const facts = (opts && opts.facts) || null;
+    const uploads = fromComposer ? { images: this.pending.images, reports: this.pending.reports } : { images: [], reports: [] };
+    if (!text && !facts && !uploads.images.length && !uploads.reports.length) return;
+    /* A structured submission or an example is always a real turn. */
+    const whatif = fromComposer && this.whatif && !!lastResult(c);
+    Cases.commit(c);
+    c.messages.push({ id: uid(), role: "user", ts: Date.now(), text: text || "（附件）", whatif, facts, attachments: [...uploads.images, ...uploads.reports].map((f) => f.name) });
+    if (fromComposer) { this.text = ""; this.pending = { images: [], reports: [] }; }
+    this.busy = true;
+    Cases.touch(c); Cases.save(); render();
     try {
-      if (!Chat.started) { await Bridge.call("chat_new", { role: Chat.role, allow_dose_planning: Chat.dose }); Chat.started = true; }
-      const attachments = [...Chat.pending.images.map((f) => f.name), ...Chat.pending.reports.map((f) => f.name)];
-      Chat.messages.push({ role: "user", text: text || (Chat.whatif ? "（假设推演）" : "（结构化事实）"), whatif: Chat.whatif, attachments: attachments.length ? attachments : null });
-      draw();
-      let out;
-      if (Chat.whatif) out = await Bridge.timed("chat_whatif", { description: text, facts });
+      await Session.bind(c);
+      const out = whatif
+        ? await Bridge.timed("chat_whatif", { description: text, facts })
+        : await Bridge.timed("chat_turn", { message: text, facts, enable_panel: this.panel && llmOn() }, uploads);
+      c.messages.push({ id: uid(), role: "agent", ts: Date.now(), whatif, ms: out.ms, payload: out.result });
+      if (whatif) this.whatif = false;
       else {
-        const uploads = { images: Chat.pending.images.map((f) => ({ name: f.name, bytes: f.bytes })), reports: Chat.pending.reports.map((f) => ({ name: f.name, bytes: f.bytes })) };
-        out = await Bridge.timed("chat_turn", { message: text, facts }, uploads);
-        Chat.pending = { images: [], reports: [] }; drawAttach();
+        const r = out.result;
+        const onc = r.views && r.views.oncologist;
+        const f = r.session_facts || {};
+        c.status = r.release_status;
+        c.stage = (onc && onc.staging && onc.staging.stage_group) || c.stage;
+        c.title = [c.stage, keyDriver(f) || (f.histologic_category ? HIST[f.histologic_category] : "")].filter(Boolean).join(" · ")
+          || c.title || (r.release_status === "emergency_action_plan" ? "肿瘤急症" : text.slice(0, 18));
       }
-      const r = out.result;
-      Chat.last = r;
-      Chat.messages.push({ role: "agent", text: r.reply, whatif: r.what_if, meta: { release_status: r.release_status, plan_reused: r.plan_reused, ms: out.ms, llm_calls: r.llm_calls, whatif: r.what_if } });
-      input.value = ""; factsInput.value = "";
-      draw(); drawSide(); drawDetail();
-    } catch (err) { toast(`会诊失败：${err.message}`, true); Chat.messages.pop(); draw(); } finally { done(); }
-  };
-  sendBtn.addEventListener("click", send);
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) send(); });
-
-  const chatCard = h("div", { class: "card chat" }, log,
-    h("div", { class: "composer" }, input,
-      h("details", null, h("summary", { class: "muted small", style: { cursor: "pointer" } }, "结构化事实确认（高级）"), factsInput),
-      attachList,
-      h("div", { class: "row" }, whatifToggle, h("span", { style: { flex: 1 } }),
-        imgPick, repPick,
-        h("button", { class: "btn sm", onclick: () => imgPick.click() }, icon("upload"), "影像"),
-        h("button", { class: "btn sm", onclick: () => repPick.click() }, icon("doc"), "报告"),
-        sendBtn)));
-
-  const side = h("div", { class: "stack", style: { position: "sticky", top: "84px" } });
-  const drawSide = () => {
-    clear(side);
-    const r = Chat.last;
-    side.appendChild(h("div", { class: "card" },
-      h("div", { class: "card-head" }, h("h3", null, "会话"), h("span", { class: "right" }, Chat.started ? h("span", { class: "chip ok" }, "进行中") : h("span", { class: "chip" }, "未开始"))),
-      h("div", { class: "stack" },
-        h("label", { class: "field" }, "角色（新会话生效）", selectEl([["oncologist", "肿瘤科医师"], ["patient", "患者"]], Chat.role, (v) => (Chat.role = v))),
-        h("label", { class: "check" }, h("input", { type: "checkbox", checked: Chat.dose || null, onchange: (e) => (Chat.dose = e.target.checked) }), "开启剂量规划（新会话生效）"),
-        h("div", { class: "row" },
-          h("button", { class: "btn sm", onclick: async () => { await Bridge.call("chat_new", { role: Chat.role, allow_dose_planning: Chat.dose }); Chat.started = true; Chat.messages = []; Chat.last = null; draw(); drawSide(); drawDetail(); toast("已开始新会话"); } }, "新会话"),
-          h("button", { class: "btn sm", disabled: !Chat.started || null, onclick: async () => downloadJSON("nsclc-session.json", await Bridge.call("chat_export")) }, icon("download"), "导出"),
-          h("button", { class: "btn sm", onclick: () => importInput.click() }, icon("upload"), "导入")),
-        h("div", { class: "muted small" }, "会话文件只携带记忆、不携带授权：导入时角色与剂量权限以上面的设置为准，方案缓存不从文件恢复。"))));
-    if (r) {
-      side.appendChild(h("div", { class: "card" },
-        h("div", { class: "card-head" }, h("h3", null, "最新一轮")),
-        h("div", { class: "stack" }, statusPill(r.release_status),
-          r.views && r.views.oncologist && r.views.oncologist.staging && r.views.oncologist.staging.stage_group
-            ? h("div", { class: "kv" }, h("div", { class: "k" }, "分期"), h("div", null, h("strong", null, r.views.oncologist.staging.stage_group)),
-                h("div", { class: "k" }, "方案"), h("div", { class: "chips" }, ((r.views.oncologist.treatment_plan || {}).regimen_ids || []).map(regimenChip)))
-            : null,
-          (r.notes || []).length ? h("details", null, h("summary", { class: "small" }, `提取备注 ${r.notes.length} 条`), fmtList(r.notes)) : null)));
-      side.appendChild(h("div", { class: "card" },
-        h("div", { class: "card-head" }, h("h3", null, "累计事实"), h("span", { class: "sub" }, "会话记忆")),
-        Object.keys(r.session_facts || {}).length ? jsonBlock(r.session_facts) : h("div", { class: "muted small" }, "暂无")));
+      c.session = await Bridge.call("chat_export");
+    } catch (err) {
+      c.messages.push({ id: uid(), role: "error", ts: Date.now(), text: err.message });
+      Session.invalidate();
+    } finally {
+      this.busy = false;
+      Cases.touch(c); Cases.save(); render();
     }
-  };
-  const importInput = h("input", { type: "file", accept: "application/json", style: { display: "none" }, onchange: async (e) => {
-    const file = e.target.files[0]; if (!file) return;
+  },
+
+  runExample(e) {
+    const k = e.case || {};
+    const facts = JSON.parse(JSON.stringify(k.facts || {}));
+    if (k.t || k.n || k.m) { facts.tnm = { prefix: k.prefix || "c" }; for (const x of ["t", "n", "m"]) if (k[x]) facts.tnm[x] = k[x]; }
+    this.send({ text: [k.presentation, k.question].filter(Boolean).join(" "), facts: Object.keys(facts).length ? facts : null });
+  },
+
+  turn(m, c, idx) {
+    if (m.role === "user") {
+      const chips = factChips(m.facts);
+      return h("div", { class: "turn user" + (m.whatif ? " whatif" : "") }, h("div", { class: "bubble" },
+        m.whatif ? h("div", { class: "small", style: { color: "var(--indigo)", fontWeight: 700, marginBottom: "4px" } }, "假设推演") : null,
+        m.text,
+        chips.length ? h("div", { class: "chips" }, chips.map((x) => h("span", { class: "chip" }, x))) : null,
+        (m.attachments || []).length ? h("div", { class: "chips" }, m.attachments.map((a) => h("span", { class: "chip" }, icon("doc"), a))) : null));
+    }
+    if (m.role === "error") {
+      return h("div", { class: "turn agent" }, logoMark("avatar"), h("div", { class: "turn-body" },
+        h("div", { class: "callout warn" }, icon("alert"), h("div", null, `本轮运行失败：${m.text}`,
+          h("div", { class: "small muted" }, "会诊记录已保留，可修改后重试；若接入了模型，请在「模型接入」检查密钥与网络。")))));
+    }
+    const p = m.payload;
+    const isLastAgent = c.messages.slice(idx + 1).every((x) => x.role !== "agent");
+    const onc = p && p.views && p.views.oncologist;
+    const questions = p ? ((onc && onc.open_questions) || (p.views && p.views.patient && p.views.patient.questions_for_you) || []) : [];
+    return h("div", { class: "turn agent" }, logoMark("avatar"),
+      h("div", { class: "turn-body" },
+        h("div", { class: "turn-head" }, h("b", null, "NSCLC-Agent"), p ? statusPill(p.release_status) : null,
+          m.whatif ? h("span", { class: "chip trial" }, "假设推演 · 不写入病例") : null,
+          p && p.plan_reused ? h("span", { class: "chip" }, "方案复用") : null,
+          h("span", { class: "muted small" }, timeAgo(m.ts))),
+        formatReply(p ? p.reply : m.text),
+        p ? consultCard(p, m) : null,
+        isLastAgent && questions.length && !m.whatif ? h("div", null,
+          h("div", { class: "starters-title", style: { margin: "2px 2px 8px" } }, "智能体需要您补充"),
+          h("div", { class: "qs" }, questions.map((q) => h("button", { class: "q", type: "button", onclick: () => this.insert(`${q}\n答：`) },
+            icon("question"), h("span", null, q), h("span", { class: "go" }, "回答"))))) : null,
+        p ? h("div", { class: "turn-actions" },
+          h("button", { class: "act", type: "button", onclick: () => openReport(m, c) }, icon("doc"), "完整报告"),
+          !m.whatif && p.release_status !== "emergency_action_plan" ? h("button", { class: "act", type: "button", onclick: () => { this.whatif = true; render(); } }, icon("branch"), "假设推演") : null,
+          h("button", { class: "act", type: "button", onclick: () => copyText(p.reply) }, icon("copy"), "复制"),
+          h("button", { class: "act", type: "button", onclick: () => downloadJSON("nsclc-turn.json", p) }, icon("download"), "JSON")) : null));
+  },
+
+  insert(snippet) {
+    this.text = this.text.trim() ? `${this.text.trim()}\n${snippet}` : snippet;
+    render();
+    requestAnimationFrame(() => { const ta = this.ta; if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } });
+  },
+
+  dossierPanel(c) {
+    const inner = h("div", { class: "dossier-inner" });
+    const m = lastResult(c);
+    inner.appendChild(h("h3", null, icon("consult"), "病例档案", m ? h("span", { style: { marginLeft: "auto" } }, statusPill(m.payload.release_status)) : null));
+    if (!m) {
+      inner.appendChild(h("div", { class: "dossier-empty" }, icon("form"), "开始会诊后，智能体会在这里整理分期、关键事实、当前方案与待办。"));
+      return inner;
+    }
+    const p = m.payload;
+    const onc = p.views && p.views.oncologist;
+    const st = onc && onc.staging;
+    const f = p.session_facts || {};
+    if (st && st.stage_group) inner.appendChild(h("div", { class: "stage-tile" }, h("div", { class: "muted small" }, "分期 · 确定性引擎"), h("div", { class: "big" }, st.stage_group), h("div", { class: "tnm" }, `${st.tnm || ""} · ${st.edition || ""}`)));
+    else if (f.tnm) inner.appendChild(h("div", { class: "stage-tile" }, h("div", { class: "muted small" }, onc ? "TNM · 未能分期" : "TNM（患者视角不显示分期细节）"), h("div", { class: "tnm" }, tnmText(f.tnm))));
+    const rows = factRows(f);
+    if (rows.length) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "关键事实"), h("div", { class: "facts" }, rows.map(([k, v]) => [h("div", { class: "k" }, k), h("div", { class: "v" }, v)]))));
+    const plan = onc && onc.treatment_plan;
+    if (plan && (plan.options || []).length) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, p.released ? "当前方案" : "候选方案（未放行）"),
+      h("div", { class: "todo" }, plan.options.map((o, i) => h("div", null, h("b", { style: { color: "var(--accent)" } }, `${i + 1}.`), h("span", null, o.name))))));
+    else if (!onc && p.views && p.views.patient && (p.views.patient.options || []).length) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "方案"), fmtList(p.views.patient.options.map((o) => o.name))));
+    const todo = [...((plan && plan.workup_needed) || []), ...((onc && onc.open_questions) || [])];
+    if (todo.length) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, `待办 · ${todo.length}`), h("div", { class: "todo" }, todo.slice(0, 8).map((t) => h("div", null, icon("alert"), h("span", null, t))))));
+    if (onc) {
+      const v = p.violations || [];
+      inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "安全终审"),
+        h("div", { class: "metrics" }, h("span", { class: `metric ${v.some((x) => x.severity === "block") ? "bad" : "ok"}` }, icon("lab"), v.length ? `${v.length} 项发现` : "无违规"),
+          h("span", { class: "metric" }, `证据 ${(p.evidence || []).length}`), h("span", { class: "metric" }, `主张 ${(p.claims || []).length}`))));
+    }
+    inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "会诊"), h("div", { class: "facts" },
+      h("div", { class: "k" }, "视角"), h("div", { class: "v" }, ROLE_LABEL[c.role] || c.role),
+      h("div", { class: "k" }, "模型"), h("div", { class: "v" }, llmOn() ? `${Store.llm.llm.provider} · ${Store.llm.llm.model}` : "确定性模式"),
+      h("div", { class: "k" }, "开始于"), h("div", { class: "v" }, new Date(c.created).toLocaleString()))));
+    inner.appendChild(h("div", { class: "row" },
+      h("button", { class: "btn sm", type: "button", onclick: () => openReport(m, c) }, icon("doc"), "完整报告"),
+      h("button", { class: "btn sm", type: "button", onclick: () => openCaseForm(c) }, icon("pen"), "编辑事实")));
+    return inner;
+  },
+
+  toggleDossier(c) {
+    if (window.matchMedia("(max-width: 1200px)").matches) {
+      openDrawer({ title: "病例档案", sub: c.title || "新会诊", width: 420, body: this.dossierPanel(c) });
+      return;
+    }
+    this.dossier = !this.dossier; LS.set("nsclc.ui.dossier", this.dossier); render();
+  },
+
+  setRole(c, role) {
+    c.role = role; if (role !== "oncologist") c.dose = false;
+    LS.set("nsclc.pref.role", role);
+    if (Session.boundId === c.id) Session.invalidate();
+    if (Cases.get(c.id)) Cases.save();
+    toast(`已切换为${ROLE_LABEL[role]}视角 · 下一轮生效（权限来自本次设置，不来自记录）`);
+    render();
+  },
+  setDose(c, on) {
+    c.dose = !!on;
+    if (Session.boundId === c.id) Session.invalidate();
+    if (Cases.get(c.id)) Cases.save();
+    toast(on ? "已开启剂量草案：全部闸门通过时由确定性方案库产出，待签核" : "已关闭剂量草案");
+    render();
+  },
+
+  exportCase(c) {
+    downloadJSON(`nsclc-case-${(c.title || "untitled").replace(/[\s/·]+/g, "_")}.json`,
+      { format: "nsclc-agent-case/1", title: c.title, created: c.created, messages: c.messages, session: c.session });
+  },
+  async importCase() {
+    const [file] = await pickFile("application/json");
+    if (!file) return;
     try {
       const data = JSON.parse(await file.text());
-      const r = await Bridge.call("chat_import", { data, role: Chat.role, allow_dose_planning: Chat.dose });
-      const transcript = data.transcript || [];
-      const narrative = data.narrative || [];
-      const turns = transcript.filter((t) => t.kind !== "what_if");
-      let k = 0; /* user text is stored as narrative; pair it only when the counts line up */
-      Chat.started = true; Chat.last = null;
-      Chat.messages = transcript.flatMap((t) => {
-        const whatif = t.kind === "what_if";
-        const text = whatif ? (t.description || "（假设推演）") : (turns.length === narrative.length ? narrative[k++] : "（历史轮次）");
-        return [{ role: "user", text, whatif }, { role: "agent", text: t.reply || "", whatif, meta: t.release_status ? { release_status: t.release_status, plan_reused: t.plan_reused, ms: Math.round((t.duration_s || 0) * 1000), whatif } : null }];
-      });
-      toast(`已导入会话：${r.turns} 轮，角色 ${r.role}`); draw(); drawSide();
+      /* Authority (role, dose) is NOT taken from the file. */
+      const base = { id: uid(), created: Date.now(), updated: Date.now(), role: Cases.current().role || DEFAULT_ROLE, dose: false, status: null, stage: null };
+      let c;
+      if (data.format === "nsclc-agent-case/1") {
+        c = Object.assign(base, { title: data.title || "导入的会诊", messages: Array.isArray(data.messages) ? data.messages : [], session: data.session || null });
+      } else if (Array.isArray(data.transcript) && Array.isArray(data.narrative)) { /* a raw session export (CLI / earlier builds) */
+        const turns = data.transcript.filter((t) => t.kind !== "what_if");
+        let k = 0;
+        const messages = data.transcript.flatMap((t) => {
+          const whatif = t.kind === "what_if";
+          const text = whatif ? t.description || "（假设推演）" : turns.length === data.narrative.length ? data.narrative[k++] : "（历史轮次）";
+          return [{ id: uid(), role: "user", ts: Date.now(), text, whatif }, { id: uid(), role: "agent", ts: Date.now(), whatif, text: t.reply || "" }];
+        });
+        c = Object.assign(base, { title: "导入的会诊", messages, session: data });
+      } else throw new Error("不是 NSCLC-Agent 会诊文件");
+      const last = lastResult(c);
+      if (last) {
+        c.status = last.payload.release_status;
+        const onc = last.payload.views && last.payload.views.oncologist;
+        c.stage = onc && onc.staging && onc.staging.stage_group;
+      }
+      Cases.list.unshift(c); Cases.save();
+      location.hash = `#/case/${c.id}`;
+      toast("已导入会诊 · 视角与剂量权限以当前设置为准，不来自文件");
     } catch (err) { toast(`导入失败：${err.message}`, true); }
-    e.target.value = "";
-  } });
-  const drawDetail = () => {
-    clear(detailHost);
-    if (Chat.last && !Chat.last.what_if) {
-      detailHost.appendChild(h("details", { class: "card", style: { marginTop: "18px" } },
-        h("summary", { style: { cursor: "pointer", fontWeight: 650 } }, "本轮完整审计详情（分期、方案、安全审计、证据台账…）"),
-        h("div", { style: { marginTop: "14px" } }, renderResult(Chat.last))));
-    }
-  };
-  root.appendChild(h("div", null, chatCard, detailHost));
-  root.appendChild(h("div", null, side, importInput));
-  draw(); drawSide(); drawDetail(); drawAttach();
-  return root;
+  },
 };
 
-/* ---------------------------------------------------------------- staging */
+function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast("已复制"), () => toast("复制失败", true));
+  else toast("当前浏览器不支持复制", true);
+}
+
+/* ================================================================ tools */
+
+const TOOLS = {
+  staging: { title: "分期计算器", sub: "AJCC/UICC 第 9 版 · 唯一分期权威 · 歧义即拒绝", icon: "staging" },
+  kg: { title: "指南知识库", sub: "六部指南 2,960 条推荐 · 机器抽取、默认未经临床复核", icon: "kg" },
+  lab: { title: "安全实验室", sub: "把构造的方案直接交给规则引擎 — 与审计探针同一调用", icon: "lab" },
+  eval: { title: "评测看板", sub: "金标准病例 · 临床错误分类学 · 该拦未拦率", icon: "eval" },
+  settings: { title: "模型接入", sub: "Poe · MiniMax · Azure OpenAI · 离线 Mock — 密钥只在本页内存中", icon: "settings" },
+  about: { title: "关于", sub: "IMPF-AI 研发", icon: "about" },
+};
+const VIEWS = {};
 
 const StagingView = { t: "T2b", n: "N2b", m: "M0", prefix: "c", matrix: null };
-
 VIEWS.staging = () => {
   const s = StagingView;
   const out = h("div");
@@ -891,11 +1199,10 @@ VIEWS.staging = () => {
     try {
       const r = await Bridge.call("stage", { t: s.t, n: s.n, m: s.m, prefix: s.prefix });
       clear(out).appendChild(r.refused
-        ? h("div", { class: "stack" }, statusBanner("needs_staging_workup"),
-            h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "引擎拒绝分期（不猜）")), h("div", null, r.reason)))
+        ? h("div", { class: "stack" }, statusBanner("needs_staging_workup"), h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "引擎拒绝分期（不猜）")), h("div", null, r.reason)))
         : h("div", { class: "card" },
-            h("div", { class: "row" }, h("div", { class: "stage-big" }, r.stage_group, h("small", null, r.tnm)),
-              h("span", { style: { flex: 1 } }), h("span", { class: "chip regimen" }, r.module && r.module.module_key), h("span", { class: "chip" }, r.edition)),
+            h("div", { class: "row" }, h("div", { class: "stage-big" }, r.stage_group, h("small", null, r.tnm)), h("span", { style: { flex: 1 } }),
+              h("span", { class: "chip regimen" }, r.module && r.module.module_key), h("span", { class: "chip" }, r.edition)),
             (r.migration_notes || []).length ? h("div", { style: { marginTop: "14px" } }, h("h4", null, "第 8 → 9 版迁移"), fmtList(r.migration_notes)) : null,
             (r.descriptor_notes || []).length ? h("div", { style: { marginTop: "10px" } }, h("h4", null, "描述符注记"), fmtList(r.descriptor_notes)) : null));
     } catch (err) { toast(err.message, true); }
@@ -907,16 +1214,14 @@ VIEWS.staging = () => {
       h("label", { class: "field" }, "M", selectEl(M_OPTIONS.slice(1), s.m, (v) => { s.m = v; compute(); })),
       h("label", { class: "field" }, "前缀", selectEl([["c", "c"], ["p", "p"], ["yp", "yp"]], s.prefix, (v) => { s.prefix = v; compute(); }))),
     h("div", { class: "muted small", style: { marginTop: "10px" } }, "试试 N2（未分 a/b）或 M1c（未分 c1/c2）：引擎会拒绝并说明需要哪项检查。"));
-  const matrixHost = h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "M0 分期矩阵（第 9 版）"), h("span", { class: "sub" }, "点击任意格子查看")), h("div", { class: "muted small" }, "计算中…"));
+  const matrixHost = h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "M0 分期矩阵（第 9 版）"), h("span", { class: "sub" }, "点击任意格子")), h("div", { class: "muted small" }, "计算中…"));
   const Ts = ["T1mi", "T1a", "T1b", "T1c", "T2a", "T2b", "T3", "T4"];
   const Ns = ["N0", "N1", "N2a", "N2b", "N3"];
   const drawMatrix = async () => {
     if (!s.matrix) {
-      s.matrix = {};
-      for (const t of Ts) for (const n of Ns) {
-        const r = await Bridge.call("stage", { t, n, m: "M0" });
-        s.matrix[`${t}|${n}`] = r.refused ? "—" : r.stage_group;
-      }
+      const m = {};
+      for (const t of Ts) for (const n of Ns) { const r = await Bridge.call("stage", { t, n, m: "M0" }); m[`${t}|${n}`] = r.refused ? "—" : r.stage_group; }
+      s.matrix = m;
     }
     const grid = h("div", { class: "tn-grid" }, h("div"), Ns.map((n) => h("div", { class: "h" }, n)));
     for (const t of Ts) {
@@ -924,30 +1229,20 @@ VIEWS.staging = () => {
       for (const n of Ns) {
         const g = s.matrix[`${t}|${n}`];
         const lvl = g.startsWith("IV") ? 4 : g.startsWith("III") ? 3 : g.startsWith("II") ? 2 : g.startsWith("I") ? 1 : 0;
-        grid.appendChild(h("div", { class: `tn-cell s${lvl}${t === s.t && n === s.n && s.m === "M0" ? " sel" : ""}`, onclick: () => { s.t = t; s.n = n; s.m = "M0"; Router.render(); } }, g));
+        grid.appendChild(h("div", { class: `tn-cell s${lvl}${t === s.t && n === s.n && s.m === "M0" ? " sel" : ""}`, onclick: () => { s.t = t; s.n = n; s.m = "M0"; render(); } }, g));
       }
     }
-    const body = matrixHost.lastChild; matrixHost.replaceChild(grid, body);
+    matrixHost.replaceChild(grid, matrixHost.lastChild);
   };
   setTimeout(() => { compute(); drawMatrix(); }, 0);
   return h("div", { class: "grid cols-2" }, h("div", { class: "stack" }, controls, out), matrixHost);
 };
 
-/* ---------------------------------------------------------------- KG */
-
-const KG = { query: "osimertinib", stage: "", gene: "", histology: "", jurisdiction: "", hits: null, info: null };
-
+const KG = { query: "osimertinib", stage: "", gene: "", histology: "", jurisdiction: "", hits: null };
 VIEWS.kg = () => {
   const root = h("div", { class: "stack" });
   const results = h("div", { class: "stack" });
   const infoHost = h("div");
-  const search = async (btn) => {
-    const done = btn ? busy(btn, "检索中…") : null;
-    try {
-      const r = await Bridge.call("kg_search", { query: KG.query, stage: KG.stage, gene: KG.gene, histology: KG.histology, jurisdiction: KG.jurisdiction, limit: 20 });
-      KG.hits = r.hits; drawResults();
-    } catch (err) { toast(err.message, true); } finally { if (done) done(); }
-  };
   const drawResults = () => {
     clear(results);
     if (!KG.hits) return;
@@ -955,45 +1250,47 @@ VIEWS.kg = () => {
     for (const hit of KG.hits) {
       const grade = hit.grade || {};
       results.appendChild(h("div", { class: "card flat" },
-        h("div", { class: "row" }, h("span", { class: "chip mono" }, hit.rec_id), h("strong", null, hit.guideline),
-          h("span", { class: "chip" }, hit.region), hit.direction ? h("span", { class: `chip ${hit.direction === "recommend" ? "ok" : hit.direction.includes("against") ? "block" : ""}` }, hit.direction) : null,
+        h("div", { class: "row" }, h("span", { class: "chip mono" }, hit.rec_id), h("strong", null, hit.guideline), h("span", { class: "chip" }, hit.region),
+          hit.direction ? h("span", { class: `chip ${hit.direction === "recommend" ? "ok" : hit.direction.includes("against") ? "block" : ""}` }, hit.direction) : null,
           grade.strength ? h("span", { class: "chip trial" }, `${grade.scheme || ""} ${grade.strength_original || grade.strength}/${grade.evidence_original || grade.evidence}`) : null,
           h("span", { style: { flex: 1 } }),
           h("span", { class: `chip ${hit.curation_status === "clinician_verified" ? "ok" : "warn"}` }, hit.curation_status === "clinician_verified" ? "已临床复核" : "机器抽取 · 未复核")),
         hit.question ? h("div", { class: "muted small", style: { marginTop: "8px" } }, hit.question) : null,
         h("div", { style: { marginTop: "6px", fontWeight: 500 } }, hit.recommendation),
-        h("div", { class: "row small muted", style: { marginTop: "8px" } },
-          hit.topic ? h("span", null, `主题：${hit.topic}`) : null, hit.line ? h("span", null, `线次：${hit.line}`) : null,
+        h("div", { class: "row small muted", style: { marginTop: "8px" } }, hit.topic ? h("span", null, `主题：${hit.topic}`) : null, hit.line ? h("span", null, `线次：${hit.line}`) : null,
           hit.provenance && hit.provenance.page ? h("span", null, `原文第 ${hit.provenance.page} 页`) : null)));
     }
+  };
+  const search = async (btn) => {
+    const done = btn ? busy(btn, "检索中…") : null;
+    try {
+      const r = await Bridge.call("kg_search", { query: KG.query, stage: KG.stage, gene: KG.gene, histology: KG.histology, jurisdiction: KG.jurisdiction, limit: 20 });
+      KG.hits = r.hits; drawResults();
+    } catch (err) { toast(err.message, true); } finally { if (done) done(); }
   };
   const btn = h("button", { class: "btn primary" }, icon("kg"), "检索");
   btn.addEventListener("click", () => search(btn));
   const q = inputEl("text", KG.query, (v) => (KG.query = v), "关键词：osimertinib / 围术期 / PD-L1 …");
-  q.addEventListener("keydown", (e) => { if (e.key === "Enter") search(btn); });
-  root.appendChild(h("div", { class: "card" },
-    h("div", { class: "form-grid" },
-      h("label", { class: "field span-2" }, "关键词", q),
-      h("label", { class: "field" }, "分期", selectEl([["", "全部"], "IA1", "IA2", "IA3", "IB", "IIA", "IIB", "IIIA", "IIIB", "IIIC", "IVA", "IVB"].map((x) => (Array.isArray(x) ? x : [x, x])), KG.stage, (v) => (KG.stage = v))),
-      h("label", { class: "field" }, "基因", selectEl([["", "全部"], ...["EGFR", "ALK", "ROS1", "RET", "MET", "BRAF", "NTRK", "HER2", "KRAS"].map((x) => [x, x])], KG.gene, (v) => (KG.gene = v))),
-      h("label", { class: "field" }, "组织学", selectEl([["", "全部"], ["adenocarcinoma", "腺癌"], ["squamous", "鳞癌"]], KG.histology, (v) => (KG.histology = v))),
-      h("label", { class: "field" }, "地区", selectEl([["", "全部"], ["US", "美国（NCCN）"], ["EU", "欧洲（ESMO）"], ["CN", "中国（CSCO 等）"]], KG.jurisdiction, (v) => (KG.jurisdiction = v))),
-      h("div", { class: "field span-2", style: { justifyContent: "flex-end" } }, btn))));
-  root.appendChild(h("div", { class: "callout warn" }, icon("alert"), h("div", null, "知识图谱条目为机器抽取、默认未经临床复核：在智能体中它们只作为权衡上下文（证据等级 kg_llm_extracted，不可单独支撑放行），且已做剂量深度清洗。")));
+  q.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) search(btn); });
+  root.appendChild(h("div", { class: "card" }, h("div", { class: "form-grid" },
+    h("label", { class: "field span-2" }, "关键词", q),
+    h("label", { class: "field" }, "分期", selectEl([["", "全部"], ...["IA1", "IA2", "IA3", "IB", "IIA", "IIB", "IIIA", "IIIB", "IIIC", "IVA", "IVB"].map((x) => [x, x])], KG.stage, (v) => (KG.stage = v))),
+    h("label", { class: "field" }, "基因", selectEl([["", "全部"], ...["EGFR", "ALK", "ROS1", "RET", "MET", "BRAF", "NTRK", "HER2", "KRAS"].map((x) => [x, x])], KG.gene, (v) => (KG.gene = v))),
+    h("label", { class: "field" }, "组织学", selectEl([["", "全部"], ["adenocarcinoma", "腺癌"], ["squamous", "鳞癌"]], KG.histology, (v) => (KG.histology = v))),
+    h("label", { class: "field" }, "地区", selectEl([["", "全部"], ["US", "美国（NCCN）"], ["EU", "欧洲（ESMO）"], ["CN", "中国（CSCO 等）"]], KG.jurisdiction, (v) => (KG.jurisdiction = v))),
+    h("div", { class: "span-2", style: { display: "flex", alignItems: "flex-end", justifyContent: "flex-end" } }, btn))));
+  root.appendChild(h("div", { class: "callout warn" }, icon("alert"), h("div", null, "知识库条目为机器抽取、默认未经临床复核：在智能体中只作为权衡上下文（不可单独支撑放行），且已做剂量深度清洗。")));
   root.appendChild(infoHost);
   root.appendChild(results);
   Bridge.call("kg_info").then((info) => {
-    KG.info = info;
     append(infoHost, [h("div", { class: "grid cols-4" }, stat(info.recommendations, "推荐条目"), stat(Object.keys(info.guidelines || {}).length, "指南"), stat(info.clusters, "跨区域聚类"), stat((info.curation || {}).clinician_verified || 0, "已临床复核"))]);
   }).catch(() => {});
   if (KG.hits) drawResults(); else search();
   return root;
 };
-
-/* ---------------------------------------------------------------- lab */
+function stat(v, k) { return h("div", { class: "stat" }, h("div", { class: "v" }, v === undefined ? "—" : v), h("div", { class: "k" }, k)); }
 
 const Lab = { probes: null, sel: null, staging: '{\n  "stage_group": "IVB"\n}', facts: '{\n  "driver_mutations": {"egfr": "L858R", "alk": "negative"},\n  "histologic_category": "adenocarcinoma"\n}', plan: '{\n  "regimen_ids": ["pembro_monotherapy"],\n  "options": [{"name": "Pembrolizumab monotherapy", "regimen_ids": ["pembro_monotherapy"]}]\n}', result: null };
-
 VIEWS.lab = () => {
   const root = h("div", { class: "grid side" });
   const out = h("div", { class: "stack" });
@@ -1002,15 +1299,6 @@ VIEWS.lab = () => {
   const drawEditors = () => { clear(editors); append(editors, [ed("分期 staging", "staging"), ed("事实 facts", "facts"), ed("方案 plan（模型可能写出的方案）", "plan")]); };
   drawEditors();
   const runBtn = h("button", { class: "btn primary" }, icon("lab"), "交给规则引擎终审");
-  runBtn.addEventListener("click", async () => {
-    let staging, facts, plan;
-    try { staging = JSON.parse(Lab.staging); facts = JSON.parse(Lab.facts); plan = JSON.parse(Lab.plan); } catch (err) { toast(`JSON 无效：${err.message}`, true); return; }
-    const done = busy(runBtn, "审计中…");
-    try {
-      const r = await Bridge.call("audit_plan", { staging, facts, plan });
-      Lab.result = r; drawOut();
-    } catch (err) { toast(err.message, true); } finally { done(); }
-  });
   const drawOut = () => {
     clear(out);
     const r = Lab.result; if (!r) return;
@@ -1026,49 +1314,42 @@ VIEWS.lab = () => {
     out.appendChild(statusBanner(r.blocked ? "blocked" : "treatment_recommendation", verdict === null ? null : verdict ? "✓ 与探针期望一致" : "✗ 与探针期望不符"));
     out.appendChild(h("div", { class: "card" }, renderAudit({ violations: r.violations, checks_run: ["safety_rule_engine"] })));
   };
+  runBtn.addEventListener("click", async () => {
+    let staging, facts, plan;
+    try { staging = JSON.parse(Lab.staging); facts = JSON.parse(Lab.facts); plan = JSON.parse(Lab.plan); } catch (err) { toast(`JSON 无效：${err.message}`, true); return; }
+    const done = busy(runBtn, "审计中…");
+    try { Lab.result = await Bridge.call("audit_plan", { staging, facts, plan }); drawOut(); } catch (err) { toast(err.message, true); } finally { done(); }
+  });
   const probeList = h("div", { class: "stack", style: { maxHeight: "560px", overflowY: "auto" } });
   const drawProbes = () => {
     clear(probeList);
     for (const p of Lab.probes || []) {
       probeList.appendChild(h("button", { class: "example", style: Lab.sel && Lab.sel.id === p.id ? { borderColor: "var(--accent)" } : null, onclick: () => {
-        Lab.sel = p;
-        Lab.staging = JSON.stringify(p.audit_staging || {}, null, 2);
-        Lab.facts = JSON.stringify(p.audit_facts || {}, null, 2);
-        Lab.plan = JSON.stringify(p.audit_plan || {}, null, 2);
+        Lab.sel = p; Lab.staging = JSON.stringify(p.audit_staging || {}, null, 2); Lab.facts = JSON.stringify(p.audit_facts || {}, null, 2); Lab.plan = JSON.stringify(p.audit_plan || {}, null, 2);
         Lab.result = null; drawEditors(); drawOut(); drawProbes();
       } }, h("div", { class: "t mono", style: { fontSize: "12px" } }, p.id), h("div", { class: "s" }, p.comment)));
     }
   };
   Bridge.call("golden_cases").then((cases) => { Lab.probes = cases.filter((c) => c.kind === "audit"); drawProbes(); }).catch((e) => toast(e.message, true));
   root.appendChild(h("div", { class: "stack" },
-    h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "构造方案"), h("span", { class: "sub" }, "与审计型金标准探针同一调用：rules.check_plan(staging, facts, plan)")),
-      editors, h("div", { class: "row", style: { marginTop: "12px" } }, runBtn,
-        h("span", { class: "muted small" }, "试试：把 EGFR 改成 negative，或在 options 里写一个没有 regimen_ids 的药名。"))),
+    h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "构造方案"), h("span", { class: "sub" }, "rules.check_plan(staging, facts, plan)")),
+      editors, h("div", { class: "row", style: { marginTop: "12px" } }, runBtn, h("span", { class: "muted small" }, "试试：把 EGFR 改成 negative，或在 options 里写一个没有 regimen_ids 的药名。"))),
     out));
-  root.appendChild(h("div", { class: "card", style: { position: "sticky", top: "84px" } },
+  root.appendChild(h("div", { class: "card" },
     h("div", { class: "card-head" }, h("h3", null, "安全网探针"), h("span", { class: "sub" }, "点击载入")),
-    probeList,
-    h("div", { class: "hr" }),
+    probeList, h("div", { class: "hr" }),
     h("div", { class: "muted small", style: { marginBottom: "6px" } }, "规则清单"),
     h("div", { class: "chips" }, ((Store.info && Store.info.rule_ids) || []).map((r) => h("span", { class: "chip mono", style: { fontSize: "11px" } }, r)))));
   if (Lab.result) drawOut();
   return root;
 };
 
-/* ---------------------------------------------------------------- eval */
-
 const Evalv = { report: null, ms: 0, filter: "all" };
 const TAXO = { major_harmful: "方向性伤害", unsafe_release: "该拦未拦", overblocking: "过度拦截", false_alarm: "误报", omission: "遗漏", missing_workup: "漏补检", incorrect_release: "放行状态错误", staging_error: "分期错误", routing_error: "路由错误" };
-
 VIEWS.eval = () => {
   const root = h("div", { class: "stack" });
   const host = h("div", { class: "stack" });
   const btn = h("button", { class: "btn primary" }, icon("play"), "在浏览器内运行全部金标准");
-  btn.addEventListener("click", async () => {
-    const done = busy(btn, "评测中（全部病例完整运行）…");
-    try { const { result, ms } = await Bridge.timed("run_eval"); Evalv.report = result; Evalv.ms = ms; draw(); }
-    catch (err) { toast(err.message, true); } finally { done(); }
-  });
   const draw = () => {
     clear(host);
     const r = Evalv.report; if (!r) { host.appendChild(empty("点击上方按钮运行评测：每个病例都走完整的受治理流水线，安全网探针直接交给规则引擎。", "eval")); return; }
@@ -1084,51 +1365,46 @@ VIEWS.eval = () => {
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "临床错误分类学"), h("span", { class: "sub" }, "失败是被分类的临床事件")),
         Object.entries(tax).map(([k, v]) => h("div", { class: "bar-row" }, h("span", null, TAXO[k] || k), h("div", { class: "bar" + (v ? " bad" : "") }, h("span", { style: { width: `${v ? (100 * v) / max : 0}%` } })), h("span", { class: "mono" }, v)))),
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "双医师裁定覆盖")),
-        h("div", { class: "kv" },
-          h("div", { class: "k" }, "病例数"), h("div", null, (s.adjudication || {}).cases),
-          h("div", { class: "k" }, "双人裁定"), h("div", null, (s.adjudication || {}).dual_adjudicated),
+        h("div", { class: "kv" }, h("div", { class: "k" }, "病例数"), h("div", null, (s.adjudication || {}).cases), h("div", { class: "k" }, "双人裁定"), h("div", null, (s.adjudication || {}).dual_adjudicated),
           h("div", { class: "k" }, "未裁定"), h("div", null, (s.adjudication || {}).unadjudicated)),
-        h("div", { class: "muted small", style: { marginTop: "10px" } }, "裁定本身是人的工作；台账追加式、分歧并存、内容寻址作废（命令行 adjudicate）。"),
-        s.unsafe_release_breakdown ? h("div", { style: { marginTop: "10px" } }, jsonBlock(s.unsafe_release_breakdown)) : null)));
-    const filterSeg = h("div", { class: "seg" }, [["all", "全部"], ["pipeline", "流水线病例"], ["audit", "安全网探针"], ["failed", "失败"]].map(([k, l]) =>
-      h("button", { class: Evalv.filter === k ? "on" : "", onclick: () => { Evalv.filter = k; draw(); } }, l)));
+        h("div", { class: "muted small", style: { marginTop: "10px" } }, "裁定本身是人的工作；台账追加式、分歧并存、内容寻址作废。"))));
+    const filterSeg = h("div", { class: "seg" }, [["all", "全部"], ["pipeline", "流水线"], ["audit", "探针"], ["failed", "失败"]].map(([k, l]) => h("button", { class: Evalv.filter === k ? "on" : "", onclick: () => { Evalv.filter = k; draw(); } }, l)));
     const rows = r.results.filter((x) => Evalv.filter === "all" || (Evalv.filter === "failed" ? !x.passed : x.kind === Evalv.filter));
     host.appendChild(h("div", { class: "card" },
       h("div", { class: "card-head" }, h("h3", null, "逐例结果"), h("div", { class: "right" }, filterSeg)),
       h("div", { class: "table-wrap" }, h("table", null,
         h("thead", null, h("tr", null, ["病例", "类型", "结果", "分期 / 放行", "方案 / 触发规则"].map((x) => h("th", null, x)))),
         h("tbody", null, rows.map((x) => h("tr", null,
-          h("td", { class: "mono" }, x.id),
-          h("td", null, h("span", { class: `chip ${x.kind === "audit" ? "trial" : ""}` }, x.kind === "audit" ? "探针" : "流水线")),
+          h("td", { class: "mono" }, x.id), h("td", null, h("span", { class: `chip ${x.kind === "audit" ? "trial" : ""}` }, x.kind === "audit" ? "探针" : "流水线")),
           h("td", null, h("span", { class: `chip ${x.passed ? "ok" : "block"}` }, x.passed ? "通过" : "失败"), x.failures.length ? h("div", { class: "small", style: { marginTop: "4px" } }, x.failures.map((f) => `${TAXO[f.taxonomy] || f.taxonomy}: ${f.detail}`).join("；")) : null),
           h("td", null, x.kind === "audit" ? "—" : `${x.stage_group || "—"} · ${x.release_status}`),
           h("td", { class: "small" }, x.kind === "audit" ? (x.violations || []).map((v) => v.join(":")).join(", ") : (x.regimen_ids || []).join(", ")))))))));
   };
-  root.appendChild(h("div", { class: "card" }, h("div", { class: "row" }, btn, h("span", { class: "muted small" }, "约 70 例 — 桌面浏览器通常 5–20 秒。结果与命令行 `python -m nsclc_agent eval` 完全一致（同一份代码）。"))));
+  btn.addEventListener("click", async () => {
+    const done = busy(btn, "评测中…");
+    try { const { result, ms } = await Bridge.timed("run_eval"); Evalv.report = result; Evalv.ms = ms; draw(); } catch (err) { toast(err.message, true); } finally { done(); }
+  });
+  root.appendChild(h("div", { class: "card" }, h("div", { class: "row" }, btn, h("span", { class: "muted small" }, "约 70 例，通常数秒完成；与命令行 `python -m nsclc_agent eval` 同一份代码、同一结果。"))));
   root.appendChild(host);
   draw();
   return root;
 };
 
-/* ---------------------------------------------------------------- settings */
-
 const PROVIDERS = [
   { id: "none", name: "确定性模式", desc: "无需密钥 · 规则模式方案 · 完整安全治理" },
-  { id: "poe", name: "Poe", desc: "一个密钥接入 Claude / Gemini / GPT 等；支持读片" },
+  { id: "poe", name: "Poe", desc: "一个密钥接入 Claude / Gemini / GPT；支持读片" },
   { id: "minimax", name: "MiniMax", desc: "MiniMax-M3 · 中国区 / 国际区" },
   { id: "azure", name: "Azure OpenAI", desc: "企业部署（需开启浏览器 CORS）" },
-  { id: "mock", name: "离线 Mock", desc: "驱动完整工具循环的离线模型桩（演示用）" },
+  { id: "mock", name: "离线 Mock", desc: "驱动完整工具循环与 MDT 面板的离线桩" },
 ];
 const Settings = {
   cfg: { provider: "none", api_key: "", model: "", base_url: "", region: "china", group_id: "", endpoint: "", api_version: "", vision: true, vision_model: "", remember: false },
   async apply(silent) {
     const r = await Bridge.call("configure_llm", Object.fromEntries(Object.entries(this.cfg).filter(([k]) => k !== "remember")));
-    Store.llm = r; updateModelPill(r);
-    try {
-      if (this.cfg.remember) sessionStorage.setItem("nsclc-llm", JSON.stringify(this.cfg));
-      else sessionStorage.removeItem("nsclc-llm");
-    } catch (_) { /* storage unavailable */ }
-    Chat.started = false;
+    Store.llm = r;
+    Session.invalidate(); /* the worker dropped its session along with the old clients */
+    try { if (this.cfg.remember) sessionStorage.setItem("nsclc-llm", JSON.stringify(this.cfg)); else sessionStorage.removeItem("nsclc-llm"); } catch (_) { /* storage unavailable */ }
+    renderRail();
     if (!silent) toast(r.llm.available ? `已接入 ${r.llm.provider} · ${r.llm.model}` : "已切换为确定性模式");
     return r;
   },
@@ -1140,14 +1416,19 @@ const Settings = {
     Store.llm = Store.info.llm;
   },
 };
-
 VIEWS.settings = () => {
   const c = Settings.cfg;
   const root = h("div", { class: "stack" });
   const form = h("div");
   const out = h("div", { class: "stack" });
-  const cards = h("div", { class: "grid cols-4", style: { gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))" } });
-  const drawCards = () => { clear(cards); for (const p of PROVIDERS) cards.appendChild(h("button", { class: `provider${c.provider === p.id ? " on" : ""}`, onclick: () => { c.provider = p.id; drawCards(); drawForm(); } }, h("div", { class: "t" }, p.name), h("div", { class: "s" }, p.desc))); };
+  const cards = h("div", { class: "grid", style: { gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))" } });
+  const drawOut = () => {
+    const l = Store.llm || {};
+    out.appendChild(h("div", { class: "card flat" }, h("div", { class: "card-head" }, h("h3", null, "当前状态")),
+      h("div", { class: "kv" }, h("div", { class: "k" }, "模式"), h("div", null, l.mode || "deterministic"),
+        h("div", { class: "k" }, "文本模型"), h("div", null, l.llm && l.llm.available ? `${l.llm.provider} · ${l.llm.model}` : "无"),
+        h("div", { class: "k" }, "视觉模型"), h("div", null, l.vision && l.vision.provider !== "none" ? `${l.vision.provider} · ${l.vision.model}` : "无"))));
+  };
   const drawForm = () => {
     clear(form);
     const grid = h("div", { class: "form-grid" });
@@ -1162,18 +1443,16 @@ VIEWS.settings = () => {
         h("label", { class: "field" }, "区域", selectEl([["china", "中国区 api.minimaxi.com"], ["global", "国际区 api.minimax.io"]], c.region, (v) => (c.region = v))),
         h("label", { class: "field" }, "模型", inputEl("text", c.model, (v) => (c.model = v), "MiniMax-M3")),
         h("label", { class: "field span-2" }, "GroupId（可选）", inputEl("text", c.group_id, (v) => (c.group_id = v))),
-        h("label", { class: "field span-2" }, "视觉模型（可选，留空不启用读片）", inputEl("text", c.vision_model, (v) => (c.vision_model = v)))]);
+        h("label", { class: "field span-2" }, "视觉模型（可选）", inputEl("text", c.vision_model, (v) => (c.vision_model = v)))]);
     } else if (c.provider === "azure") {
       append(grid, [key,
         h("label", { class: "field span-2" }, "Endpoint", inputEl("text", c.endpoint, (v) => (c.endpoint = v), "https://<resource>.openai.azure.com")),
         h("label", { class: "field" }, "Deployment", inputEl("text", c.model, (v) => (c.model = v))),
         h("label", { class: "field" }, "API Version", inputEl("text", c.api_version, (v) => (c.api_version = v), "2024-10-21"))]);
     } else {
-      grid.appendChild(h("div", { class: "span-4 muted" }, c.provider === "mock" ? "离线模型桩：驱动完整的工具循环与会诊面板，不产生真实临床推理，用于演示治理机制。" : "无需任何配置。规则模式产出真实临床形状的方案，并经过与模型模式完全相同的安全治理。"));
+      grid.appendChild(h("div", { class: "span-4 muted" }, c.provider === "mock" ? "离线模型桩：驱动完整的工具循环与 MDT 面板，不产生真实临床推理，用于演示治理机制。" : "无需任何配置。规则模式产出真实临床形状的方案，并经过与模型模式完全相同的安全治理。"));
     }
-    if (["poe", "minimax", "azure"].includes(c.provider)) {
-      grid.appendChild(h("label", { class: "check span-4" }, h("input", { type: "checkbox", checked: c.remember || null, onchange: (e) => (c.remember = e.target.checked) }), "在本标签页记住（sessionStorage，关闭标签页即清除）"));
-    }
+    if (["poe", "minimax", "azure"].includes(c.provider)) grid.appendChild(h("label", { class: "check span-4" }, h("input", { type: "checkbox", checked: c.remember || null, onchange: (e) => (c.remember = e.target.checked) }), "在本标签页记住（sessionStorage，关闭标签页即清除）"));
     form.appendChild(grid);
     const applyBtn = h("button", { class: "btn primary" }, icon("check"), "保存并应用");
     applyBtn.addEventListener("click", async () => { const done = busy(applyBtn, "应用中…"); try { await Settings.apply(); drawOut(); } catch (err) { toast(err.message, true); } finally { done(); } });
@@ -1196,22 +1475,20 @@ VIEWS.settings = () => {
     });
     form.appendChild(h("div", { class: "row", style: { marginTop: "14px" } }, applyBtn, pingBtn, catBtn));
   };
-  const drawOut = () => {
-    const l = Store.llm || {};
-    out.appendChild(h("div", { class: "card flat" }, h("div", { class: "card-head" }, h("h3", null, "当前状态")),
-      h("div", { class: "kv" }, h("div", { class: "k" }, "模式"), h("div", null, l.mode || "deterministic"),
-        h("div", { class: "k" }, "文本模型"), h("div", null, l.llm && l.llm.available ? `${l.llm.provider} · ${l.llm.model}` : "无"),
-        h("div", { class: "k" }, "视觉模型"), h("div", null, l.vision && l.vision.provider !== "none" ? `${l.vision.provider} · ${l.vision.model}` : "无"))));
-  };
+  const drawCards = () => { clear(cards); for (const p of PROVIDERS) cards.appendChild(h("button", { class: `provider${c.provider === p.id ? " on" : ""}`, onclick: () => { c.provider = p.id; drawCards(); drawForm(); } }, h("div", { class: "t" }, p.name), h("div", { class: "s" }, p.desc))); };
   drawCards(); drawForm(); drawOut();
   root.appendChild(h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "选择模型服务")), cards, h("div", { class: "hr" }), form));
   root.appendChild(h("div", { class: "callout" }, icon("key"), h("div", null,
     "密钥只保存在本页的 Web Worker 内存中，请求从您的浏览器直接发往所选服务商（Poe 与 MiniMax 均允许浏览器跨域调用，已实测）。IMPF-AI 与 GitHub Pages 不经手您的密钥或病例。模型只能提议：分期、适应证、器官闸门、证据蕴含与终审规则仍由确定性内核裁决，剂量永远只来自确定性方案库。")));
   root.appendChild(out);
+  root.appendChild(h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", null, "本机数据")),
+    h("div", { class: "row" }, h("span", { class: "muted small", style: { flex: 1 } }, `会诊记录只保存在本浏览器（localStorage），当前 ${Cases.list.length} 个会诊，不会上传到任何服务器。`),
+      h("button", { class: "btn danger", onclick: () => {
+        if (!confirm("清除本机全部会诊记录？此操作不可撤销。")) return;
+        Cases.list = []; Cases.save(); Session.invalidate(); Cases.newDraft(); toast("已清除本机会诊记录"); location.hash = "#/";
+      } }, icon("trash"), "清除全部会诊记录"))));
   return root;
 };
-
-/* ---------------------------------------------------------------- about */
 
 VIEWS.about = () => {
   const i = Store.info || {};
@@ -1220,21 +1497,89 @@ VIEWS.about = () => {
     h("section", { class: "hero" },
       h("span", { class: "hero-badge" }, h("span", { class: "impf-dot" }), "IMPF-AI 研发"),
       h("h2", null, "NSCLC-Agent"),
-      h("p", null, "由 IMPF-AI 研发的非小细胞肺癌多学科决策支持智能体：证据治理、分期确定、安全终审。本网页端在浏览器内以 WebAssembly 运行与命令行完全相同的 Python 代码。")),
+      h("p", null, "由 IMPF-AI 研发的非小细胞肺癌多学科会诊智能体：分期确定、证据治理、安全终审。网页端在浏览器内以 WebAssembly 运行与命令行完全相同的 Python 代码 —— 无服务器，病例数据不离开本机。")),
     h("div", { class: "grid cols-3" },
       h("div", { class: "card" }, h("h3", { style: { fontSize: "15px", marginBottom: "8px" } }, "版本"),
-        h("div", { class: "kv" }, h("div", { class: "k" }, "智能体"), h("div", null, `v${i.version || ""}`),
-          h("div", { class: "k" }, "运行时"), h("div", null, i.runtime || ""),
-          h("div", { class: "k" }, "构建"), h("div", { class: "mono" }, `${b.hash || ""} · ${b.built || ""}`))),
+        h("div", { class: "kv" }, h("div", { class: "k" }, "智能体"), h("div", null, `v${i.version || ""}`), h("div", { class: "k" }, "运行时"), h("div", null, i.runtime || ""),
+          h("div", { class: "k" }, "构建"), h("div", { class: "mono" }, `${b.hash || ""} · ${b.built || ""}`),
+          h("div", { class: "k" }, "规则 / 方案"), h("div", null, `${(i.counts || {}).rules || "—"} / ${(i.counts || {}).regimens || "—"}`))),
       h("div", { class: "card" }, h("h3", { style: { fontSize: "15px", marginBottom: "8px" } }, "设计原则"),
         fmtList(["确定性分期是唯一分期权威", "模型只能提议，确定性内核裁决", "每个事实只有一种读法", "未放行的方案不展示给患者", "剂量只来自确定性方案库", "文件与日志不授予任何权限"])),
       h("div", { class: "card" }, h("h3", { style: { fontSize: "15px", marginBottom: "8px" } }, "重要声明"),
-        h("div", { class: "muted" }, "本系统仅供教学与研究，不是医疗器械，不构成医疗建议；内置试验注册表、方案库与指南知识图谱为教学规模语料，须经本机构医师与药师复核。任何治疗决定请与主治团队确认。"))),
+        h("div", { class: "muted" }, "本系统仅供教学与研究，不是医疗器械，不构成医疗建议；内置试验注册表、方案库与指南知识库为教学规模语料，须经本机构医师与药师复核。任何治疗决定请与主治团队确认。"))),
     h("div", { class: "card" }, h("div", { class: "row" },
       h("div", null, h("div", { style: { fontWeight: 700 } }, "© 2026 IMPF-AI 研发"), h("div", { class: "muted small" }, "NSCLC-Agent · MIT License")),
       h("span", { style: { flex: 1 } }),
       h("a", { class: "btn", href: "https://github.com/psknlr/NSCLC-Agent", target: "_blank", rel: "noopener" }, "GitHub 仓库"))));
 };
+
+/* ================================================================ router */
+
+function currentRoute() {
+  const [name, arg] = location.hash.replace(/^#\/?/, "").split("/");
+  if (TOOLS[name]) return { tool: name };
+  return { tool: null, caseId: name === "case" ? arg : null };
+}
+function renderRail() {
+  const route = currentRoute();
+  const c = Bridge.ready ? Cases.current() : null;
+  const newBtn = clear($("#new-case"));
+  append(newBtn, [icon("plus"), "新建会诊"]);
+  const list = clear($("#case-list"));
+  const q = ($("#case-search").value || "").trim().toLowerCase();
+  const cases = Cases.list.filter((x) => !q || (x.title || "").toLowerCase().includes(q) || x.messages.some((m) => (m.text || "").toLowerCase().includes(q)));
+  if (!cases.length) list.appendChild(h("div", { class: "case-empty" }, q ? "没有匹配的会诊" : "暂无会诊记录"));
+  for (const x of cases) {
+    const on = !route.tool && c && c.id === x.id;
+    const open = () => { location.hash = `#/case/${x.id}`; };
+    list.appendChild(h("div", { class: "case-item" + (on ? " on" : ""), role: "button", tabindex: "0", onclick: open, onkeydown: (e) => { if (e.key === "Enter") open(); } },
+      h("span", { class: `dot ${x.status ? statusMeta(x.status)[0] : ""}` }),
+      h("span", { style: { minWidth: 0 } }, h("div", { class: "t" }, x.title || "新会诊"), h("div", { class: "s" }, `${x.status ? statusMeta(x.status)[1] + " · " : ""}${timeAgo(x.updated)}`)),
+      h("button", { class: "del", type: "button", title: "删除会诊", "aria-label": "删除会诊", onclick: (e) => {
+        e.stopPropagation();
+        if (!confirm(`删除会诊「${x.title || "新会诊"}」？`)) return;
+        Cases.remove(x.id); toast("已删除");
+        if (on) location.hash = "#/"; else render();
+      } }, icon("trash"))));
+  }
+  const nav = clear($("#tool-nav"));
+  for (const [id, t] of Object.entries(TOOLS)) nav.appendChild(h("a", { href: `#/${id}`, class: route.tool === id ? "on" : null }, icon(t.icon), t.title));
+  const mb = clear($("#model-btn"));
+  mb.className = "model-btn" + (llmOn() ? " on" : "");
+  append(mb, [h("span", { class: "dot" }), h("span", { class: "lbl" }, h("span", { class: "muted" }, "模型"), h("b", null, llmOn() ? `${Store.llm.llm.provider} · ${Store.llm.llm.model}` : "确定性模式（无需密钥）"))]);
+}
+function render() {
+  renderRail();
+  const stage = clear($("#stage"));
+  if (!Bridge.ready) return;
+  const route = currentRoute();
+  if (route.tool) {
+    const t = TOOLS[route.tool];
+    document.title = `${t.title} · NSCLC-Agent · IMPF-AI`;
+    let body;
+    try { body = VIEWS[route.tool](); } catch (err) { body = empty(`渲染失败：${err.message}`, "alert"); console.error(err); }
+    stage.appendChild(h("div", { class: "page" },
+      h("div", { class: "page-head" },
+        h("button", { class: "icon-btn ghost only-mobile", type: "button", title: "菜单", "aria-label": "菜单", onclick: toggleRail }, icon("menu")),
+        h("a", { class: "icon-btn ghost", href: "#/", title: "返回会诊", "aria-label": "返回会诊" }, icon("back")),
+        h("div", { style: { minWidth: 0 } }, h("h1", null, t.title), h("div", { class: "crumb" }, t.sub))),
+      h("div", { class: "page-body" }, body)));
+    return;
+  }
+  const c = Cases.current();
+  document.title = `${c.title || "新会诊"} · NSCLC-Agent · IMPF-AI`;
+  stage.appendChild(Workspace.render());
+}
+function onRoute() {
+  const route = currentRoute();
+  if (!route.tool && Bridge.ready) {
+    if (route.caseId) { if (route.caseId !== Cases.currentId) { Cases.select(route.caseId); Workspace.reset(); } }
+    else if (Cases.currentId) { Cases.newDraft(); Workspace.reset(); }
+  }
+  $("#shell").classList.remove("rail-open");
+  render();
+}
+function toggleRail() { $("#shell").classList.toggle("rail-open"); }
 
 /* ================================================================ theme */
 
@@ -1243,13 +1588,10 @@ function initTheme() {
   try { saved = localStorage.getItem("nsclc-theme"); } catch (_) { /* ignore */ }
   if (saved) document.documentElement.dataset.theme = saved;
   const btn = $("#theme-btn");
-  const paint = () => {
-    const dark = document.documentElement.dataset.theme === "dark" || (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
-    clear(btn).appendChild(icon(dark ? "sun" : "moon"));
-  };
+  const isDark = () => document.documentElement.dataset.theme === "dark" || (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  const paint = () => { clear(btn).appendChild(icon(isDark() ? "sun" : "moon")); };
   btn.addEventListener("click", () => {
-    const dark = document.documentElement.dataset.theme === "dark" || (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
-    document.documentElement.dataset.theme = dark ? "light" : "dark";
+    document.documentElement.dataset.theme = isDark() ? "light" : "dark";
     try { localStorage.setItem("nsclc-theme", document.documentElement.dataset.theme); } catch (_) { /* ignore */ }
     paint();
   });
@@ -1258,8 +1600,15 @@ function initTheme() {
 
 /* ================================================================ start */
 
-Router.buildNav();
 initTheme();
-window.addEventListener("hashchange", () => Router.render());
-Router.render();
+$("#new-case").addEventListener("click", () => {
+  Workspace.reset();
+  Cases.newDraft();
+  if (currentRoute().tool || currentRoute().caseId) location.hash = "#/"; else onRoute();
+});
+$("#case-search").addEventListener("input", () => renderRail());
+$("#model-btn").addEventListener("click", () => { location.hash = "#/settings"; });
+$("#scrim").addEventListener("click", () => $("#shell").classList.remove("rail-open"));
+window.addEventListener("hashchange", onRoute);
+renderRail();
 Bridge.start();
