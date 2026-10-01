@@ -61,6 +61,20 @@ check("model-led agent turn (tool loop + review)", agentTurn.mode === "agent"
   `${agentTurn.steps.length} steps · ${agentTurn.llm_calls} model calls`);
 check("live agent events stream from the worker", agentEvents.some((e) => e.type === "tool_call")
   && agentEvents[agentEvents.length - 1].type === "turn_end", `${agentEvents.length} events`);
+// v1.0 runtime under WebAssembly: plan, specialist sub-agents (serial — no
+// threads), slash commands, checkpoints/rewind, runtime config.
+const mdt = call("agent_command", { text: "/mdt" });
+const mdtTurn = call("agent_turn", { message: mdt.prompt });
+check("specialist sub-agents run in the browser", mdt.kind === "prompt" && mdtTurn.specialists.length === 2
+  && mdtTurn.steps.some((s) => s.name === "delegate" && (s.children || []).length) && mdtTurn.plan.length === 4,
+  `${mdtTurn.specialists.join(", ")} · ${mdtTurn.llm_calls} model calls`);
+check("sub-agent events tagged and nested", agentEvents.some((e) => e.type === "subagent_start")
+  && agentEvents.some((e) => e.depth === 1 && e.type === "tool_call"));
+const usage = call("agent_command", { text: "/usage" });
+const rewound = call("agent_rewind", {});
+const cfg = call("agent_configure", { config: { hooks: { rule_review: false } } });
+check("commands, rewind and config", usage.kind === "local" && rewound.turns === 1 && cfg.hooks.rule_review === false
+  && call("agent_info", {}).hooks.find((x) => x.name === "rule_review").enabled === false);
 const panel = call("run_case", Object.assign({}, call("examples")[1].case, { role: "oncologist", enable_panel: true }));
 check("mock model + MDT panel (serial scheduling)", Boolean(panel.release_status), panel.release_status);
 call("chat_new", { role: "oncologist" });

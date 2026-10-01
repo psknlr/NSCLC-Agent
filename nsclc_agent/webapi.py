@@ -31,6 +31,9 @@ _STATE: dict[str, Any] = {
     "session": None, "last_state": None, "last_role": "patient",
     #: "agent" (model-led) | "governed" (deterministic control plane).
     "mode": "governed", "agent": None,
+    #: Agent runtime settings (hooks, specialists, memory, MCP, budgets);
+    #: survive model changes and new consults.
+    "agent_config": {},
 }
 
 _RELEASED = ("treatment_recommendation", "draft_for_tumor_board",
@@ -357,28 +360,102 @@ def _turn_payload(session: Any, result: Any, *,
 
 # ------------------------------------------------------------- agent mode
 
-def agent_new(role: str = "oncologist") -> dict[str, Any]:
+def agent_configure(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Update the agent runtime settings (partial update); applies to the
+    running consult too."""
+    from .agentic import AgentConfig
+
+    merged = AgentConfig.from_dict({**_STATE["agent_config"],
+                                    **dict(config or {})}).to_dict()
+    _STATE["agent_config"] = merged
+    if _STATE["agent"] is not None:
+        _STATE["agent"].configure(merged)
+    return merged
+
+
+def agent_new(role: str = "oncologist",
+              config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Start a model-led consultation (the model leads; the deterministic
     kernel is its toolbox and second opinion)."""
     from .agentic import AgentSession
 
+    if config is not None:
+        agent_configure(config)
     _STATE["agent"] = AgentSession(_STATE["llm"], role=_role(role),
-                                   vision_llm=_STATE["vision"], on_event=_emit)
+                                   vision_llm=_STATE["vision"],
+                                   config=_STATE["agent_config"], on_event=_emit)
     return {"role": _STATE["agent"].role, "turns": 0, "mode": "agent"}
+
+
+def _agent() -> Any:
+    if _STATE["agent"] is None:
+        agent_new()
+    return _STATE["agent"]
 
 
 def agent_turn(message: str = "", facts: dict[str, Any] | None = None,
                images: list[str] | None = None,
                reports: list[str] | None = None) -> dict[str, Any]:
-    if _STATE["agent"] is None:
-        agent_new()
-    session = _STATE["agent"]
+    session = _agent()
     result = session.turn(message, facts=facts or None, images=images or None,
                           reports=reports or None)
     payload = result.to_dict()
     payload.update({"role": session.role, "turns": len(session.turns),
                     "provider": getattr(_STATE["llm"], "name", "")})
     return payload
+
+
+def agent_command(text: str) -> dict[str, Any]:
+    """Expand a slash command. Prompt commands come back as the prompt to
+    send (``kind: "prompt"``); local ones run here (``kind: "local"``)."""
+    from .agentic.commands import expand
+
+    out = expand(text)
+    if out["kind"] != "local":
+        return out
+    if out["command"] == "clear":
+        role = _STATE["agent"].role if _STATE["agent"] is not None else "oncologist"
+        agent_new(role)
+        return {"kind": "local", "command": "clear", "data": {},
+                "text": "已开始新会诊（记忆与设置保留）。"}
+    return {"kind": "local", **_agent().local_command(out["command"], out["arg"])}
+
+
+def agent_commands() -> list[dict[str, str]]:
+    from .agentic.commands import listing
+
+    return listing()
+
+
+def agent_rewind(turn: int | None = None) -> dict[str, Any]:
+    if _STATE["agent"] is None:
+        raise RuntimeError("no agent session")
+    return _STATE["agent"].rewind(turn)
+
+
+def agent_compact() -> dict[str, Any]:
+    if _STATE["agent"] is None:
+        raise RuntimeError("no agent session")
+    return _STATE["agent"].compact()
+
+
+def agent_info() -> dict[str, Any]:
+    """The runtime as the agent sees it: tools, specialists, hooks, plan,
+    usage, context, checkpoints (a catalog when no consult is running)."""
+    from .agentic.session import runtime_catalog
+
+    if _STATE["agent"] is not None:
+        return _STATE["agent"].info()
+    return runtime_catalog(_STATE["agent_config"])
+
+
+def mcp_check(url: str, name: str = "server",
+              headers: dict[str, str] | None = None) -> dict[str, Any]:
+    """Connect to one MCP server and list its tools (settings 'test')."""
+    from .agentic.mcp import connect
+
+    _tools, status = connect([{"name": name, "url": url, "headers": headers or {}}])
+    return status[0] if status else {"name": name, "ok": False, "error": "no server"}
 
 
 def agent_export() -> dict[str, Any]:
@@ -388,15 +465,18 @@ def agent_export() -> dict[str, Any]:
 
 
 def agent_import(data: dict[str, Any], role: str = "oncologist") -> dict[str, Any]:
-    """Resume a model-led consultation; authority (role) comes from this
-    call, never from the file."""
+    """Resume a model-led consultation; authority (role, settings) comes
+    from this call and this page, never from the file."""
     from .agentic import AgentSession
 
     session = AgentSession.load(data, _STATE["llm"], role=_role(role),
-                                vision_llm=_STATE["vision"], on_event=_emit)
+                                vision_llm=_STATE["vision"],
+                                config=_STATE["agent_config"], on_event=_emit)
     _STATE["agent"] = session
     return {"role": session.role, "turns": len(session.turns),
-            "facts": session.facts, "mode": "agent"}
+            "facts": session.facts, "mode": "agent", "plan": session.plan.items,
+            "transcript": [{"message": t.get("message", ""), "reply": t.get("reply", ""),
+                            "turn": i} for i, t in enumerate(session.turns)]}
 
 
 def _emit(event: dict[str, Any]) -> None:
@@ -544,6 +624,10 @@ _API: dict[str, Callable[..., Any]] = {
     "chat_export": chat_export, "chat_import": chat_import,
     "set_mode": set_mode, "agent_new": agent_new, "agent_turn": agent_turn,
     "agent_export": agent_export, "agent_import": agent_import,
+    "agent_configure": agent_configure, "agent_command": agent_command,
+    "agent_commands": agent_commands, "agent_rewind": agent_rewind,
+    "agent_compact": agent_compact, "agent_info": agent_info,
+    "mcp_check": mcp_check,
     "kg_info": kg_info, "kg_search": kg_search, "kg_get": kg_get,
     "audit_plan": audit_plan, "golden_cases": golden_cases,
     "run_eval": run_eval,

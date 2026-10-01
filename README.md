@@ -7,15 +7,18 @@
 > 内容寻址的记录/重放日志，以及模型驱动的规划、ReAct 工具循环、主动问诊与
 > 多学科会诊。
 
-**两种会诊模式（v0.9.0）**
+**两种会诊模式（v1.0.0）**
 
-* **模型主导（agent，接入模型后的默认）**：由模型主导整个会诊——自主思考、规划、
-  调用 20 个临床工具（分期引擎、急症筛查、驱动基因解析、试验注册表、方案库与参考剂量、
-  适应证/器官功能核对、脑转移分层、后线序贯、临床路径、指南知识库、预后、相互作用、
-  读片读报告……），维护结构化病例笔记，给出自己的临床判断。确定性内核变成它的
-  **工具与第二意见**：规则引擎在模型提交后复核一次，意见交回模型逐条「采纳并修改」或
-  「保留并写明临床理由」，**不拦截、不改写、不扣留**；思考、每次工具调用、复核意见与
-  模型的回应全部展示给医生。
+* **模型主导（agent，接入模型后的默认）**：一个按主流智能体架构（Claude Code / Grok CLI /
+  Codex / OpenAI Agents SDK）构建的**智能体运行时**——主诊智能体自主思考、用 `update_plan`
+  维护实时会诊计划、并行调用 20 个临床工具（分期引擎、急症筛查、驱动基因解析、试验注册表、
+  方案库与参考剂量、适应证/器官功能核对、脑转移分层、后线序贯、临床路径、指南知识库、预后、
+  相互作用、读片读报告……）、用 `delegate` **并行邀请 7 位专科子智能体**（影像、病理与分子
+  病理、胸外、放疗、肿瘤内科、临床药师、循证医学，各有独立上下文与工具集），综合后给出自己的
+  临床判断。确定性内核的全部安全网改由 **Hooks** 承载（急症筛查、证据台账、规则引擎、分期
+  一致性、引用溯源、剂量溯源、急症优先），意见交回模型逐条「采纳并修改」或「保留并写明理由」，
+  **不拦截、不改写、不扣留**。另有记忆（NSCLC.md）、上下文压缩、逐轮检查点与回退、斜杠命令、
+  MCP 外部工具与 stream-json 输出——详见下文「智能体运行时（v1.0.0）」。
 * **受治理（governed，未接入模型时唯一可用，接入后可选）**：模型只能提案，确定性
   控制层裁决——下面「架构」一节的全部不变量在这一模式下是硬约束：模型不能定分期、
   不能产出剂量、不能清除规则命中的安全问题；未配置模型时全流程确定性运行，产出的
@@ -35,9 +38,15 @@
 
 打开即是**会诊工作台**（不是介绍页）：
 
-* **模型主导会诊**（接入 Poe / MiniMax 等之后的默认）：模型自主推理、调用工具，界面**实时**
-  展示它的思考与每一次工具调用；回答以 Markdown 呈现，下方是模型的结论卡（分期与引擎对照、
-  首选方案、证据锚点、待完善检查）与**规则引擎复核面板**（每条参考意见 + 模型的采纳/保留理由）。
+* **模型主导会诊**（接入 Poe / MiniMax 等之后的默认）：界面**实时**展示会诊计划清单、模型的
+  思考、每一次工具调用，以及**嵌套的专科子智能体轨迹**（各专科自己的工具调用与结构化意见）；
+  回答以 Markdown 呈现，下方是结论卡（分期与引擎对照、首选方案、证据锚点、多学科意见、待完善
+  检查、智能体提议记住的条目）与 **Hooks 复核面板**（每条参考意见 + 模型的采纳/保留理由）。
+  输入 `/` 唤出**命令面板**（`/mdt` 多学科会诊、`/plan`、`/review`、`/evidence`、`/patient`、
+  `/whatif`、`/compact`、`/rewind`、`/usage`…）；运行中可随时**停止**（Esc）；每一轮都能
+  **回退**（病例笔记、计划、证据台账一并恢复，原输入放回输入框）；右栏显示上下文占用。
+* **智能体页**：专科子智能体开关与自定义专科、Hooks 开关、记忆（机构规范与偏好）、MCP 服务器
+  （测试连接）、运行预算与命令表。
 * **受治理会诊**（未接入模型时，或在顶部切换）：每一轮都是一次完整的受治理运行，
   回复下方是**会诊卡**——确定性分期、放行状态、推荐方案（方案库 + 试验锚点）、待完善检查、
   终审拦截原因；智能体的追问可一键「回答」。
@@ -50,7 +59,7 @@
   MDT 面板（接入模型后）。
 * **会诊记录**（左栏）：多病例并行、搜索、导入/导出；记录只保存在本机浏览器。
   视角（医师/患者/研究者）与剂量草案权限来自当前设置，**从不来自记录文件**。
-* **临床工具**：分期计算器（第 9 版 T×N 全矩阵）、指南知识库（2,960 条）、安全实验室
+* **临床工具**：智能体运行时设置、分期计算器（第 9 版 T×N 全矩阵）、指南知识库（2,960 条）、安全实验室
   （28 个审计探针）、评测看板（浏览器内跑完整金标准）、模型接入（Poe · MiniMax · Azure ·
   离线 Mock，测试连接与 Poe 目录核对）。
 
@@ -661,6 +670,57 @@ AURA3 奥希替尼（新方案/试验/声明）；器官闸门读取"CrCl 38 mL/
   `--message`；`--session` 续接；`--json` 输出完整轮次）。离线 `mock` 模型会真实地走完
   「调用工具 → 提交 → 复核 → 回应」的循环，但只转述受治理流水线的意见，并明确标注。
 
+### 智能体运行时（v1.0.0）
+
+> 用户反馈：「继续深度优化，要真正体现智能体，参考 grok cli 等架构，所有不契合主流智能体
+> 架构设计的都可以修改，专业性和创新性都需要兼顾。」
+
+v0.9.0 的 agent 模式是「一个循环 + 一个提交后复核」。v1.0.0 把它重写为一个完整的智能体运行时
+（`nsclc_agent/agentic/`），每个部件都对应主流智能体 CLI 的成熟设计，并为多学科会诊做了专科化：
+
+| 主流设计 | NSCLC-Agent 实现 | 模块 |
+|---|---|---|
+| 统一的 Tool 抽象 / toolset | `Tool`（JSON-schema、handler、`parallel_safe`、`terminal`）+ 每个智能体各自过滤的 `Toolset` | `tools.py` |
+| 一个 agent loop 驱动所有智能体 | `run_loop`：思考捕获（`<think>`/`reasoning_content`）、只读工具**同步并行**、写操作按序、终止工具最后执行、纯文字回答一次提醒后接受、截断续写、取消时修复历史 | `loop.py` |
+| TodoWrite / update_plan | `update_plan` 会诊计划：跨轮保留、每轮放到模型面前、界面实时清单 | `planning.py` |
+| Task 工具 / agents-as-tools | `delegate` → **7 位专科子智能体**，各自独立上下文、系统提示与工具白名单（只读，不能再委派、不能提交结论），返回结构化意见（要点/建议/顾虑/把握度）；同一步可并行；支持自定义专科（Markdown front matter） | `subagents.py` |
+| Hooks（UserPromptSubmit / PostToolUse / Stop） | 8 个确定性 hooks 承载全部临床安全网：急症筛查、病例笔记预填、证据台账、规则引擎、分期一致性、**引用溯源**（工具没返回过、注册表/KG 也查不到的引用 → 疑似幻觉）、**剂量溯源**（含剂量却没查方案库；面向患者给剂量）、急症优先。全部为参考意见，可逐个关闭 | `hooks.py` |
+| CLAUDE.md / GROK.md 记忆 | `NSCLC.md`（`~/.nsclc-agent/` 与项目目录）写入每轮系统提示；`remember` 工具**提议**写入，由医生确认 | `memory.py` |
+| 上下文管理 / auto-compact | 与服务商无关的 token 估算；接近窗口上限时**由模型撰写**临床摘要压缩早期轮次（失败时确定性摘要兜底） | `memory.py` |
+| Checkpoints / rewind | 每轮开始前的检查点：消息、病例笔记、计划、证据台账；`/rewind N` 回到第 N 轮之前 | `session.py` |
+| 斜杠命令 | `/mdt` `/plan` `/review` `/evidence` `/patient` `/whatif`（交给智能体）与 `/compact` `/rewind` `/usage` `/agents` `/tools` `/hooks` `/memory` `/clear` `/help`（本地），CLI 与网页同一份定义 | `commands.py` |
+| MCP | Streamable HTTP 客户端（JSON 或 SSE 响应、`Mcp-Session-Id`），外部工具以 `mcp__服务器__工具` 加入工具集（机构处方集、试验匹配、EMR 网关……） | `mcp.py` |
+| 可中断 | CLI：Ctrl-C 停止当前轮；网页：停止按钮（Esc）终止并重启 Worker，会诊恢复到上一轮结束时的状态 | `session.py` / `app.js` |
+| headless / 流式输出 | `--output-format stream-json`：每个事件一行 JSON（含子智能体事件，`agent`/`depth` 标注），最后一行为结果 | `cli.py` |
+
+**命令行**
+
+```bash
+export NSCLC_LLM_PROVIDER=poe POE_API_KEY=...        # 或 minimax / azure / litellm / mock
+python -m nsclc_agent agent                           # 交互式 REPL：/help 查看命令，Ctrl-C 停止当前轮
+python -m nsclc_agent agent --message "68岁女性，肺腺癌 cT2aN0M1b，EGFR阴性，PD-L1 80%，请 MDT" \
+    --message "/usage" --session consult.json        # 脚本化多轮；会诊文件可续接、可回退
+python -m nsclc_agent agent --output-format stream-json --message "…"   # 事件流（管道给其他程序）
+python -m nsclc_agent agent --no-hook dose_provenance --disable-agent pharmacy \
+    --agents-dir .nsclc-agent/agents --mcp formulary=https://mcp.example.org/mcp --max-steps 32
+```
+
+自定义专科：`.nsclc-agent/agents/geriatric.md`
+
+```markdown
+---
+name: geriatric_oncology
+title: 老年肿瘤科医师
+description: 老年综合评估、治疗强度与耐受性
+tools: prognosis, check_organ_function, interaction_check
+---
+关注：功能状态与合并症对治疗强度的影响；不要给出剂量。
+```
+
+**安全姿态不变**：在 agent 模式下，确定性内核依旧在场，只是从「闸门」变成「工具 + hooks」；
+受治理模式的全部硬约束原样保留（见下文「架构」）。会诊文件依旧不授予任何权限：视角与运行配置
+来自调用方，系统提示每轮重建；导入时病例笔记与检查点重新校验。
+
 ## 快速开始（零依赖、离线）
 
 ```bash
@@ -772,6 +832,9 @@ nsclc_agent/
   perception/  imaging.py 读片(词表校验/归一化交叉核对/拒绝文本模型)
   tools/       base.py Broker+熔断 · registry.py 11个工具 · retrieval.py 实连检索
   agents/      toolloop.py ReAct · planner.py · panel.py MDT · critic.py · catalog.py
+  agentic/     模型主导的智能体运行时：session.py 编排 · loop.py 统一循环 · tools.py
+               toolbox.py 20个临床工具 · planning.py · subagents.py 7位专科 · hooks.py
+               memory.py 记忆/压缩 · commands.py 斜杠命令 · mcp.py · prompts.py · terminal.py
   llm/         base.py · openai_compatible.py(tools+重试) · providers.py · mock.py
   prompts/     9个协议模块(.md, sha256钉版) · cores.py 蒸馏决策核心
   state.py 证据台账/预算/状态 · journal.py 记录/重放 · runner.py · render.py
@@ -782,7 +845,7 @@ nsclc_agent/
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   eval/run_eval.py 错误分类学评测 · eval/adjudication.py 双医师裁定台账
   schemas.py · skills.py · case.py · cli.py
-tests/         550 个用例，全离线    eval/       70 例金标准 + 指标
+tests/         652 个用例，全离线    eval/       70 例金标准 + 指标
 docs/ARCHITECTURE.md                 examples/   病例样例
 ```
 
@@ -790,7 +853,7 @@ docs/ARCHITECTURE.md                 examples/   病例样例
 
 ```bash
 pip install pytest
-python -m pytest -q            # 623 passed，全离线
+python -m pytest -q            # 652 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 70/70：分期40/40 路由11/11 方案35/35
                                # 安全42/42 · unsafe_release_rate 0/35 · 分类学全零
@@ -798,7 +861,7 @@ python -m nsclc_agent eval     # 金标准 70/70：分期40/40 路由11/11 方�
 
 ## 仍未完成（诚实清单）
 
-模型主导模式（v0.9.0）的临床质量取决于所接入的模型：金标准评测衡量的是受治理流水线，模型主导模式尚无真实模型上的系统评测（离线 mock 只验证循环机制），规则复核在该模式下按设计只作参考、不拦截；模型不能主动发起轮次；急症命中后累计病史会保守地持续触发急症通道（会话内
+模型主导模式（v1.0.0）的临床质量取决于所接入的模型：金标准评测衡量的是受治理流水线，模型主导模式尚无真实模型上的系统评测（离线 mock 只验证运行时机制：计划、委派、hooks、回退、压缩），hooks 在该模式下按设计只作参考、不拦截；专科子智能体与主诊使用同一个模型——多视角来自各自的上下文、提示与工具集，而不是不同的模型；浏览器内工具与专科串行执行（无线程），网页端「停止」通过重启 Worker 实现（数秒，运行时已缓存）；token 占用为估算值，压缩之前的轮次无法回退；浏览器内接入 MCP 需服务器允许 CORS，鉴权请求头只保存在页面内存；模型不能主动发起轮次；急症命中后累计病史会保守地持续触发急症通道（会话内
 无降级路径，这是有意的）；PubMed/CT.gov 实连检索需操作者
 显式开网（默认离线 stub）；内置指南 KG 为**机器抽取、默认未经临床复核**——
 逐条复核工作流已就绪（`kg-review`，内容寻址绑定、可撤销），但复核本身

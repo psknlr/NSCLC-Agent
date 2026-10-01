@@ -755,10 +755,65 @@ def cmd_llm_check(args) -> int:
     return rc
 
 
+def _agent_config(args) -> dict:
+    """Runtime settings from flags + memory files + custom specialists."""
+    from .agentic import builtin_hooks, load_definitions, load_instructions
+
+    hooks = {h.name for h in builtin_hooks()}
+    unknown = [h for h in args.no_hook or [] if h not in hooks]
+    if unknown:
+        raise ValueError(f"unknown hook(s) {', '.join(unknown)}; "
+                         f"available: {', '.join(sorted(hooks))}")
+    servers = []
+    for item in args.mcp or []:
+        name, sep, url = item.partition("=")
+        if not sep:
+            name, url = f"mcp{len(servers) + 1}", item
+        servers.append({"name": name.strip(), "url": url.strip()})
+    custom = []
+    dirs = [Path(d) for d in args.agents_dir or []] or [
+        Path.home() / ".nsclc-agent" / "agents", Path(".nsclc-agent") / "agents"]
+    for directory in dirs:
+        custom += [d.to_dict() for d in load_definitions(directory)]
+    config = {
+        "subagents": not args.no_subagents,
+        "disabled_agents": args.disable_agent or [],
+        "hooks": {name: False for name in args.no_hook or []},
+        "instructions": "" if args.no_memory else load_instructions(),
+        "custom_agents": custom, "mcp_servers": servers,
+    }
+    for key in ("max_steps", "context_window"):
+        if getattr(args, key, None):
+            config[key] = getattr(args, key)
+    return config
+
+
+def _save_memory(proposals: list[str], path: Path = Path("NSCLC.md")) -> bool:
+    """Ask before writing the agent's memory proposals to ./NSCLC.md."""
+    if not proposals or not sys.stdin.isatty():
+        return False
+    print("\n智能体提议记住：", file=sys.stderr)
+    for note in proposals:
+        print(f"  - {note}", file=sys.stderr)
+    try:
+        answer = input(f"写入 {path}？[y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    if answer not in ("y", "yes", "是"):
+        return False
+    existing = path.read_text(encoding="utf-8") if path.exists() else "# NSCLC-Agent 记忆\n"
+    path.write_text(existing.rstrip("\n") + "\n" + "".join(f"- {n}\n" for n in proposals),
+                    encoding="utf-8")
+    return True
+
+
 def cmd_agent(args) -> int:
-    """Model-led consultation: the model reasons, calls tools and decides;
-    the deterministic kernel is its toolbox and an advisory reviewer."""
-    from .agentic import AgentSession
+    """Model-led consultation: the model leads (plan, tools, specialist
+    sub-agents); hooks hold the clinical safety nets and are advisory."""
+    from .agentic import AgentSession, load_instructions
+    from .agentic.commands import expand
+    from .agentic.terminal import TerminalView
+    from .agentic.toolbox import LABELS
 
     try:
         llm = build_client(getattr(args, "llm_provider", None) or None,
@@ -773,76 +828,131 @@ def cmd_agent(args) -> int:
               "minimax, azure, litellm or mock) or pass --llm-provider",
               file=sys.stderr)
         return 2
+    try:
+        config = _agent_config(args)
+    except (ValueError, OSError) as exc:
+        print(f"agent configuration error: {exc}", file=sys.stderr)
+        return 2
 
-    def show(event: dict) -> None:
-        if args.json or args.quiet:
-            return
-        kind = event.get("type")
-        if kind == "tool_call":
-            print(f"  → {event['name']}({json.dumps(event.get('args') or {}, ensure_ascii=False)[:120]})",
-                  file=sys.stderr)
-        elif kind == "tool_result":
-            print(f"    {'✓' if event.get('ok') else '✗'} {event.get('summary')}",
-                  file=sys.stderr)
-        elif kind == "thinking":
-            print(f"  · 思考：{str(event.get('text'))[:200]}", file=sys.stderr)
-        elif kind == "review":
-            print(f"  ⚖ 规则复核：{len(event.get('findings') or [])} 条参考意见",
-                  file=sys.stderr)
-        elif kind == "alert":
-            print(f"  ⚠ 急症筛查：{', '.join(event['emergency']['signals'])}",
-                  file=sys.stderr)
+    fmt = args.output_format or ("json" if args.json else "text")
+    view = TerminalView(sys.stderr, labels={**LABELS, "remember": "提议写入记忆"}) \
+        if fmt == "text" and not args.quiet else None
+
+    import threading
+
+    out_lock = threading.Lock()  # parallel specialists emit from worker threads
+
+    def on_event(event: dict) -> None:
+        if fmt == "stream-json":
+            line = json.dumps(event, ensure_ascii=False, default=str) + "\n"
+            with out_lock:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+        elif view is not None:
+            view(event)
 
     session_path = Path(args.session) if args.session else None
     role = args.role or "oncologist"
+
+    def new_session() -> AgentSession:
+        return AgentSession(llm, role=role, vision_llm=vision, config=config,
+                            on_event=on_event)
+
     if session_path and session_path.exists():
         try:
             session = AgentSession.load(
                 json.loads(session_path.read_text(encoding="utf-8")), llm,
-                role=role, vision_llm=vision, on_event=show)
+                role=role, vision_llm=vision, config=config, on_event=on_event)
         except (ValueError, json.JSONDecodeError) as exc:
             print(f"cannot resume {session_path}: {exc}", file=sys.stderr)
             return 2
     else:
-        session = AgentSession(llm, role=role, vision_llm=vision, on_event=show)
+        session = new_session()
+    if view is not None:
+        view.titles.update({d.name: d.title for d in session.definitions})
     facts = json.loads(args.facts) if args.facts else None
+    interactive = not args.message
+
+    def save() -> None:
+        if session_path:
+            session_path.write_text(json.dumps(session.to_dict(), ensure_ascii=False,
+                                               indent=2), encoding="utf-8")
+
+    def emit_local(payload: dict) -> None:
+        if fmt == "text":
+            print(payload["text"])
+        else:
+            print(json.dumps({"type": "command", **payload}, ensure_ascii=False,
+                             default=str), flush=True)
 
     def one_turn(text: str, turn_facts=None) -> int:
-        result = session.turn(text, facts=turn_facts,
+        nonlocal session
+        command = expand(text)
+        if command["kind"] == "unknown":
+            print(command["message"], file=sys.stderr)
+            return 1
+        if command["kind"] == "local":
+            if command["command"] == "clear":
+                session = new_session()
+                save()
+                emit_local({"command": "clear", "text": "已开始新会诊（记忆与设置保留）。",
+                            "data": {}})
+                return 0
+            try:
+                emit_local(session.local_command(command["command"], command["arg"]))
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            save()
+            return 0
+        prompt = command["prompt"] if command["kind"] == "prompt" else text
+        result = session.turn(prompt, facts=turn_facts,
                               images=_expand_image_args(args.image),
                               reports=_expand_image_args(args.report))
-        if session_path:
-            session_path.write_text(json.dumps(session.to_dict(),
-                                               ensure_ascii=False, indent=2),
-                                    encoding="utf-8")
-        if args.json:
+        save()
+        if fmt == "stream-json":
+            print(json.dumps({"type": "result", **result.to_dict()}, ensure_ascii=False,
+                             default=str), flush=True)
+        elif fmt == "json":
             print(json.dumps(result.to_dict(), ensure_ascii=False, default=str))
         else:
             print(result.reply)
             review = result.review
             if review["findings"]:
-                print("\n— 规则引擎参考意见（非硬约束）：")
+                print("\n— hooks 复核意见（参考，非硬约束）：")
                 answers = {r.get("rule_id"): r for r in review["responses"]}
                 for f in review["findings"]:
                     a = answers.get(f["rule_id"])
                     verdict = (f"{a.get('decision')}：{a.get('reason', '')}"
                                if a else "未回应")
                     print(f"  [{f['severity']}] {f['rule_id']} — {verdict}")
+            ctx = result.context
+            print(f"\n· {result.llm_calls} 次模型调用"
+                  + (f"（专科：{'、'.join(result.specialists)}）" if result.specialists else "")
+                  + f" · {result.duration_s:.1f}s · 上下文 {ctx.get('ratio', 0):.0%}"
+                  + (" · 已停止" if result.stop == "cancelled" else ""), file=sys.stderr)
+            if result.memory and not _save_memory(result.memory):
+                print("· 智能体提议记住：" + "；".join(result.memory)
+                      + "（交互模式下可确认写入 ./NSCLC.md）", file=sys.stderr)
+            elif result.memory:
+                session.configure({"instructions": load_instructions()})
         return 1 if result.error else 0
 
-    if args.message:
+    if not interactive:
         rc = 0
         for i, text in enumerate(args.message):
             rc = max(rc, one_turn(text, facts if i == 0 else None))
         return rc
-    print("NSCLC-Agent 模型主导会诊（IMPF-AI）。输入病例或问题，空行退出。", file=sys.stderr)
+    print("NSCLC-Agent 模型主导会诊（IMPF-AI）。输入病例或问题；/help 查看命令，"
+          "Ctrl-C 停止当前轮，空行或 /exit 退出。", file=sys.stderr)
     first = True
     while True:
         try:
             text = input("你> ").strip()
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
+            print(file=sys.stderr)
             break
-        if not text:
+        if not text or text in ("/exit", "/quit"):
             break
         one_turn(text, facts if first else None)
         first = False
@@ -1071,8 +1181,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--session", help="session file to resume and save")
     p.add_argument("--image", action="append", help="imaging file(s) for the turn")
     p.add_argument("--report", action="append", help="report image(s) for the turn")
-    p.add_argument("--json", action="store_true")
-    p.add_argument("--quiet", action="store_true", help="no live tool timeline")
+    p.add_argument("--json", action="store_true", help="= --output-format json")
+    p.add_argument("--output-format", choices=["text", "json", "stream-json"],
+                   help="text (default) | json (one result per turn) | "
+                        "stream-json (every event as a JSON line, then the result)")
+    p.add_argument("--quiet", action="store_true", help="no live timeline")
+    p.add_argument("--max-steps", type=int, help="lead-agent step budget (default 24)")
+    p.add_argument("--context-window", type=int,
+                   help="model context window in tokens (auto-compaction)")
+    p.add_argument("--no-subagents", action="store_true",
+                   help="do not offer MDT specialist sub-agents")
+    p.add_argument("--disable-agent", action="append", metavar="NAME",
+                   help="disable one specialist (radiology, pathology, …)")
+    p.add_argument("--agents-dir", action="append", metavar="DIR",
+                   help="custom specialists (*.md with front matter); default "
+                        "~/.nsclc-agent/agents and ./.nsclc-agent/agents")
+    p.add_argument("--no-hook", action="append", metavar="NAME",
+                   help="disable a hook (emergency_screen, rule_review, …)")
+    p.add_argument("--no-memory", action="store_true",
+                   help="do not load NSCLC.md instructions")
+    p.add_argument("--mcp", action="append", metavar="[NAME=]URL",
+                   help="MCP server (Streamable HTTP); repeatable")
     p.set_defaults(func=cmd_agent)
 
     p = sub.add_parser("llm-check", help="Show configured backends")

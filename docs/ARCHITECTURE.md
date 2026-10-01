@@ -38,27 +38,58 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
 
 ## 2. Two modes
 
-Since v0.9.0 the harness runs in one of two modes:
+The harness runs in one of two modes.
 
-* **Agent mode** (`nsclc_agent/agentic/`, the default once a model is
-  connected): the model LEADS. `AgentSession` runs a ReAct loop in which
-  the model decides what to call, how often and when it is done; it keeps
-  structured case notes and submits a structured consult through
-  `submit_consult`. The deterministic kernel is its toolbox
-  (`AgentToolbox`, 20 tools over the staging engine, registries, gates,
-  CNS/sequencing modules, guideline KG, prognosis, interactions, vision
-  readers) and its second opinion: `rule_review` and `governed_reference`
-  on request, plus one mandatory-but-advisory review round on submission
-  in which the rule-engine findings (and any disagreement with the AJCC-9
-  engine's stage) go back to the model, which revises or answers each with
-  a reason. Nothing is blocked, rewritten or withheld; the findings and the
-  model's answers are shown side by side, and every thought (when the
-  provider exposes it), tool call and review round is streamed and kept.
-  The emergency screen runs on every message and is put in front of the
-  model, not in place of it. A session file still grants no authority.
 * **Governed mode** (the only mode without a model, selectable with one):
-  the invariants below are hard guarantees — the model proposes, the
+  the invariants of §3 are hard guarantees — the model proposes, the
   control plane disposes.
+* **Agent mode** (`nsclc_agent/agentic/`, the default once a model is
+  connected): the model LEADS, inside an agent runtime built on the same
+  patterns as mainstream agent CLIs (Claude Code, Grok CLI, Codex, the
+  OpenAI Agents SDK) and specialised for a multidisciplinary consult.
+
+### 2.1 Agent runtime (v1.0)
+
+```
+            user message ──► user_prompt_submit hooks (emergency screen, note seeding)
+                                   │  context for the model · alerts for the clinician
+                                   ▼
+ ┌────────────────────────── lead agent (run_loop) ──────────────────────────┐
+ │  system prompt = role + roster + MCP tools + memory (NSCLC.md), rebuilt    │
+ │  every turn · user content = message + hook context + plan + case notes    │
+ │                                                                             │
+ │  model ─► thinking / text / tool calls ─► observations ─► model …          │
+ │            │ read-only tools run concurrently (natively), writers in order  │
+ │            ├─ clinical tools (20, AgentToolbox)  ── post_tool_use hooks     │
+ │            ├─ update_plan (live consult plan)        (evidence ledger)      │
+ │            ├─ delegate ──► specialist sub-agent (run_loop, own context,     │
+ │            │               own read-only toolset, submit_report) × N ∥      │
+ │            ├─ remember (memory proposal → clinician decides)               │
+ │            ├─ mcp__<server>__<tool> (Streamable HTTP MCP servers)          │
+ │            └─ submit_consult (terminal) ──► stop hooks: rule engine, stage  │
+ │                consistency, citation provenance, dose provenance,           │
+ │                emergency addressed ─► findings back to the model once:      │
+ │                revise, or answer each in rule_responses                     │
+ └─────────────────────────────────────────────────────────────────────────────┘
+        checkpoint before every turn (messages, notes, plan, ledger) → rewind
+        context estimate → model-written compaction near the window
+        every step → typed events (CLI timeline · stream-json · web trace)
+```
+
+| Concern | Design |
+|---|---|
+| Tools | `Tool` (schema, handler, `parallel_safe`, `terminal`, label) and per-agent `Toolset`s. A failing tool is an observation, never an exception. |
+| Loop | One `run_loop` for the lead and every specialist: reasoning capture (`reasoning_content`, `<think>`), concurrent read-only calls, ordered writers, terminal tool last, one nudge for plain-text answers (a plain answer is still an answer), truncation continue, `Cancelled` with `repair_history` so the transcript stays valid for every provider; the trace keeps call order whatever order tools finished in. |
+| Planning | `update_plan` — a checklist that survives turns and is put in front of the model each turn. |
+| Sub-agents | `delegate` runs a specialist with its own system prompt, a fresh context (task + case notes) and an allow-listed read-only toolset; it cannot write notes, delegate or submit. Only its structured report enters the lead's context; its full trace is kept as `children` of the delegate step. Custom specialists are front-matter Markdown files. |
+| Hooks | `user_prompt_submit` / `post_tool_use` / `stop`, each individually switchable. Every hook is advisory; a crashing hook becomes a `HOOK_ERROR` finding. |
+| Memory & context | Instruction files in every system prompt; `remember` only proposes. Provider-neutral token estimate; compaction summarises older turns with the model (deterministic fallback) and drops checkpoints before the cut. |
+| Checkpoints | Taken before every turn; `rewind(turn)` restores messages, notes, plan, ledger and memory proposals, and returns the rewound message for the composer. |
+| Commands | One definition for CLI and web: prompt commands expand to an instruction for the agent, local commands run in the session (`local_command`). |
+| MCP | JSON-RPC over HTTP POST, JSON or SSE replies, `Mcp-Session-Id`; urllib natively, synchronous XHR in the browser worker. |
+| Concurrency | Threads natively (parallel tools and specialists, thread-safe usage accounting, serialised stream-json output); strictly serial in Pyodide (`platform_caps.THREADS_AVAILABLE`). |
+| Interruption | CLI: Ctrl-C ends the turn (`KeyboardInterrupt` → cancelled, history repaired). Web: the page terminates and restarts the worker; the case resumes from its last exported session. |
+| Authority | Role and runtime configuration come from the surface; a session file (format `nsclc-agent-session/2`, `/1` still readable) supplies data only: facts and checkpoint facts are re-validated, the system prompt is rebuilt, inconsistent checkpoints are dropped. |
 
 ## 3. Control-plane invariants (governed mode)
 

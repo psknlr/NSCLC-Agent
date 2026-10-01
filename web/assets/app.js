@@ -73,6 +73,11 @@ const ICONS = {
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>',
   chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2.5"/>',
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
+  plan: '<path d="M10 6h10M10 12h10M10 18h10"/><path d="M3.5 6l1.2 1.2L7 5M3.5 12l1.2 1.2L7 11M3.5 18l1.2 1.2L7 17"/>',
+  memory: '<path d="M6 3h12v18l-6-4-6 4z"/>',
+  agent: '<rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M9 12v1.5M15 12v1.5M2 12v3M22 12v3"/>',
 };
 function icon(name, cls) {
   return h("span", { class: cls || "", style: { display: "inline-flex" },
@@ -158,14 +163,31 @@ function statusBanner(status, right) {
 
 /* ================================================================ bridge */
 
+const STOPPED = "已停止";
 const Bridge = {
-  worker: null, seq: 0, pending: new Map(), ready: false,
+  worker: null, seq: 0, pending: new Map(), ready: false, restarting: null,
   start() {
     this.worker = new Worker("worker.js");
     this.worker.onmessage = (e) => this.onMessage(e.data);
-    this.worker.onerror = (e) => Boot.fatal(e.message || "worker error");
+    this.worker.onerror = (e) => (this.restarting ? this.onMessage({ type: "fatal", error: e.message || "worker error" }) : Boot.fatal(e.message || "worker error"));
+  },
+  /* Stop = terminate the worker mid-turn (a synchronous model call cannot be
+     interrupted from inside it) and boot a fresh one. The page re-applies the
+     model and agent settings and resumes the case from its last saved turn. */
+  restart() {
+    if (this.worker) this.worker.terminate();
+    for (const settle of this.pending.values()) settle({ ok: false, error: STOPPED });
+    this.pending.clear();
+    this.ready = false;
+    return new Promise((resolve, reject) => { this.restarting = { resolve, reject }; this.start(); });
   },
   onMessage(msg) {
+    if (this.restarting && ["ready", "fatal", "progress"].includes(msg.type)) {
+      if (msg.type === "progress") return undefined;
+      const r = this.restarting; this.restarting = null;
+      if (msg.type === "fatal") return r.reject(new Error(msg.error));
+      this.ready = true; return r.resolve();
+    }
     if (msg.type === "progress") return Boot.step(msg.stage);
     if (msg.type === "ready") return Boot.done(msg.info, msg.build);
     if (msg.type === "fatal") return Boot.fatal(msg.error);
@@ -193,7 +215,7 @@ const Bridge = {
   },
 };
 
-const Store = { info: null, build: null, catalog: null, examples: [], llm: null };
+const Store = { info: null, build: null, catalog: null, examples: [], llm: null, commands: [] };
 const llmOn = () => !!(Store.llm && Store.llm.llm && Store.llm.llm.available);
 const visionOn = () => !!(Store.llm && Store.llm.vision && Store.llm.vision.provider !== "none");
 
@@ -215,8 +237,9 @@ const Boot = {
     this.step("ready");
     $("#side-version").textContent = `v${info.version}`;
     try {
-      [Store.catalog, Store.examples] = await Promise.all([Bridge.call("catalog"), Bridge.call("examples")]);
+      [Store.catalog, Store.examples, Store.commands] = await Promise.all([Bridge.call("catalog"), Bridge.call("examples"), Bridge.call("agent_commands")]);
       await Settings.restore();
+      await AgentCfg.apply();
     } catch (err) { toast(`初始化失败：${err.message}`, true); }
     Cases.load();
     render();
@@ -776,14 +799,31 @@ const TOOL_LABEL = {
   check_organ_function: "器官功能核对", cns_assessment: "脑转移分层", later_line_options: "后线序贯", protocol_sections: "临床路径章节",
   guideline_search: "指南知识库", prognosis: "预后（人群）", interaction_check: "药物相互作用", rule_review: "规则引擎复核",
   governed_reference: "受治理流水线参考", read_attachment: "读片 / 读报告", citation_verify: "引用核验", pubmed_search: "PubMed 检索",
-  submit_consult: "提交结论",
+  update_plan: "更新会诊计划", delegate: "专科会诊", remember: "提议写入记忆", submit_consult: "提交结论", submit_report: "提交专科意见",
 };
 const TOOL_ICON = { stage_tnm: "staging", guideline_search: "kg", rule_review: "lab", governed_reference: "lab", screen_emergency: "siren",
-  record_case_facts: "pen", read_attachment: "image", search_trials: "doc", search_regimens: "consult", regimen_dosing: "consult" };
+  record_case_facts: "pen", read_attachment: "image", search_trials: "doc", search_regimens: "consult", regimen_dosing: "consult",
+  update_plan: "plan", delegate: "users", remember: "memory" };
+const AGENT_TITLE = { radiology: "影像科医师", pathology: "病理与分子病理科医师", thoracic_surgery: "胸外科医师", radiation_oncology: "放疗科医师",
+  medical_oncology: "肿瘤内科医师", pharmacy: "临床药师", evidence: "循证医学研究员" };
+const HOOK_TITLE = { emergency_screen: "急症筛查", fact_seed: "病例笔记预填", evidence_ledger: "证据台账", rule_review: "规则引擎",
+  stage_consistency: "分期一致性", citation_provenance: "引用溯源", dose_provenance: "剂量溯源", emergency_addressed: "急症优先" };
+const CONF = { high: ["ok", "把握度 高"], moderate: ["", "把握度 中"], low: ["warn", "把握度 低"] };
+function agentTitle(name) {
+  const a = AgentCfg.catalog && (AgentCfg.catalog.agents || []).find((x) => x.name === name);
+  return (a && a.title) || AGENT_TITLE[name] || name || "专科";
+}
+function toolLabel(name) {
+  if (TOOL_LABEL[name]) return TOOL_LABEL[name];
+  const parts = String(name || "").split("__");
+  return parts[0] === "mcp" && parts.length >= 3 ? `${parts[1]} · ${parts.slice(2).join("__")}` : name;
+}
 function argSummary(name, a) {
   a = a || {};
   if (name === "stage_tnm") return [a.prefix || "c", a.t, a.n, a.m].filter(Boolean).join(" ");
   if (name === "record_case_facts") return Object.keys(a.facts || {}).join("、");
+  if (name === "update_plan") return `${(a.items || []).length} 步`;
+  if (name === "remember") return "";
   if (a.regimen_ids) return [].concat(a.regimen_ids).join(", ");
   if (a.regimen_id) return a.regimen_id;
   if (a.query || a.stage || a.gene) return [a.query, a.stage, a.gene].filter(Boolean).join(" · ");
@@ -792,6 +832,55 @@ function argSummary(name, a) {
   if (a.kind) return a.kind;
   const s = JSON.stringify(a);
   return s === "{}" ? "" : s.slice(0, 80);
+}
+
+const PLAN_MARK = { pending: "", in_progress: "", completed: "✓", cancelled: "✕" };
+function planList(items, compact) {
+  const list = items || [];
+  const done = list.filter((i) => i.status === "completed").length;
+  const pct = list.length ? Math.round((done * 100) / list.length) : 0;
+  return h("div", { class: "plan" + (compact ? " compact" : "") },
+    h("div", { class: "plan-head" }, icon("plan"), h("span", null, "会诊计划"), h("span", { class: "plan-count" }, `${done}/${list.length}`),
+      h("span", { class: "plan-bar" }, h("i", { style: { width: `${pct}%` } }))),
+    h("ol", null, list.map((i) => h("li", { class: `p-${i.status}` }, h("span", { class: "pm" }, PLAN_MARK[i.status] || ""), h("span", { class: "pc" }, i.content)))));
+}
+function contextMeter(ctx) {
+  const pct = Math.min(100, Math.max(1, Math.round((ctx.ratio || 0) * 100)));
+  const hot = (ctx.ratio || 0) > (ctx.compact_at || 0.75) * 0.85;
+  return h("div", { class: "meter-wrap" }, h("div", { class: "meter" + (hot ? " warn" : "") }, h("i", { style: { width: `${pct}%` } })),
+    h("span", { class: "muted small" }, `${pct}% · 约 ${ctx.tokens} tokens${ctx.compactions ? ` · 已压缩 ${ctx.compactions} 次` : ""}`));
+}
+function memoryButton(note) {
+  const saved = () => (AgentCfg.cfg.instructions || "").includes(note);
+  const b = h("button", { class: "btn sm", type: "button", disabled: saved() || null }, icon(saved() ? "check" : "memory"), saved() ? "已在记忆中" : "保存到记忆");
+  b.addEventListener("click", async () => {
+    try { await AgentCfg.remember(note); b.disabled = true; append(clear(b), [icon("check"), "已保存"]); toast("已写入记忆：之后的会诊都会遵循"); }
+    catch (err) { toast(err.message, true); }
+  });
+  return b;
+}
+function specList(label, list) {
+  return (list || []).length ? h("div", null, h("div", { class: "lbl" }, label), h("ul", null, list.map((x) => h("li", null, x)))) : null;
+}
+function specialistStep(step, live) {
+  const a = step.args || {};
+  const r = step.report || {};
+  const pending = step.ok === undefined;
+  const kids = step.children || [];
+  const conf = CONF[r.confidence];
+  const kidTools = kids.filter((s) => s.kind === "tool").length;
+  const sub = h("div", { class: "timeline sub" }, kids.map((s) => stepItem(s, live)));
+  return h("div", { class: "step s-agent" + (pending ? " s-pending" : step.ok ? "" : " s-fail") },
+    h("span", { class: "si" }, pending ? h("span", { class: "spinner" }) : icon("users")),
+    h("div", { class: "sb" },
+      h("div", { class: "sl" }, step.title || agentTitle(a.agent), h("span", { class: "chip agent" }, "专科子智能体"),
+        conf ? h("span", { class: `chip ${conf[0]}` }, conf[1]) : null,
+        step.ms !== undefined ? h("span", { class: "ms" }, `${(step.ms / 1000).toFixed(1)} s`) : null),
+      a.task ? h("div", { class: "task" }, a.task) : null,
+      r.report ? h("div", { class: "st" }, r.report) : pending ? null : h("div", { class: "st" }, step.summary || ""),
+      (r.key_points || []).length || (r.recommendations || []).length || (r.concerns || []).length
+        ? h("div", { class: "spec-grid" }, specList("要点", r.key_points), specList("建议", r.recommendations), specList("顾虑", r.concerns)) : null,
+      kids.length ? (live && pending ? sub : h("details", { class: "subtrace" }, h("summary", null, `专科推理 · ${kidTools} 次工具调用`), sub)) : null));
 }
 function stepItem(step, live) {
   if (step.kind === "thinking") {
@@ -802,22 +891,36 @@ function stepItem(step, live) {
   if (step.kind === "message") {
     return h("div", { class: "step s-note" }, h("span", { class: "si" }, icon("chat")), h("div", { class: "sb" }, h("div", { class: "st" }, step.text)));
   }
+  if (step.kind === "hook") {
+    return h("div", { class: "step s-hook" }, h("span", { class: "si" }, icon("lab")),
+      h("div", { class: "sb" }, h("div", { class: "sl" }, `Hook · ${step.title || HOOK_TITLE[step.name] || step.name}`), h("div", { class: "st" }, String(step.text || "").replace(/^【[^】]*】/, ""))));
+  }
+  if (step.kind === "tool" && step.name === "delegate") return specialistStep(step, live);
+  if (step.kind === "tool" && step.name === "remember") {
+    const note = step.memory || (step.args || {}).note || "";
+    return h("div", { class: "step s-memory" }, h("span", { class: "si" }, icon("memory")),
+      h("div", { class: "sb" }, h("div", { class: "sl" }, "提议写入记忆", h("span", { class: "sa" }, (step.args || {}).scope || "")), h("div", { class: "st" }, note),
+        !live && note ? h("div", { style: { marginTop: "6px" } }, memoryButton(note)) : null));
+  }
   if (step.kind === "tool") {
     const pending = step.ok === undefined;
-    return h("div", { class: "step s-tool" + (pending ? " s-pending" : step.ok ? "" : " s-fail") },
-      h("span", { class: "si" }, pending ? h("span", { class: "spinner" }) : icon(TOOL_ICON[step.name] || "settings")),
+    return h("div", { class: "step s-tool" + (pending ? " s-pending" : step.ok ? "" : " s-fail") + (String(step.name).startsWith("mcp__") ? " s-mcp" : "") },
+      h("span", { class: "si" }, pending ? h("span", { class: "spinner" }) : icon(TOOL_ICON[step.name] || (String(step.name).startsWith("mcp__") ? "kg" : "settings"))),
       h("div", { class: "sb" },
-        h("div", { class: "sl" }, TOOL_LABEL[step.name] || step.name, h("span", { class: "sa" }, argSummary(step.name, step.args)), step.ms !== undefined ? h("span", { class: "ms" }, `${step.ms} ms`) : null),
+        h("div", { class: "sl" }, toolLabel(step.name), h("span", { class: "sa" }, argSummary(step.name, step.args)), step.ms !== undefined ? h("span", { class: "ms" }, `${step.ms} ms`) : null),
         pending ? null : h("div", { class: "st" }, step.summary || "")));
   }
   if (step.kind === "review" || step.kind === "submit") {
     const n = step.findings && step.findings.length !== undefined ? step.findings.length : step.findings;
     return h("div", { class: "step s-review" }, h("span", { class: "si" }, icon("lab")),
-      h("div", { class: "sb" }, h("div", { class: "sl" }, step.kind === "submit" ? "提交结论 · 规则引擎复核" : "规则引擎复核"),
-        h("div", { class: "st" }, n ? `${n} 条参考意见${step.unanswered ? `，${step.unanswered} 条交回模型判断` : ""}` : "无规则意见")));
+      h("div", { class: "sb" }, h("div", { class: "sl" }, step.kind === "submit" ? "提交结论 · Hooks 复核" : "Hooks 复核"),
+        h("div", { class: "st" }, n ? `${n} 条参考意见${step.unanswered ? `，${step.unanswered} 条交回模型判断` : ""}` : "无复核意见")));
   }
   if (step.kind === "alert") {
     return h("div", { class: "step s-alert" }, h("span", { class: "si" }, icon("siren")), h("div", { class: "sb" }, h("div", { class: "sl" }, "急症筛查命中"), h("div", { class: "st" }, (step.emergency.signals || []).join("、"))));
+  }
+  if (step.kind === "compact" || step.kind === "info") {
+    return h("div", { class: "step s-note" }, h("span", { class: "si" }, icon("info")), h("div", { class: "sb" }, h("div", { class: "st muted" }, step.text)));
   }
   if (step.kind === "error" || step.kind === "limit") {
     return h("div", { class: "step s-fail" }, h("span", { class: "si" }, icon("alert")), h("div", { class: "sb" }, h("div", { class: "st" }, step.text || step.message)));
@@ -825,24 +928,27 @@ function stepItem(step, live) {
   return null;
 }
 function traceBlock(steps, live) {
-  const tools = steps.filter((s) => s.kind === "tool").length;
+  const tools = steps.filter((s) => s.kind === "tool" && s.name !== "update_plan").length;
+  const specialists = steps.filter((s) => s.kind === "tool" && s.name === "delegate").length;
   const thoughts = steps.filter((s) => s.kind === "thinking").length;
   const body = h("div", { class: "timeline" }, steps.map((s) => stepItem(s, live)));
   if (live) return h("div", { class: "trace live" }, body);
-  return h("details", { class: "trace" }, h("summary", null, icon("sparkle"), `推理与工具调用 · ${tools} 次工具调用${thoughts ? ` · ${thoughts} 段思考` : ""}`), body);
+  return h("details", { class: "trace" }, h("summary", null, icon("sparkle"),
+    `推理与工具调用 · ${tools} 次工具调用${specialists ? ` · ${specialists} 位专科会诊` : ""}${thoughts ? ` · ${thoughts} 段思考` : ""}`), body);
 }
 const DECISION = { accepted: ["ok", "已采纳"], overridden: ["warn", "保留方案 · 已说明理由"] };
 function reviewPanel(review) {
   const findings = (review && review.findings) || [];
-  if (!findings.length) return h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "规则引擎复核"), h("div", { class: "metrics" }, h("span", { class: "metric ok" }, icon("lab"), "无规则意见 · 20 条规则已核对")));
+  if (!findings.length) return h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "Hooks 复核"), h("div", { class: "metrics" }, h("span", { class: "metric ok" }, icon("lab"), "无复核意见 · 规则引擎、分期一致性、引用与剂量溯源已核对")));
   const answers = Object.fromEntries((review.responses || []).filter((r) => r && r.rule_id).map((r) => [r.rule_id, r]));
   return h("div", { class: "rx-sec" },
-    h("div", { class: "lbl" }, "规则引擎复核", h("span", { class: "chip" }, "参考意见 · 非硬约束")),
+    h("div", { class: "lbl" }, "Hooks 复核", h("span", { class: "chip" }, "参考意见 · 非硬约束")),
     findings.map((f) => {
       const a = answers[f.rule_id];
       const d = a ? DECISION[a.decision] || ["", a.decision] : ["", "模型未回应"];
       return h("div", { class: "finding" },
-        h("div", { class: "fh" }, h("span", { class: `sev ${f.severity}` }, f.severity === "block" ? "高" : "提示"), h("span", { class: "rule" }, f.rule_id), h("span", { class: `chip ${d[0]}` }, d[1])),
+        h("div", { class: "fh" }, h("span", { class: `sev ${f.severity}` }, f.severity === "block" ? "高" : "提示"), h("span", { class: "rule" }, f.rule_id),
+          f.hook ? h("span", { class: "muted small" }, HOOK_TITLE[f.hook] || f.hook) : null, h("span", { class: `chip ${d[0]}` }, d[1])),
         h("div", { class: "msg" }, f.message),
         a && a.reason ? h("div", { class: "why" }, h("b", null, "模型理由："), a.reason) : null);
     }));
@@ -854,8 +960,9 @@ function agentCard(p, m) {
   const status = p.error ? "agent_error" : p.emergency ? "agent_emergency" : "agent_done";
   const meta = statusMeta(status);
   const rx = h("div", { class: "rx agent" });
-  const conf = { high: ["ok", "把握度 高"], moderate: ["", "把握度 中"], low: ["warn", "把握度 低"] }[k.confidence];
-  const tools = (p.steps || []).filter((s) => s.kind === "tool").length;
+  const conf = CONF[k.confidence];
+  const tools = (p.steps || []).filter((s) => s.kind === "tool" && s.name !== "update_plan").length;
+  const ctx = p.context || {};
   rx.appendChild(h("div", { class: "rx-top" },
     h("div", { class: "rx-stage" }, h("div", { class: "lbl" }, "分期"), h("div", { class: "big" }, stage || "—"),
       h("div", { class: "tnm" }, k.tnm || engine.tnm || ""),
@@ -867,7 +974,8 @@ function agentCard(p, m) {
         conf ? h("span", { class: `chip ${conf[0]}` }, conf[1]) : null),
       k.assessment ? h("div", { class: "d" }, k.assessment) : h("div", { class: "d" }, meta[2]),
       h("div", { class: "metrics" }, h("span", { class: "metric" }, icon("sparkle"), `${p.model || "模型"} · ${p.llm_calls} 次推理`),
-        h("span", { class: "metric" }, `${tools} 次工具调用`), m.ms ? h("span", { class: "metric" }, `${(m.ms / 1000).toFixed(1)} s`) : null))));
+        h("span", { class: "metric" }, `${tools} 次工具调用`), m.ms ? h("span", { class: "metric" }, `${(m.ms / 1000).toFixed(1)} s`) : null,
+        ctx.ratio !== undefined ? h("span", { class: "metric", title: `约 ${ctx.tokens} / ${ctx.window} tokens` }, `上下文 ${Math.max(1, Math.round(ctx.ratio * 100))}%`) : null))));
   if (p.emergency) {
     rx.appendChild(h("div", { class: "rx-sec emergency" }, h("div", { class: "lbl" }, "急症筛查（标准处置路径，供参考）"),
       fmtList((p.emergency.pathway || {}).immediate_actions || p.emergency.signals)));
@@ -880,6 +988,21 @@ function agentCard(p, m) {
           o.rationale ? h("div", { class: "why" }, o.rationale) : null,
           (o.regimen_ids || []).length || (o.evidence || []).length ? h("div", { class: "chips" },
             (o.regimen_ids || []).map(regimenChip), (o.evidence || []).map((e) => (Store.catalog && Store.catalog.trials[e] ? trialChip(e) : h("span", { class: "chip" }, e)))) : null)))));
+  }
+  const specialists = (p.steps || []).filter((s) => s.kind === "tool" && s.name === "delegate" && s.ok);
+  if (specialists.length) {
+    rx.appendChild(h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, `多学科会诊 · ${specialists.length} 位专科子智能体`),
+      h("div", { class: "spec-cards" }, specialists.map((s) => {
+        const r = s.report || {};
+        const c2 = CONF[r.confidence];
+        return h("div", { class: "spec-card" }, h("div", { class: "sc-h" }, icon("users"), h("b", null, s.title || agentTitle((s.args || {}).agent)), c2 ? h("span", { class: `chip ${c2[0]}` }, c2[1]) : null),
+          h("div", { class: "sc-b" }, (r.key_points || [])[0] || r.report || s.summary || ""));
+      }))));
+  }
+  const memory = p.memory || [];
+  if (memory.length) {
+    rx.appendChild(h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "智能体提议记住", h("span", { class: "chip" }, "由您决定是否保存")),
+      memory.map((n) => h("div", { class: "mem-row" }, icon("memory"), h("span", null, n), memoryButton(n)))));
   }
   const workup = k.workup || [];
   const warnings = k.warnings || [];
@@ -901,7 +1024,12 @@ function openAgentReport(m) {
         if (item && s.kind === "tool" && s.args && Object.keys(s.args).length) item.querySelector(".sb").appendChild(h("details", null, h("summary", { class: "muted small" }, "参数"), jsonBlock(s.args)));
         return item;
       })) },
-      { id: "review", label: "规则复核", count: ((p.review || {}).findings || []).length, render: () => h("div", { class: "rx" }, reviewPanel(p.review)) },
+      { id: "plan", label: "会诊计划", count: (p.plan || []).length, render: () => ((p.plan || []).length ? planList(p.plan) : empty("本轮没有会诊计划", "plan")) },
+      { id: "mdt", label: "专科意见", count: (p.steps || []).filter((s) => s.name === "delegate").length, render: () => {
+        const list = (p.steps || []).filter((s) => s.kind === "tool" && s.name === "delegate");
+        return list.length ? h("div", { class: "timeline full" }, list.map((s) => specialistStep(s, false))) : empty("本轮没有请专科会诊（可输入 /mdt）", "users");
+      } },
+      { id: "review", label: "Hooks 复核", count: ((p.review || {}).findings || []).length, render: () => h("div", { class: "rx" }, reviewPanel(p.review)) },
       { id: "facts", label: "病例笔记", render: () => h("div", { class: "stack" }, h("div", { class: "facts" }, factRows(p.facts || {}).map(([a, b]) => [h("div", { class: "k" }, a), h("div", { class: "v" }, b)])),
         p.engine_stage ? h("div", { class: "muted small" }, `分期引擎：${p.engine_stage.staged ? `${p.engine_stage.tnm} → ${p.engine_stage.stage_group}` : p.engine_stage.refusal}`) : null) },
       { id: "consult", label: "结构化结论", render: () => jsonBlock(k) },
@@ -1106,33 +1234,56 @@ const Workspace = {
   text: "", whatif: false, panel: false, busy: false,
   pending: { images: [], reports: [] },
   dossier: LS.get("nsclc.ui.dossier", true),
-  ta: null, live: null, liveEl: null, thread: null,
+  ta: null, live: null, liveEl: null, thread: null, stopping: false, palList: [], palIdx: 0, starts: [],
 
-  /* Live agent progress (worker events arrive while the turn runs). */
+  /* Live agent progress (worker events arrive while the turn runs). Events
+     from a specialist sub-agent nest under the lead's delegate step. */
   onEvent(ev) {
-    if (!this.live) return;
-    const steps = this.live.steps;
-    if (ev.type === "llm_call") this.live.step = ev.step;
-    else if (ev.type === "thinking") steps.push({ kind: "thinking", text: ev.text });
+    const L = this.live;
+    if (!L) return;
+    if (ev.type === "plan") { L.plan = ev.items; this.paintLive(); return; }
+    if (ev.type === "usage" || ev.type === "turn_start" || ev.type === "turn_end") return;
+    let steps = L.steps;
+    if (ev.agent && ev.agent !== "lead") {
+      const host = [...L.steps].reverse().find((x) => x.kind === "tool" && x.name === "delegate" && (x.args || {}).agent === ev.agent && x.ok === undefined);
+      if (!host) return;
+      host.children = host.children || [];
+      steps = host.children;
+      if (ev.type === "subagent_start") { host.title = ev.title; this.paintLive(); return; }
+      if (ev.type === "subagent_end") return;
+      if (ev.type === "llm_call") { L.calls += 1; this.paintLive(); return; }
+    } else if (ev.type === "llm_call") { L.step = ev.step; L.calls += 1; }
+    if (ev.type === "thinking") steps.push({ kind: "thinking", text: ev.text });
     else if (ev.type === "message") steps.push({ kind: "message", text: ev.text });
-    else if (ev.type === "tool_call") steps.push({ kind: "tool", name: ev.name, args: ev.args });
+    else if (ev.type === "tool_call") steps.push({ kind: "tool", id: ev.id, name: ev.name, args: ev.args });
     else if (ev.type === "tool_result") {
-      const s = [...steps].reverse().find((x) => x.kind === "tool" && x.name === ev.name && x.ok === undefined);
-      if (s) Object.assign(s, { ok: ev.ok, summary: ev.summary, ms: ev.ms });
+      const s = steps.find((x) => x.kind === "tool" && x.id && x.id === ev.id)
+        || [...steps].reverse().find((x) => x.kind === "tool" && x.name === ev.name && x.ok === undefined);
+      if (s) Object.assign(s, ev, { kind: "tool" });
+      if (ev.plan) L.plan = ev.plan;
     } else if (ev.type === "review") steps.push({ kind: "review", findings: ev.findings, unanswered: ev.unanswered });
+    else if (ev.type === "hook") steps.push({ kind: "hook", name: ev.name, title: ev.title, text: ev.text });
     else if (ev.type === "alert") steps.push({ kind: "alert", emergency: ev.emergency });
+    else if (ev.type === "compact_start") steps.push({ kind: "info", text: `正在压缩 ${ev.turns} 轮早期会诊…` });
+    else if (ev.type === "compact") steps.push({ kind: "info", text: `上下文已压缩（${ev.by_model ? "模型撰写摘要" : "确定性摘要"}）：${ev.before} → ${ev.after} tokens` });
+    else if (ev.type === "mcp") for (const sv of ev.servers || []) steps.push(sv.ok ? { kind: "info", text: `MCP ${sv.name}：已连接，${(sv.tools || []).length} 个工具` } : { kind: "error", message: `MCP ${sv.name} 连接失败：${sv.error}` });
     else if (ev.type === "error") steps.push({ kind: "error", message: ev.message });
+    else return;
     this.paintLive();
   },
   paintLive() {
     const el = this.liveEl; if (!el || !this.live) return;
+    const L = this.live;
     const thread = this.thread;
     const nearBottom = thread && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 160;
     clear(el);
-    const tools = this.live.steps.filter((x) => x.kind === "tool").length;
+    const tools = L.steps.filter((x) => x.kind === "tool" && x.name !== "update_plan").length;
+    const specialists = L.steps.filter((x) => x.kind === "tool" && x.name === "delegate").length;
     el.appendChild(h("div", { class: "thinking" }, h("span", { class: "dots" }, h("i"), h("i"), h("i")),
-      h("span", { class: "shimmer" }, `模型主导会诊中 · 第 ${this.live.step || 1} 步推理${tools ? ` · 已调用 ${tools} 个工具` : ""}…`)));
-    if (this.live.steps.length) el.appendChild(traceBlock(this.live.steps, true));
+      h("span", { class: "shimmer" }, `模型主导会诊中 · 第 ${L.step || 1} 步${tools ? ` · ${tools} 次工具调用` : ""}${specialists ? ` · ${specialists} 位专科会诊` : ""}${L.calls > 1 ? ` · ${L.calls} 次模型调用` : ""}…`),
+      h("span", { class: "muted small hide-narrow", style: { marginLeft: "auto" } }, "Esc 停止")));
+    if (L.plan && L.plan.length) el.appendChild(planList(L.plan, true));
+    if (L.steps.length) el.appendChild(traceBlock(L.steps, true));
     if (nearBottom) thread.scrollTop = thread.scrollHeight;
   },
 
@@ -1150,6 +1301,7 @@ const Workspace = {
     const composer = this.composer(c);
     if (!hasTurns) inner.appendChild(this.welcome(composer));
     else {
+      this.starts = c.mode === "agent" && !this.busy ? this.turnStarts(c) : [];
       c.messages.forEach((m, i) => inner.appendChild(this.turn(m, c, i)));
       this.liveEl = null;
       if (this.busy && c.mode === "agent" && this.live) {
@@ -1216,12 +1368,13 @@ const Workspace = {
       h("div", { class: "welcome" }, logoMark(),
         h("h1", null, "今天会诊哪位患者？"),
         h("p", null, agent
-          ? `由 ${model} 主导会诊：自主思考、规划并调用分期引擎、试验库、方案库、指南知识库等 20 个临床工具；规则引擎的复核意见只作参考，由模型逐条判断。`
+          ? `由 ${model} 主导会诊：自主规划，调用分期引擎、试验库、方案库、指南知识库等 20 个临床工具，并可并行邀请 7 位专科子智能体（MDT）；Hooks 的安全复核只作参考，由模型逐条判断。输入 / 查看命令。`
           : "描述病例、补充检查结果或上传报告。NSCLC-Agent 完成确定性分期、循证方案与安全终审 —— 未通过终审的方案不会放行。"),
         h("div", { class: "trust" },
           agent ? h("span", null, icon("sparkle"), `模型主导 · ${Store.llm.llm.model}`) : h("span", null, icon("cpu"), "浏览器内运行"),
           llmOn() ? h("span", null, icon("lock"), `数据直连 ${Store.llm.llm.provider}，不经第三方服务器`) : h("span", null, icon("lock"), "病例不离开本机"),
-          agent ? h("span", null, icon("lab"), "规则复核 · 非硬约束") : h("span", null, icon("lab"), `${(Store.info && Store.info.counts.rules) || 20} 条安全规则终审`),
+          agent ? h("span", null, icon("users"), "专科子智能体 · 并行会诊") : null,
+          agent ? h("span", null, icon("lab"), "Hooks 复核 · 非硬约束") : h("span", null, icon("lab"), `${(Store.info && Store.info.counts.rules) || 20} 条安全规则终审`),
           h("span", null, icon("staging"), "AJCC/UICC 第 9 版分期"))),
       llmOn() ? null : h("div", { class: "callout" }, icon("sparkle"), h("div", null, "当前为确定性模式。在左下角「模型」中接入 Poe 或 MiniMax 后，会诊将由模型主导：自主推理、调用工具，规则仅作参考。")),
       composer,
@@ -1236,15 +1389,44 @@ const Workspace = {
   },
 
   composer(c) {
-    const ta = h("textarea", { rows: 1, "aria-label": "会诊输入", placeholder: this.whatif ? "描述假设变化，例如：如果 PD-L1 为 10% 会怎样？" : "描述病例或补充信息…  例：65岁男性，肺腺癌 cT2aN1M0，EGFR 阴性，PD-L1 60%，脑MRI阴性" });
+    const agentMode = c.mode === "agent";
+    const ph = this.whatif ? "描述假设变化，例如：如果 PD-L1 为 10% 会怎样？"
+      : agentMode ? "描述病例或补充信息；输入 / 使用命令（/mdt 多学科会诊 · /plan · /review · /rewind …）"
+        : "描述病例或补充信息…  例：65岁男性，肺腺癌 cT2aN1M0，EGFR 阴性，PD-L1 60%，脑MRI阴性";
+    const ta = h("textarea", { rows: 1, "aria-label": "会诊输入", placeholder: Bridge.ready ? ph : "运行时重启中…" });
     ta.value = this.text;
-    const sendBtn = h("button", { class: "send", type: "button", title: "发送（Enter；Shift+Enter 换行）", "aria-label": "发送", disabled: !this.canSend() || null, onclick: () => this.send() }, icon("send"));
+    const stopMode = this.busy && agentMode;
+    const sendBtn = stopMode
+      ? h("button", { class: "send stop", type: "button", title: "停止本轮（Esc）", "aria-label": "停止", disabled: this.stopping || null, onclick: () => this.stop() }, this.stopping ? h("span", { class: "spinner" }) : icon("stop"))
+      : h("button", { class: "send", type: "button", title: "发送（Enter；Shift+Enter 换行）", "aria-label": "发送", disabled: !this.canSend() || null, onclick: () => this.send() }, icon("send"));
     const grow = () => { ta.style.height = "auto"; ta.style.height = `${Math.min(ta.scrollHeight, 220)}px`; };
-    ta.addEventListener("input", () => { this.text = ta.value; grow(); sendBtn.disabled = !this.canSend(); });
+    /* Slash-command palette (agent mode). */
+    const pal = h("div", { class: "palette", role: "listbox", "aria-label": "命令" });
+    pal.hidden = true;
+    const choose = (x) => { ta.value = `/${x.name}${x.args ? " " : ""}`; this.text = ta.value; paintPal(); if (!stopMode) sendBtn.disabled = !this.canSend(); ta.focus(); };
+    const paintPal = () => {
+      const v = ta.value;
+      const list = agentMode && /^\/\S*$/.test(v) ? (Store.commands || []).filter((x) => x.name.startsWith(v.slice(1).toLowerCase())) : [];
+      this.palList = list;
+      if (!(this.palIdx < list.length)) this.palIdx = 0;
+      clear(pal);
+      pal.hidden = !list.length;
+      list.forEach((x, i) => pal.appendChild(h("div", { class: "cmd" + (i === this.palIdx ? " on" : ""), role: "option", "aria-selected": i === this.palIdx ? "true" : "false", onmousedown: (e) => { e.preventDefault(); choose(x); } },
+        h("span", { class: "cn" }, `/${x.name}`), x.args ? h("span", { class: "ca" }, x.args) : null, h("span", { class: "cd" }, x.description),
+        h("span", { class: `ck ${x.kind}` }, x.kind === "prompt" ? "交给智能体" : "本地"))));
+    };
+    ta.addEventListener("input", () => { this.text = ta.value; grow(); paintPal(); if (!stopMode) sendBtn.disabled = !this.canSend(); });
     ta.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && stopMode) { e.preventDefault(); this.stop(); return; }
+      const list = pal.hidden ? [] : this.palList || [];
+      if (list.length) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); this.palIdx = (this.palIdx + (e.key === "ArrowDown" ? 1 : list.length - 1)) % list.length; paintPal(); return; }
+        if (e.key === "Escape") { e.preventDefault(); pal.hidden = true; return; }
+        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.isComposing && ta.value !== `/${list[this.palIdx].name}`)) { e.preventDefault(); choose(list[this.palIdx]); return; }
+      }
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); this.send(); }
     });
-    requestAnimationFrame(grow);
+    requestAnimationFrame(() => { grow(); paintPal(); });
     const hasBaseline = !!lastResult(c);
     const attach = h("div", { class: "attach-list" });
     for (const kind of ["images", "reports"]) this.pending[kind].forEach((f, i) => attach.appendChild(h("span", { class: "chip" }, icon(kind === "images" ? "image" : "doc"), f.name,
@@ -1257,24 +1439,26 @@ const Workspace = {
     };
     const tool = (ic, label, title, onclick, on, disabled) => h("button", { class: "tool" + (on ? " on" : ""), type: "button", title, "aria-label": label, "aria-pressed": on ? "true" : null, disabled: disabled || null, onclick }, icon(ic), h("span", { class: "lbl" }, label));
     this.ta = ta;
-    return h("div", { class: "composer" + (this.whatif ? " whatif" : "") },
+    return h("div", { class: "composer-wrap" }, pal, h("div", { class: "composer" + (this.whatif ? " whatif" : "") },
       attach.childNodes.length ? attach : null,
       ta,
       h("div", { class: "composer-tools" },
-        tool("form", "结构化录入", "用表单录入 TNM、驱动基因、器官功能、治疗史", () => openCaseForm(c)),
+        tool("form", "结构化录入", "用表单录入 TNM、驱动基因、器官功能、治疗史", () => openCaseForm(c), false, this.busy),
         tool("image", "影像", "上传 CT/MRI 影像（需视觉模型）", () => pick("images")),
         tool("doc", "报告", "上传病理/NGS/影像报告图片（需视觉模型）", () => pick("reports")),
-        c.mode === "agent"
-          ? tool("branch", "假设推演", "让模型在不改变病例笔记的前提下推演一个假设", () => this.insert("【假设推演 · 不改变病例笔记】如果 "), false, !hasBaseline)
+        agentMode
+          ? tool("users", "MDT", "召集多学科会诊：主诊智能体并行邀请专科子智能体评估，再综合（/mdt）", () => { this.text = `/mdt ${this.text.trim()}`.trim(); this.send(); }, false, this.busy || (!this.text.trim() && !hasBaseline))
+          : tool("users", "MDT 面板", llmOn() ? "召集多学科会诊面板" : "需在「模型接入」中接入模型", () => { this.panel = !this.panel; render(); }, this.panel && llmOn(), !llmOn()),
+        agentMode
+          ? tool("branch", "假设推演", "让模型在不改变病例笔记的前提下推演一个假设（/whatif）", () => this.insert("/whatif "), false, !hasBaseline || this.busy)
           : tool("branch", "假设推演", hasBaseline ? "what-if：在当前病例上推演一个假设变化，不写入病例" : "需要先有一轮会诊结果", () => { this.whatif = !this.whatif; render(); }, this.whatif, !hasBaseline),
-        c.mode === "agent" ? null : tool("users", "MDT 面板", llmOn() ? "召集多学科会诊面板" : "需在「模型接入」中接入模型", () => { this.panel = !this.panel; render(); }, this.panel && llmOn(), !llmOn()),
-        sendBtn));
+        sendBtn)));
   },
 
-  canSend() { return !this.busy && !!(this.text.trim() || this.pending.images.length || this.pending.reports.length); },
+  canSend() { return Bridge.ready && !this.busy && !!(this.text.trim() || this.pending.images.length || this.pending.reports.length); },
 
   async send(opts) {
-    if (this.busy) return;
+    if (this.busy || !Bridge.ready) return;
     const c = Cases.current();
     const fromComposer = !opts;
     const text = (fromComposer ? this.text : opts.text || "").trim();
@@ -1285,24 +1469,33 @@ const Workspace = {
     if (!c.messages.length) c.mode = defaultMode();
     const agent = c.mode === "agent";
     if (agent && !llmOn()) { toast("这是模型主导的会诊：请先在「模型接入」中接入模型，或新建一个受治理会诊。", true); return; }
+    let prompt = text;
+    let command = null;
+    if (agent && text.startsWith("/")) {
+      let ex;
+      try { ex = await this.command(c, text); } catch (err) { toast(err.message, true); return; }
+      if (!ex) return;
+      prompt = ex.prompt; command = ex.command;
+    }
     const whatif = !agent && fromComposer && this.whatif && !!lastResult(c);
     Cases.commit(c);
-    c.messages.push({ id: uid(), role: "user", ts: Date.now(), text: text || "（附件）", whatif, facts, attachments: [...uploads.images, ...uploads.reports].map((f) => f.name) });
+    const userMsg = { id: uid(), role: "user", ts: Date.now(), text: text || "（附件）", command, whatif, facts, attachments: [...uploads.images, ...uploads.reports].map((f) => f.name) };
+    c.messages.push(userMsg);
     if (fromComposer) { this.text = ""; this.pending = { images: [], reports: [] }; }
     this.busy = true;
-    this.live = agent ? { steps: [], step: 1 } : null;
+    this.live = agent ? { steps: [], step: 1, calls: 0, plan: null } : null;
     Cases.touch(c); Cases.save(); render();
     try {
       await Session.bind(c);
       if (agent) {
-        const out = await Bridge.timed("agent_turn", { message: text, facts }, uploads);
+        const out = await Bridge.timed("agent_turn", { message: prompt, facts }, uploads);
         const r = out.result;
         c.messages.push({ id: uid(), role: "agent", ts: Date.now(), whatif: false, ms: out.ms, payload: r });
         const k = r.consult || {};
         c.status = r.error ? "agent_error" : r.emergency ? "agent_emergency" : "agent_done";
         c.stage = k.stage_group || (r.engine_stage && r.engine_stage.stage_group) || c.stage;
         const f = r.facts || {};
-        c.title = [c.stage, keyDriver(f) || (f.histologic_category ? HIST[f.histologic_category] : "")].filter(Boolean).join(" · ") || c.title || text.slice(0, 18);
+        c.title = [c.stage, keyDriver(f) || (f.histologic_category ? HIST[f.histologic_category] : "")].filter(Boolean).join(" · ") || c.title || (command ? `/${command}` : text.slice(0, 18));
         c.session = await Bridge.call("agent_export");
         return;
       }
@@ -1322,12 +1515,96 @@ const Workspace = {
       }
       c.session = await Bridge.call("chat_export");
     } catch (err) {
-      c.messages.push({ id: uid(), role: "error", ts: Date.now(), text: err.message });
+      if (err.message === STOPPED) {
+        /* The worker was restarted: the case resumes from its last saved turn. */
+        userMsg.stopped = true;
+        c.messages.push({ id: uid(), role: "note", ts: Date.now(), text: "已停止本轮。本轮未计入会诊记忆，会诊已恢复到上一轮结束时的状态；原输入已放回输入框。" });
+        if (!this.text.trim()) this.text = text;
+      } else c.messages.push({ id: uid(), role: "error", ts: Date.now(), text: err.message });
       Session.invalidate();
     } finally {
       this.busy = false; this.live = null;
       Cases.touch(c); Cases.save(); render();
     }
+  },
+
+  /* Slash commands: prompt commands come back as the prompt to send; local
+     ones run here (rewind and clear are page-level: they change the thread). */
+  async command(c, text) {
+    const [, rawName = "", rawArg = ""] = /^\/(\S*)\s*([\s\S]*)$/.exec(text.trim()) || [];
+    const name = rawName.toLowerCase();
+    if (name === "clear") {
+      this.text = ""; this.reset(); Cases.newDraft();
+      if (currentRoute().caseId) location.hash = "#/"; else render();
+      toast("已开始新会诊 · 记忆与设置保留");
+      return null;
+    }
+    if (name === "rewind") {
+      const starts = this.turnStarts(c);
+      if (!starts.length) { toast("还没有可回退的轮次", true); return null; }
+      const n = parseInt(rawArg, 10);
+      const idx = Number.isFinite(n) ? starts[n - 1] : starts[starts.length - 1];
+      if (idx === undefined) { toast(`没有第 ${n} 轮（共 ${starts.length} 轮）`, true); return null; }
+      this.text = "";
+      await this.rewindTo(c, idx);
+      return null;
+    }
+    await Session.bind(c);
+    const ex = await Bridge.call("agent_command", { text });
+    if (ex.kind === "unknown") { toast(ex.message, true); return null; }
+    if (ex.kind !== "local") return { prompt: ex.prompt || text, command: ex.command || null };
+    this.text = "";
+    if (c.messages.length) {
+      c.messages.push({ id: uid(), role: "note", ts: Date.now(), command: ex.command, text: ex.text });
+      if (ex.command === "compact") c.session = await Bridge.call("agent_export");
+      Cases.touch(c); Cases.save(); render();
+    } else {
+      render();
+      openDrawer({ title: `/${ex.command}`, sub: "本地命令", width: 680, body: h("div", { class: "card" }, md(ex.text)) });
+    }
+    return null;
+  },
+
+  /* Index of the user message that started each completed agent turn. */
+  turnStarts(c) {
+    const out = [];
+    let user = -1;
+    c.messages.forEach((x, i) => {
+      if (x.role === "user" && !x.stopped) user = i;
+      else if (x.role === "agent" && isAgent(x.payload) && user >= 0) { out.push(user); user = -1; }
+    });
+    return out;
+  },
+
+  async rewindTo(c, idx) {
+    if (this.busy) return;
+    const m = c.messages[idx];
+    const turn = c.messages.slice(0, idx).filter((x) => x.role === "agent" && isAgent(x.payload)).length;
+    try {
+      await Session.bind(c);
+      await Bridge.call("agent_rewind", { turn });
+      c.messages = c.messages.slice(0, idx);
+      c.session = await Bridge.call("agent_export");
+      const last = lastResult(c);
+      c.status = last ? (last.payload.error ? "agent_error" : last.payload.emergency ? "agent_emergency" : "agent_done") : null;
+      c.stage = last ? ((last.payload.consult || {}).stage_group || (last.payload.engine_stage || {}).stage_group || null) : null;
+      if (m && m.text && m.text !== "（附件）") this.text = m.text;
+      Cases.touch(c); Cases.save(); render();
+      toast(`已回退到第 ${turn + 1} 轮之前 · 病例笔记、会诊计划与证据台账已恢复`);
+    } catch (err) { toast(`回退失败：${err.message}`, true); Session.invalidate(); }
+  },
+
+  async stop() {
+    if (!this.busy || this.stopping) return;
+    this.stopping = true;
+    render();
+    try {
+      await Bridge.restart();
+      await Settings.apply(true);
+      await AgentCfg.apply();
+      toast("已停止本轮 · 运行时已重新就绪");
+    } catch (err) { toast(`重启运行时失败：${err.message}`, true); }
+    finally { this.stopping = false; render(); }
   },
 
   setMode(mode) {
@@ -1345,13 +1622,23 @@ const Workspace = {
   },
 
   turn(m, c, idx) {
+    if (m.role === "note") {
+      return h("div", { class: "turn note" }, h("div", { class: "note-card" },
+        h("div", { class: "note-h" }, m.command ? h("span", { class: "chip agent" }, `/${m.command}`) : icon("info"), h("span", { class: "muted small" }, timeAgo(m.ts))),
+        md(m.text)));
+    }
     if (m.role === "user") {
       const chips = factChips(m.facts);
-      return h("div", { class: "turn user" + (m.whatif ? " whatif" : "") }, h("div", { class: "bubble" },
-        m.whatif ? h("div", { class: "small", style: { color: "var(--indigo)", fontWeight: 700, marginBottom: "4px" } }, "假设推演") : null,
-        m.text,
-        chips.length ? h("div", { class: "chips" }, chips.map((x) => h("span", { class: "chip" }, x))) : null,
-        (m.attachments || []).length ? h("div", { class: "chips" }, m.attachments.map((a) => h("span", { class: "chip" }, icon("doc"), a))) : null));
+      const canRewind = this.starts.includes(idx);
+      return h("div", { class: "turn user" + (m.whatif ? " whatif" : "") + (m.stopped ? " stopped" : "") }, h("div", { class: "ucol" },
+        h("div", { class: "bubble" + (m.command ? " cmd" : "") },
+          m.whatif ? h("div", { class: "small", style: { color: "var(--indigo)", fontWeight: 700, marginBottom: "4px" } }, "假设推演") : null,
+          m.text,
+          chips.length ? h("div", { class: "chips" }, chips.map((x) => h("span", { class: "chip" }, x))) : null,
+          (m.attachments || []).length ? h("div", { class: "chips" }, m.attachments.map((a) => h("span", { class: "chip" }, icon("doc"), a))) : null),
+        m.stopped || canRewind ? h("div", { class: "uact" },
+          m.stopped ? h("span", { class: "chip warn" }, "已停止 · 未计入会诊") : null,
+          canRewind ? h("button", { class: "act", type: "button", title: "回退到这一轮之前：撤销这一轮及之后的会诊，病例笔记、会诊计划与证据台账一并恢复", onclick: () => this.rewindTo(c, idx) }, icon("undo"), "回退到此") : null) : null));
     }
     if (m.role === "error") {
       return h("div", { class: "turn agent" }, logoMark("avatar"), h("div", { class: "turn-body" },
@@ -1458,6 +1745,7 @@ const Workspace = {
     const stage = k.stage_group || engine.stage_group;
     if (stage || f.tnm) inner.appendChild(h("div", { class: "stage-tile" }, h("div", { class: "muted small" }, `分期 · 模型判断${engine.staged ? `（引擎：${engine.stage_group}）` : ""}`),
       h("div", { class: "big" }, stage || "—"), h("div", { class: "tnm" }, k.tnm || engine.tnm || tnmText(f.tnm))));
+    if ((p.plan || []).length) inner.appendChild(h("div", { class: "dsec" }, planList(p.plan, true)));
     const rows = factRows(f);
     if (rows.length) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "病例笔记（模型维护）"), h("div", { class: "facts" }, rows.map(([a, b]) => [h("div", { class: "k" }, a), h("div", { class: "v" }, b)]))));
     const options = (k.options || []).filter((o) => o && o.name);
@@ -1467,14 +1755,18 @@ const Workspace = {
     if (todo.length) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, `待办 · ${todo.length}`), h("div", { class: "todo" }, todo.slice(0, 8).map((t) => h("div", null, icon("alert"), h("span", null, t))))));
     const findings = (p.review && p.review.findings) || [];
     const answered = new Set(((p.review && p.review.responses) || []).map((r) => r && r.rule_id));
-    inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "规则引擎复核（参考）"),
+    inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "Hooks 复核（参考）"),
       h("div", { class: "metrics" }, h("span", { class: `metric ${findings.length ? "warn" : "ok"}` }, icon("lab"), findings.length ? `${findings.length} 条意见` : "无意见"),
         findings.length ? h("span", { class: "metric" }, `模型已回应 ${findings.filter((x) => answered.has(x.rule_id)).length}`) : null,
-        h("span", { class: "metric" }, `${(p.steps || []).filter((s) => s.kind === "tool").length} 次工具调用`))));
+        h("span", { class: "metric" }, `${(p.steps || []).filter((s) => s.kind === "tool" && s.name !== "update_plan").length} 次工具调用`))));
+    const ctx = p.context || {};
+    const usage = p.usage || {};
     inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "会诊"), h("div", { class: "facts" },
       h("div", { class: "k" }, "模式"), h("div", { class: "v" }, "模型主导"),
       h("div", { class: "k" }, "视角"), h("div", { class: "v" }, ROLE_LABEL[c.role] || c.role),
       h("div", { class: "k" }, "模型"), h("div", { class: "v" }, p.model || "—"),
+      usage.calls ? [h("div", { class: "k" }, "模型调用"), h("div", { class: "v" }, `${usage.calls} 次${usage.subagent_calls ? `（专科 ${usage.subagent_calls}）` : ""}`)] : null,
+      ctx.window ? [h("div", { class: "k" }, "上下文"), h("div", { class: "v" }, contextMeter(ctx))] : null,
       h("div", { class: "k" }, "开始于"), h("div", { class: "v" }, new Date(c.created).toLocaleString()))));
     inner.appendChild(h("div", { class: "row" },
       h("button", { class: "btn sm", type: "button", onclick: () => openAgentReport(m) }, icon("doc"), "会诊详情"),
@@ -1519,9 +1811,9 @@ const Workspace = {
       const base = { id: uid(), created: Date.now(), updated: Date.now(), role: Cases.current().role || DEFAULT_ROLE, dose: false, status: null, stage: null };
       let c;
       if (data.format === "nsclc-agent-case/1") {
-        const mode = data.mode === "agent" || (data.session && data.session.format === "nsclc-agent-session/1") ? "agent" : "governed";
+        const mode = data.mode === "agent" || (data.session && /^nsclc-agent-session\//.test(data.session.format || "")) ? "agent" : "governed";
         c = Object.assign(base, { title: data.title || "导入的会诊", mode, messages: Array.isArray(data.messages) ? data.messages : [], session: data.session || null });
-      } else if (data.format === "nsclc-agent-session/1") { /* a raw agent session (CLI `agent --session`) */
+      } else if (/^nsclc-agent-session\//.test(data.format || "")) { /* a raw agent session (CLI `agent --session`) */
         const messages = (data.turns || []).flatMap((t) => [{ id: uid(), role: "user", ts: Date.now(), text: t.message || "" }, { id: uid(), role: "agent", ts: Date.now(), text: t.reply || "" }]);
         c = Object.assign(base, { title: "导入的会诊", mode: "agent", messages, session: data });
       } else if (Array.isArray(data.transcript) && Array.isArray(data.narrative)) { /* a raw session export (CLI / earlier builds) */
@@ -1557,6 +1849,7 @@ function copyText(text) {
 /* ================================================================ tools */
 
 const TOOLS = {
+  agent: { title: "智能体", sub: "运行时 · 专科子智能体 · Hooks · 记忆 · MCP · 运行预算", icon: "agent" },
   staging: { title: "分期计算器", sub: "AJCC/UICC 第 9 版 · 唯一分期权威 · 歧义即拒绝", icon: "staging" },
   kg: { title: "指南知识库", sub: "六部指南 2,960 条推荐 · 机器抽取、默认未经临床复核", icon: "kg" },
   lab: { title: "安全实验室", sub: "把构造的方案直接交给规则引擎 — 与审计探针同一调用", icon: "lab" },
@@ -1765,6 +2058,146 @@ VIEWS.eval = () => {
   return root;
 };
 
+/* ======================================================= agent runtime */
+
+/** Agent runtime settings (specialists, hooks, memory, MCP, budgets). Saved
+ *  in this browser; MCP auth headers stay in page memory only. */
+const AgentCfg = {
+  cfg: LS.get("nsclc.agent.cfg", {}),
+  catalog: null,
+  persist() {
+    const keep = Object.assign({}, this.cfg, { mcp_servers: (this.cfg.mcp_servers || []).map((x) => ({ name: x.name, url: x.url, enabled: x.enabled !== false })) });
+    LS.set("nsclc.agent.cfg", keep);
+  },
+  async apply(patch) {
+    if (patch) this.cfg = Object.assign({}, this.cfg, patch);
+    const headers = Object.fromEntries((this.cfg.mcp_servers || []).map((x) => [x.url, x.headers]));
+    this.cfg = await Bridge.call("agent_configure", { config: this.cfg });
+    for (const x of this.cfg.mcp_servers || []) if (headers[x.url]) x.headers = headers[x.url];
+    this.persist();
+    this.catalog = await Bridge.call("agent_info");
+    return this.cfg;
+  },
+  async remember(note) {
+    const cur = (this.cfg.instructions || "").trimEnd();
+    if (cur.includes(note)) return;
+    await this.apply({ instructions: `${cur}${cur ? "\n" : ""}- ${note}` });
+  },
+};
+const EVENT_LABEL = { user_prompt_submit: "消息提交时", post_tool_use: "工具调用后", stop: "提交结论时" };
+
+VIEWS.agent = () => {
+  const cfg = AgentCfg.cfg;
+  const cat = AgentCfg.catalog || {};
+  const root = h("div", { class: "stack" });
+  const save = async (patch, msg) => {
+    try { await AgentCfg.apply(patch); if (msg) toast(msg); render(); } catch (err) { toast(err.message, true); }
+  };
+  const metric = (text) => h("span", { class: "metric" }, text);
+  const hooks = cat.hooks || [];
+  const subOn = cfg.subagents !== false;
+
+  root.appendChild(h("section", { class: "arch card" },
+    h("div", { class: "arch-flow" }, ["主诊智能体", "会诊计划", "临床工具 ∥", "专科子智能体 ∥", "Hooks 复核", "结论"].map((t, i) => [i ? h("span", { class: "arrow" }, "→") : null, h("span", { class: "node" + (i === 0 ? " lead" : "") }, t)])),
+    h("p", { class: "muted", style: { margin: "12px 0" } }, "主流智能体运行时架构：同一个 ReAct 循环驱动主诊与每位专科；同一步的只读工具并行执行（浏览器内顺序执行）；专科子智能体在独立上下文中用各自的工具集工作，只把结构化意见交回主诊；Hooks 在固定时点做确定性复核，全部是参考意见，由模型逐条采纳或说明理由；记忆写入每轮系统提示；上下文接近上限时由模型压缩；每一轮都有检查点，可回退。"),
+    h("div", { class: "metrics" }, metric(`${(cat.tools || []).length} 个工具`), metric(`${subOn ? (cat.agents || []).length : 0} 位专科子智能体`),
+      metric(`${hooks.filter((x) => x.enabled).length}/${hooks.length} 个 Hooks`), metric(`${(cfg.mcp_servers || []).length} 个 MCP 服务器`),
+      metric(`记忆 ${(cfg.instructions || "").length} 字`), metric(`最多 ${cfg.max_steps || 24} 步`))));
+
+  /* --- specialists */
+  const disabled = new Set(cfg.disabled_agents || []);
+  const custom = cfg.custom_agents || [];
+  const toolChoices = (cat.tools || []).filter((t) => (t.category === "clinical" && t.name !== "record_case_facts") || t.category === "mcp").map((t) => t.name);
+  const tile = (a, extra) => h("div", { class: "agent-tile" + (disabled.has(a.name) || !subOn ? " off" : "") },
+    h("div", { class: "at-h" }, icon("users"), h("div", { class: "at-t" }, h("b", null, a.title), h("div", { class: "mono muted small" }, a.name)), extra),
+    h("div", { class: "muted small" }, a.description),
+    h("div", { class: "chips" }, (a.tools || []).map((t) => h("span", { class: "chip" }, toolLabel(t)))));
+  const form = { name: "", title: "", description: "", prompt: "", tools: new Set() };
+  const addForm = h("details", { class: "add-agent" }, h("summary", null, icon("plus"), "添加自定义专科（如老年肿瘤科、营养科、心理科）"),
+    h("div", { class: "form-grid", style: { marginTop: "12px" } },
+      h("label", { class: "field" }, "标识（英文）", inputEl("text", "", (v) => (form.name = v), "geriatric_oncology")),
+      h("label", { class: "field" }, "名称", inputEl("text", "", (v) => (form.title = v), "老年肿瘤科医师")),
+      h("label", { class: "field span-2" }, "职责（主诊据此决定是否邀请）", inputEl("text", "", (v) => (form.description = v), "老年综合评估、治疗强度与耐受性")),
+      h("div", { class: "field span-4" }, "可用工具", h("div", { class: "tool-checks" }, toolChoices.map((t) => h("label", { class: "check small" },
+        h("input", { type: "checkbox", onchange: (e) => (e.target.checked ? form.tools.add(t) : form.tools.delete(t)) }), toolLabel(t))))),
+      h("label", { class: "field span-4" }, "专科提示词", h("textarea", { rows: 4, placeholder: "关注：……；不要给出……", oninput: (e) => (form.prompt = e.target.value) }))),
+    h("div", { class: "row", style: { marginTop: "12px" } }, h("button", { class: "btn primary sm", type: "button", onclick: () => {
+      if (!form.name.trim() || !form.title.trim()) { toast("请填写标识与名称", true); return; }
+      save({ custom_agents: [...custom.filter((a) => a.name !== form.name.trim()), { name: form.name.trim(), title: form.title.trim(), description: form.description.trim(), prompt: form.prompt, tools: [...form.tools] }] }, `已添加专科：${form.title}`);
+    } }, icon("plus"), "添加")));
+  root.appendChild(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("h3", null, "专科子智能体（MDT）"), h("span", { class: "sub hide-narrow" }, "主诊用 delegate 工具邀请；同一步可并行；每位专科有独立上下文与工具集，只读不写"),
+      h("div", { class: "right" }, h("label", { class: "switch" }, h("input", { type: "checkbox", checked: subOn || null, onchange: (e) => save({ subagents: e.target.checked }, e.target.checked ? "已启用专科子智能体" : "已停用专科子智能体") }), "启用"))),
+    h("div", { class: "agent-grid" },
+      (cat.builtin_agents || []).map((a) => tile(a, h("label", { class: "switch", title: disabled.has(a.name) ? "已停用" : "已启用" }, h("input", { type: "checkbox", checked: !disabled.has(a.name) || null, disabled: !subOn || null,
+        onchange: (e) => { const d = new Set(disabled); if (e.target.checked) d.delete(a.name); else d.add(a.name); save({ disabled_agents: [...d] }); } })))),
+      custom.map((a, i) => tile(Object.assign({}, a, { title: `${a.title} · 自定义` }), h("button", { class: "icon-btn ghost", type: "button", title: "删除", "aria-label": "删除", onclick: () => save({ custom_agents: custom.filter((_, j) => j !== i) }, "已删除") }, icon("trash"))))),
+    h("div", { class: "hr" }), addForm,
+    h("div", { class: "muted small", style: { marginTop: "8px" } }, "命令行：把同样的定义写成 .nsclc-agent/agents/*.md（front matter：name / title / description / tools）。")));
+
+  /* --- hooks */
+  root.appendChild(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("h3", null, "Hooks"), h("span", { class: "sub" }, "确定性安全网 · 在固定时点运行 · 全部为参考意见，不阻断、不改写")),
+    h("div", { class: "hook-list" }, hooks.map((x) => h("div", { class: "hook-row" },
+      h("label", { class: "switch" }, h("input", { type: "checkbox", checked: x.enabled || null, onchange: (e) => save({ hooks: Object.assign({}, cfg.hooks, { [x.name]: e.target.checked }) }) })),
+      h("div", { style: { minWidth: 0 } }, h("div", { class: "row", style: { gap: "8px" } }, h("b", null, x.title), h("span", { class: "chip" }, EVENT_LABEL[x.event] || x.event), h("span", { class: "mono muted small" }, x.name)),
+        h("div", { class: "muted small", style: { marginTop: "3px" } }, x.description)))))));
+
+  /* --- memory */
+  const memTa = h("textarea", { rows: 7, placeholder: "例如：\n- 本院优先参考 CSCO 指南的推荐排序\n- 奥希替尼不在本院目录，需替代时请说明\n- 回答先给结论，再给依据" });
+  memTa.value = cfg.instructions || "";
+  root.appendChild(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("h3", null, "记忆 · 机构规范与偏好"), h("span", { class: "sub" }, "写入每一轮的系统提示（等同命令行的 NSCLC.md）")),
+    h("label", { class: "field" }, memTa),
+    h("div", { class: "row", style: { marginTop: "10px" } }, h("button", { class: "btn primary sm", type: "button", onclick: () => save({ instructions: memTa.value }, "记忆已保存 · 下一轮生效") }, icon("check"), "保存记忆"),
+      h("span", { class: "muted small" }, "智能体在会诊中用 remember 提议的条目会出现在结论卡片里，由您决定是否保存。仅保存在本浏览器。"))));
+
+  /* --- MCP */
+  const servers = cfg.mcp_servers || [];
+  const draft = { name: "", url: "", headers: "" };
+  const mcpOut = h("div", { class: "stack", style: { gap: "8px" } });
+  root.appendChild(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("h3", null, "MCP 服务器"), h("span", { class: "sub" }, "Model Context Protocol · Streamable HTTP · 工具名 mcp__服务器__工具")),
+    servers.length ? h("div", { class: "hook-list" }, servers.map((x, i) => h("div", { class: "hook-row" },
+      h("label", { class: "switch" }, h("input", { type: "checkbox", checked: x.enabled !== false || null, onchange: (e) => save({ mcp_servers: servers.map((y, j) => (j === i ? Object.assign({}, y, { enabled: e.target.checked }) : y)) }) })),
+      h("div", { style: { minWidth: 0, flex: 1 } }, h("b", null, x.name), h("div", { class: "mono muted small", style: { wordBreak: "break-all" } }, x.url)),
+      h("button", { class: "btn sm", type: "button", onclick: async (e) => {
+        const done = busy(e.currentTarget, "连接中…");
+        try { const r = await Bridge.call("mcp_check", { url: x.url, name: x.name, headers: x.headers || {} }); mcpOut.prepend(h("div", { class: `callout${r.ok ? "" : " warn"}` }, icon(r.ok ? "check" : "alert"), h("div", null, r.ok ? `${x.name}：已连接，${(r.tools || []).length} 个工具 — ${(r.tools || []).join("、")}` : `${x.name}：${r.error}`))); }
+        catch (err) { toast(err.message, true); } finally { done(); }
+      } }, "测试"),
+      h("button", { class: "icon-btn ghost", type: "button", title: "删除", "aria-label": "删除", onclick: () => save({ mcp_servers: servers.filter((_, j) => j !== i) }, "已删除") }, icon("trash"))))) : null,
+    h("div", { class: "form-grid", style: { marginTop: servers.length ? "14px" : 0 } },
+      h("label", { class: "field" }, "名称", inputEl("text", "", (v) => (draft.name = v), "formulary")),
+      h("label", { class: "field span-2" }, "URL", inputEl("text", "", (v) => (draft.url = v), "https://mcp.example.org/mcp")),
+      h("label", { class: "field" }, "请求头 JSON（可选）", inputEl("text", "", (v) => (draft.headers = v), '{"Authorization": "Bearer …"}'))),
+    h("div", { class: "row", style: { marginTop: "12px" } }, h("button", { class: "btn sm", type: "button", onclick: () => {
+      let headers = {};
+      try { headers = draft.headers.trim() ? JSON.parse(draft.headers) : {}; } catch (_) { toast("请求头不是合法 JSON", true); return; }
+      if (!/^https?:\/\//.test(draft.url.trim())) { toast("请填写 http(s) URL", true); return; }
+      save({ mcp_servers: [...servers, { name: draft.name.trim() || `mcp${servers.length + 1}`, url: draft.url.trim(), headers, enabled: true }] }, "已添加 MCP 服务器 · 下一轮连接");
+    } }, icon("plus"), "添加服务器"),
+      h("span", { class: "muted small" }, "服务器需允许浏览器跨域（CORS）并暴露 Mcp-Session-Id；鉴权请求头只保存在本页内存中。")),
+    mcpOut));
+
+  /* --- budgets */
+  const budget = { max_steps: cfg.max_steps || 24, max_review_rounds: cfg.max_review_rounds === undefined ? 1 : cfg.max_review_rounds, context_window: cfg.context_window || 128000 };
+  root.appendChild(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("h3", null, "运行预算")),
+    h("div", { class: "form-grid" },
+      h("label", { class: "field" }, "主诊最多步数", inputEl("number", budget.max_steps, (v) => (budget.max_steps = Number(v)))),
+      h("label", { class: "field" }, "Hooks 复核轮数", selectEl([["0", "0（只记录不交回）"], ["1", "1"], ["2", "2"], ["3", "3"]], String(budget.max_review_rounds), (v) => (budget.max_review_rounds = Number(v)))),
+      h("label", { class: "field span-2" }, "模型上下文窗口（tokens，用于自动压缩）", inputEl("number", budget.context_window, (v) => (budget.context_window = Number(v))))),
+    h("div", { class: "row", style: { marginTop: "12px" } }, h("button", { class: "btn sm", type: "button", onclick: () => save(budget, "已保存") }, icon("check"), "保存"))));
+
+  /* --- commands */
+  root.appendChild(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("h3", null, "命令"), h("span", { class: "sub" }, "在会诊输入框输入 / 唤出；命令行 REPL 同样可用")),
+    h("div", { class: "cmd-table" }, (Store.commands || []).map((x) => h("div", { class: "cmd-row" },
+      h("span", { class: "mono" }, `/${x.name}${x.args ? ` ${x.args}` : ""}`), h("span", { class: "muted" }, x.description), h("span", { class: `ck ${x.kind}` }, x.kind === "prompt" ? "交给智能体" : "本地"))))));
+  return root;
+};
+
 const PROVIDERS = [
   { id: "none", name: "确定性模式", desc: "无需密钥 · 规则模式方案 · 完整安全治理" },
   { id: "poe", name: "Poe", desc: "一个密钥接入 Claude / Gemini / GPT；支持读片" },
@@ -1807,7 +2240,7 @@ VIEWS.settings = () => {
             h("button", { type: "button", class: defaultMode() !== "agent" ? "on" : "", onclick: () => { LS.set("nsclc.pref.mode", "governed"); render(); } }, "受治理"))
             : "确定性（未接入模型）",
           h("div", { class: "muted small", style: { marginTop: "6px" } }, llmOn()
-            ? (defaultMode() === "agent" ? "模型自主推理、规划并调用 20 个临床工具；规则引擎复核意见交回模型逐条判断，不作硬约束。" : "模型只能提议，分期、规则与放行由确定性内核裁决。")
+            ? (defaultMode() === "agent" ? "模型自主规划、调用 20 个临床工具、邀请专科子智能体；Hooks 复核意见交回模型逐条判断，不作硬约束。专科、Hooks、记忆与 MCP 在「智能体」页配置。" : "模型只能提议，分期、规则与放行由确定性内核裁决。")
             : "接入模型后默认由模型主导会诊。")),
         h("div", { class: "k" }, "文本模型"), h("div", null, l.llm && l.llm.available ? `${l.llm.provider} · ${l.llm.model}` : "无"),
         h("div", { class: "k" }, "视觉模型"), h("div", null, l.vision && l.vision.provider !== "none" ? `${l.vision.provider} · ${l.vision.model}` : "无"))));

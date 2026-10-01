@@ -1,58 +1,117 @@
-"""Model-led consultation: the model reasons, calls tools and decides.
+"""The agent runtime: a model-led consultation session.
 
-``AgentSession`` is the agent-mode counterpart of
-:class:`~nsclc_agent.conversation.ConsultationSession`. Where the governed
-pipeline lets a model *propose* inside a control plane that decides, here
-the model runs the consult — a ReAct loop over :class:`AgentToolbox` with
-the conversation as memory — and the deterministic kernel serves it:
+``AgentSession`` is the orchestrator of agent mode, built the way
+mainstream agent runtimes are (Claude Code, Grok CLI, Codex, the OpenAI
+Agents SDK) and specialised for a multidisciplinary cancer consult:
 
-* tools are instruments (staging engine, registries, gates, guideline KG…);
-* the rule engine and the governed pipeline are second opinions;
-* when the model submits, the rule engine reviews the plan ONCE: findings
-  go back to the model, which either revises or answers each with a
-  clinical reason. Nothing is blocked, rewritten or withheld — findings
-  and the model's answers are shown to the clinician side by side;
-* an emergency screen runs on every message and is put in front of the
-  model (and the clinician), not in place of it.
+* **one loop** (:mod:`.loop`) runs the lead agent and every specialist —
+  model → thinking/text/tool calls → observations → model … until the
+  terminal tool, a plain answer, the step budget or a cancel;
+* **tools** (:mod:`.tools`) — the clinical instruments of the
+  deterministic kernel, ``update_plan`` (a live consult plan),
+  ``delegate`` (MDT specialists as sub-agents with their own context and
+  toolset), ``remember`` (memory proposals), MCP server tools, and the
+  terminal ``submit_consult``;
+* **hooks** (:mod:`.hooks`) at ``user_prompt_submit`` / ``post_tool_use``
+  / ``stop`` hold every clinical safety net — emergency screen, evidence
+  ledger, rule engine, stage consistency, citation and dose provenance —
+  and all of them are ADVISORY: findings go back to the model, which
+  revises or answers each with a clinical reason;
+* **memory** (:mod:`.memory`) — institution/user instructions (NSCLC.md)
+  in every system prompt; token accounting; model-written compaction;
+* **checkpoints** — every turn can be rewound (case notes, plan, history);
+* **events** — every step streams through ``on_event`` (CLI timeline,
+  ``--output-format stream-json``, the web app's live trace).
 
-Everything is observable: thinking (when the provider exposes it), every
-tool call and its result, the review round. ``on_event`` streams those
-live (the web app renders them as a timeline).
+Authority stays with the caller: the role and the configuration come from
+the surface, never from a session file; the system prompt is rebuilt every
+turn, never restored.
 """
 
 from __future__ import annotations
 
+import copy
 import json
-import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Callable
 
 from ..llm.base import LLMError
-from .toolbox import SUBMIT_TOOL, AgentToolbox, compact
+from .hooks import HookRunner, builtin_hooks
+from .loop import Cancelled, LoopResult, repair_history, run_loop
+from .memory import MemoryNotes, estimate_tokens, summarize
+from .planning import Plan
+from .prompts import ROLE_TEXT, lead_prompt
+from .subagents import BUILTIN_AGENTS, AgentDefinition, SubAgentRunner
+from .toolbox import SUBMIT_SPEC, SUBMIT_TOOL, AgentToolbox
+from .tools import Tool, Toolset
 
-SESSION_FORMAT = "nsclc-agent-session/1"
+SESSION_FORMAT = "nsclc-agent-session/2"
+_READABLE_FORMATS = ("nsclc-agent-session/1", SESSION_FORMAT)
 
-_ROLE_TEXT = {
-    "oncologist": "肿瘤科医师。用专业语言；可以讨论具体方案、证据强度与方案库的参考剂量（注明须核对说明书与本院方案）。",
-    "researcher": "研究者。可以深入讨论证据、试验设计、人群外推与不确定性。",
-    "patient": "患者本人或家属。通俗、清晰、有同理心；解释为什么；不要给出可自行执行的剂量，治疗决定请与主治团队讨论。",
-}
+_SYSTEM_PREFIX = "[系统]"
+_SUMMARY_PREFIX = "【此前会诊摘要"
+_NUDGE = "请调用 submit_consult 提交本轮结论（reply 可直接使用你刚才的回答）。"
 
-SYSTEM_PROMPT = """你是 NSCLC-Agent（IMPF-AI 研发），非小细胞肺癌多学科会诊智能体。由你主导这次会诊：自主思考、规划、调用工具、权衡证据，并给出你的临床判断。
 
-工作方式
-1. 理解病例与临床问题。用 record_case_facts 维护结构化病例笔记——它就是医生看到的病例档案，也是其他工具的默认输入；新信息出现就更新它。
-2. 按需调用工具：分期引擎、急症筛查、驱动基因解析、试验注册表、方案库与参考剂量、适应证与器官功能核对、脑转移分层、后线序贯、临床路径章节、指南知识库、预后、药物相互作用、读片/读报告……工具结果是证据和参考：可以采纳，也可以基于临床理由不同意，但要说明理由。
-3. 规则引擎（rule_review）和受治理流水线（governed_reference）是第二意见，用来查漏补缺，不是硬约束。
-4. 信息不足时，基于已有信息给出初步判断，同时明确列出还需要的检查和问题；不要编造检查结果。
-5. 只把工具返回过的试验/指南条目当作引用；生存率、HR、剂量等数字要来自工具结果，或明确标注为一般医学知识。
-6. 出现急症信号时，先处理急症。
-7. 完成后调用一次 submit_consult。reply 是医生读到的完整回答：中文、Markdown、结构清晰（结论 → 依据 → 方案 → 待补充），简洁而专业。提交后若收到规则引擎的复核意见，逐条判断：采纳就修改方案，不采纳就在 rule_responses 写明临床理由，然后再次提交。
+@dataclass
+class AgentConfig:
+    """Runtime settings a surface (CLI flags, web settings) chooses."""
 
-当前对话视角：{role_text}"""
+    max_steps: int = 24
+    max_review_rounds: int = 1
+    temperature: float = 0.2
+    max_tokens: int = 6000
+    #: The model's context window (tokens) and the fill ratio that
+    #: triggers automatic compaction.
+    context_window: int = 128_000
+    compact_at: float = 0.75
+    #: Institution protocols / user preferences (NSCLC.md, the 记忆 panel).
+    instructions: str = ""
+    #: Hook name -> enabled (missing names use the hook's default).
+    hooks: dict[str, bool] = field(default_factory=dict)
+    subagents: bool = True
+    custom_agents: list[dict[str, Any]] = field(default_factory=list)
+    disabled_agents: list[str] = field(default_factory=list)
+    #: [{"name", "url", "headers"?, "enabled"?}] — Streamable HTTP servers.
+    mcp_servers: list[dict[str, Any]] = field(default_factory=list)
+    #: Run read-only tool calls concurrently (None = when threads exist).
+    parallel: bool | None = None
 
-_THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "AgentConfig":
+        data = dict(data or {})
+
+        def num(key: str, kind: type, low: float, high: float) -> Any:
+            default = getattr(cls, key)
+            try:
+                value = kind(data.get(key, default))
+            except (TypeError, ValueError):
+                value = default
+            return kind(min(max(value, low), high))
+
+        hooks = data.get("hooks") if isinstance(data.get("hooks"), dict) else {}
+        parallel = data.get("parallel")
+        return cls(
+            max_steps=num("max_steps", int, 2, 64),
+            max_review_rounds=num("max_review_rounds", int, 0, 3),
+            temperature=num("temperature", float, 0.0, 1.5),
+            max_tokens=num("max_tokens", int, 256, 32_000),
+            context_window=num("context_window", int, 8_000, 2_000_000),
+            compact_at=num("compact_at", float, 0.3, 0.95),
+            instructions=str(data.get("instructions") or "")[:20_000],
+            hooks={str(k): bool(v) for k, v in hooks.items()},
+            subagents=bool(data.get("subagents", True)),
+            custom_agents=[a for a in data.get("custom_agents") or []
+                           if isinstance(a, dict)][:12],
+            disabled_agents=[str(a) for a in data.get("disabled_agents") or []],
+            mcp_servers=[s for s in data.get("mcp_servers") or []
+                         if isinstance(s, dict) and s.get("url")][:8],
+            parallel=None if parallel is None else bool(parallel),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -72,6 +131,15 @@ class AgentTurn:
     duration_s: float
     error: str | None = None
     message: str = ""
+    turn: int = 0
+    #: terminal | text | limit | cancelled | error
+    stop: str = ""
+    plan: list[dict[str, Any]] = field(default_factory=list)
+    memory: list[str] = field(default_factory=list)
+    specialists: list[str] = field(default_factory=list)
+    context: dict[str, Any] = field(default_factory=dict)
+    usage: dict[str, int] = field(default_factory=dict)
+    compacted: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,55 +149,99 @@ class AgentTurn:
             "engine_stage": self.engine_stage, "llm_calls": self.llm_calls,
             "tokens": self.tokens, "model": self.model,
             "duration_s": round(self.duration_s, 3), "error": self.error,
-            "message": self.message,
+            "message": self.message, "turn": self.turn, "stop": self.stop,
+            "plan": self.plan, "memory": self.memory,
+            "specialists": self.specialists, "context": self.context,
+            "usage": self.usage, "compacted": self.compacted,
         }
 
 
 @dataclass
 class _TurnState:
-    steps: list[dict[str, Any]] = field(default_factory=list)
-    calls: int = 0
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    model: str = ""
-    review_rounds: int = 0
-    findings: list[dict[str, Any]] = field(default_factory=list)
     submission: dict[str, Any] | None = None
+    findings: list[dict[str, Any]] = field(default_factory=list)
+    review_rounds: int = 0
+
+
+_LEGACY_KWARGS = ("max_steps", "max_review_rounds", "temperature", "max_tokens")
 
 
 class AgentSession:
     """A multi-turn, model-led consultation."""
 
     def __init__(self, llm: Any, *, role: str = "oncologist",
-                 vision_llm: Any | None = None, max_steps: int = 16,
-                 max_review_rounds: int = 1, temperature: float = 0.2,
-                 max_tokens: int = 6000,
-                 on_event: Callable[[dict[str, Any]], None] | None = None) -> None:
+                 vision_llm: Any | None = None,
+                 config: AgentConfig | dict[str, Any] | None = None,
+                 on_event: Callable[[dict[str, Any]], None] | None = None,
+                 **overrides: Any) -> None:
         if llm is None or not getattr(llm, "available", False):
             raise LLMError("agent mode needs a configured model")
+        unknown = set(overrides) - set(_LEGACY_KWARGS)
+        if unknown:
+            raise TypeError(f"unexpected argument(s): {', '.join(sorted(unknown))}")
+        base = config.to_dict() if isinstance(config, AgentConfig) else dict(config or {})
+        self.config = AgentConfig.from_dict({**base, **overrides})
         self.llm = llm
-        self.role = role if role in _ROLE_TEXT else "patient"
+        self.role = role if role in ROLE_TEXT else "patient"
         self.vision_llm = vision_llm if vision_llm is not None else (
             llm if getattr(llm, "supports_vision", False) else None)
-        self.max_steps = max(2, int(max_steps))
-        self.max_review_rounds = max(0, int(max_review_rounds))
-        self.temperature = temperature
-        self.max_tokens = max_tokens
         self.on_event = on_event
         self.narrative: list[str] = []
         self.turns: list[dict[str, Any]] = []
+        self.messages: list[dict[str, Any]] = []
         self.toolbox = AgentToolbox(vision_llm=self.vision_llm,
                                     narrative=lambda: "\n".join(self.narrative))
-        self.messages: list[dict[str, Any]] = []
+        self.plan = Plan(on_change=lambda items: self._emit({"type": "plan",
+                                                             "items": items}))
+        self.memory = MemoryNotes()
+        self.state: dict[str, Any] = {"evidence_seen": set(), "dosing_seen": set(),
+                                      "emergency": None}
+        self.usage = {"turns": 0, "calls": 0, "prompt": 0, "completion": 0,
+                      "subagent_calls": 0}
+        self.checkpoints: list[dict[str, Any]] = []
+        self.compactions = 0
+        self.mcp_tools: list[Tool] | None = None
+        self.mcp_status: list[dict[str, Any]] = []
+        self._cancel = False
+        self._apply_config()
+
+    # ------------------------------------------------------------ settings
+    def _apply_config(self) -> None:
+        from ..platform_caps import THREADS_AVAILABLE
+
+        cfg = self.config
+        self.parallel = THREADS_AVAILABLE if cfg.parallel is None else (
+            cfg.parallel and THREADS_AVAILABLE)
+        self.hooks = HookRunner(builtin_hooks(), cfg.hooks)
+        disabled = set(cfg.disabled_agents)
+        definitions = {d.name: d for d in BUILTIN_AGENTS if d.name not in disabled}
+        for raw in cfg.custom_agents:
+            try:
+                custom = AgentDefinition.from_dict(raw)
+            except (ValueError, TypeError):
+                continue
+            if custom.name not in disabled:
+                definitions[custom.name] = custom
+        self.definitions = list(definitions.values())
+
+    def configure(self, config: AgentConfig | dict[str, Any]) -> dict[str, Any]:
+        """Change settings mid-consult (hooks, specialists, memory, MCP…)."""
+        old_servers = self.config.mcp_servers
+        self.config = config if isinstance(config, AgentConfig) else \
+            AgentConfig.from_dict({**self.config.to_dict(), **dict(config or {})})
+        if self.config.mcp_servers != old_servers:
+            self.mcp_tools = None
+        self._apply_config()
+        return self.config.to_dict()
+
+    def cancel(self) -> None:
+        """Ask the running turn to stop at the next checkpoint."""
+        self._cancel = True
 
     # ---------------------------------------------------------------- state
     @property
     def facts(self) -> dict[str, Any]:
         return self.toolbox.facts
-
-    def _system(self) -> dict[str, Any]:
-        return {"role": "system",
-                "content": SYSTEM_PROMPT.format(role_text=_ROLE_TEXT[self.role])}
 
     def _emit(self, event: dict[str, Any]) -> None:
         if self.on_event is not None:
@@ -138,190 +250,229 @@ class AgentSession:
             except Exception:  # noqa: BLE001 - a UI hook never breaks a consult
                 pass
 
+    def _mcp(self) -> list[Tool]:
+        if self.mcp_tools is None:
+            self.mcp_tools, self.mcp_status = [], []
+            if self.config.mcp_servers:
+                from .mcp import connect
+
+                self.mcp_tools, self.mcp_status = connect(self.config.mcp_servers)
+                self._emit({"type": "mcp", "servers": self.mcp_status})
+        return self.mcp_tools
+
+    def _submit_tool(self) -> Tool:
+        return Tool(SUBMIT_SPEC.name, SUBMIT_SPEC.description, SUBMIT_SPEC.parameters,
+                    category="control", parallel_safe=False, terminal=True,
+                    label="提交会诊结论")
+
+    def _toolset(self) -> tuple[Toolset, SubAgentRunner | None]:
+        mcp = self._mcp()
+        groups: list[list[Tool]] = [self.toolbox.as_tools(), [self.plan.tool()]]
+        runner = None
+        if self.config.subagents and self.definitions:
+            runner = SubAgentRunner(
+                self.llm, Toolset.of(self.toolbox.as_tools(read_only=True), mcp),
+                definitions=self.definitions, case_notes=lambda: self.facts,
+                emit=self._emit, cancelled=lambda: self._cancel,
+                parallel=self.parallel, temperature=self.config.temperature,
+                max_tokens=min(4000, self.config.max_tokens),
+                instructions=self.config.instructions, post_tool=self._post_tool)
+            groups.append([runner.tool()])
+        groups += [[self.memory.tool()], mcp, [self._submit_tool()]]
+        return Toolset.of(*groups), runner
+
+    def _system(self) -> dict[str, Any]:
+        roster = self.definitions if self.config.subagents else []
+        return {"role": "system",
+                "content": lead_prompt(self.role, roster=roster,
+                                       mcp_tools=[t.name for t in self._mcp()],
+                                       instructions=self.config.instructions)}
+
+    def _refresh_system(self) -> None:
+        if self.messages and self.messages[0].get("role") == "system":
+            self.messages[0] = self._system()
+        else:
+            self.messages.insert(0, self._system())
+
+    def context(self) -> dict[str, Any]:
+        tokens = estimate_tokens(self.messages)
+        window = self.config.context_window
+        return {"tokens": tokens, "window": window,
+                "ratio": round(tokens / window, 4) if window else 0.0,
+                "compact_at": self.config.compact_at,
+                "compactions": self.compactions}
+
     # ------------------------------------------------------------------ turn
     def turn(self, message: str, *, facts: dict[str, Any] | None = None,
              images: list[str] | None = None,
              reports: list[str] | None = None) -> AgentTurn:
         started = time.perf_counter()
+        self._cancel = False
         message = str(message or "").strip()
+        self._refresh_system()
+        compacted = self._maybe_compact()
+        index = len(self.turns)
+        self._checkpoint(message)
         self.narrative.append(message)
         self.toolbox.attachments = {"images": list(images or []),
                                     "reports": list(reports or [])}
-        self._compact_history()
-        self._emit({"type": "turn_start", "message": message})
+        toolset, runner = self._toolset()
+        self._emit({"type": "turn_start", "message": message, "turn": index})
 
         recorded: list[str] = []
         if facts:
             out = self.toolbox.record_case_facts(facts, note="clinician-entered")
             recorded = out["data"]["changed"] + out["data"]["notes"]
-        self._seed_notes(message)
 
-        from ..safety import emergencies
-
-        screen = emergencies.screen("\n".join(self.narrative))
-        emergency = None
-        if screen.hard_hits:
-            emergency = {"signals": [h["label"] for h in screen.hard_hits],
-                         "pathway": emergencies.action_plan(screen)}
-            self._emit({"type": "alert", "emergency": emergency})
-
-        content = self._user_content(message, facts, recorded, emergency)
-        self.messages.append({"role": "user", "content": content})
+        loop = LoopResult()
+        contexts = self._prompt_hooks(message, loop)
+        self.messages.append({"role": "user",
+                              "content": self._user_content(message, facts, recorded,
+                                                            contexts)})
         state = _TurnState()
         error: str | None = None
         try:
-            self._loop(state)
+            run_loop(
+                self.llm, self.messages, toolset, emit=self._emit,
+                terminal=lambda arguments: self._on_submit(arguments, state, loop),
+                terminal_name=SUBMIT_TOOL, agent="lead",
+                max_steps=self.config.max_steps,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens, parallel=self.parallel,
+                cancelled=lambda: self._cancel, nudge=_NUDGE,
+                post_tool=self._post_tool, result=loop)
+        except (Cancelled, KeyboardInterrupt):
+            self._cancel = True
+            loop.stop = "cancelled"
+            self._emit({"type": "cancelled"})
         except LLMError as exc:
             error = str(exc)
+            loop.stop = "error"
             self._emit({"type": "error", "message": error})
         finally:
+            repair_history(self.messages,
+                           "interrupted by the clinician" if loop.stop == "cancelled"
+                           else "not executed")
             self._strip_images()
 
-        consult = state.submission or {}
+        consult = self._final_consult(state, loop)
         reply = str(consult.get("reply") or "").strip()
         if not reply:
             reply = (f"本轮模型调用失败：{error}" if error else
+                     "（已停止）本轮会诊被中断。" if loop.stop == "cancelled" else
                      "模型未提交结论（步数用尽）。请补充信息或重试。")
-        responses = consult.get("rule_responses") or []
-        answered = {str(r.get("rule_id")) for r in responses if isinstance(r, dict)}
-        review = {
-            "findings": state.findings,
-            "responses": responses,
-            "unanswered": [f for f in state.findings if f["rule_id"] not in answered],
-            "rounds": state.review_rounds,
-        }
+        responses = [r for r in consult.get("rule_responses") or [] if isinstance(r, dict)]
+        answered = {str(r.get("rule_id")) for r in responses}
+        review = {"findings": state.findings, "responses": responses,
+                  "unanswered": [f for f in state.findings
+                                 if f["rule_id"] not in answered],
+                  "rounds": state.review_rounds}
+
+        sub = runner.usage if runner else {"calls": 0, "prompt": 0, "completion": 0}
+        self.usage["turns"] += 1
+        self.usage["calls"] += loop.calls + sub["calls"]
+        self.usage["prompt"] += loop.prompt_tokens + sub["prompt"]
+        self.usage["completion"] += loop.completion_tokens + sub["completion"]
+        self.usage["subagent_calls"] += sub["calls"]
+        proposals = self.memory.proposals[self.checkpoints[-1]["proposals"]:]
+        specialists = list(dict.fromkeys(runner.consulted)) if runner else []
+        self.turns.append({"message": message, "reply": reply, "consult": consult,
+                           "review": review, "error": error, "stop": loop.stop,
+                           "specialists": specialists})
         result = AgentTurn(
-            reply=reply, consult=consult, steps=state.steps, review=review,
-            emergency=emergency, facts=json.loads(json.dumps(self.facts, default=str)),
-            engine_stage=self.toolbox.engine_stage(), llm_calls=state.calls,
-            tokens={"prompt": state.prompt_tokens,
-                    "completion": state.completion_tokens},
-            model=state.model or getattr(self.llm, "model", ""),
+            reply=reply, consult=consult, steps=loop.steps, review=review,
+            emergency=self.state.get("emergency"),
+            facts=json.loads(json.dumps(self.facts, default=str)),
+            engine_stage=self.toolbox.engine_stage(),
+            llm_calls=loop.calls + sub["calls"],
+            tokens={"prompt": loop.prompt_tokens + sub["prompt"],
+                    "completion": loop.completion_tokens + sub["completion"]},
+            model=loop.model or getattr(self.llm, "model", ""),
             duration_s=time.perf_counter() - started, error=error,
-            message=message)
-        self.turns.append({"message": message, "reply": reply,
-                           "consult": consult, "review": review,
-                           "error": error})
-        self._emit({"type": "turn_end", "error": error})
+            message=message, turn=index, stop=loop.stop,
+            plan=copy.deepcopy(self.plan.items), memory=proposals,
+            specialists=specialists, context=self.context(),
+            usage=dict(self.usage), compacted=compacted)
+        self._emit({"type": "turn_end", "error": error, "stop": loop.stop,
+                    "context": result.context})
         return result
 
-    # ------------------------------------------------------------------ loop
-    def _loop(self, state: _TurnState) -> None:
-        tools = self.toolbox.specs()
-        nudged = False
-        for step in range(self.max_steps):
-            self._emit({"type": "llm_call", "step": step + 1})
-            response = self.llm.chat(self.messages, tools=tools,
-                                     temperature=self.temperature,
-                                     max_tokens=self.max_tokens)
-            state.calls += 1
-            state.prompt_tokens += response.prompt_tokens
-            state.completion_tokens += response.completion_tokens
-            state.model = response.model or state.model
-            thinking, visible = self._split_reasoning(response)
-            if thinking:
-                state.steps.append({"kind": "thinking", "text": thinking})
-                self._emit({"type": "thinking", "text": thinking})
-            if visible and response.tool_calls:
-                state.steps.append({"kind": "message", "text": visible})
-                self._emit({"type": "message", "text": visible})
+    def _prompt_hooks(self, message: str, loop: LoopResult) -> list[str]:
+        """user_prompt_submit hooks: context for the model, alerts for the
+        clinician (both shown in the trace)."""
+        self.state["emergency"] = None
+        ctx = {"message": message, "narrative": message, "facts": self.toolbox.facts,
+               "state": self.state}
+        contexts = []
+        for hook, outcome in self.hooks.run("user_prompt_submit", ctx):
+            if outcome.alert:
+                self._emit({"type": "alert", "emergency": outcome.alert,
+                            "hook": hook.name})
+            if outcome.context:
+                contexts.append(outcome.context)
+                step = {"kind": "hook", "name": hook.name, "title": hook.title,
+                        "text": outcome.context, "agent": "lead"}
+                loop.steps.append(step)
+                self._emit({"type": "hook", **step})
+        return contexts
 
-            if not response.tool_calls:
-                self.messages.append({"role": "assistant",
-                                      "content": response.text or ""})
-                if response.truncated:
-                    self._continue("你的上一条输出被截断。请更简洁地继续：直接调用工具，或调用 submit_consult 提交结论。")
-                    continue
-                if not nudged and state.submission is None:
-                    # A plain-text answer is a valid answer — but ask once
-                    # for the structured submission so the dossier fills in.
-                    nudged = True
-                    state.submission = {"reply": visible}
-                    self._continue("请调用 submit_consult 提交本轮结论（reply 可直接使用你刚才的回答）。")
-                    continue
-                # The latest plain answer wins — unless the model already
-                # made a structured submission (then that stands).
-                if visible and (state.submission is None
-                                or set(state.submission) <= {"reply"}):
-                    state.submission = {"reply": visible}
-                return
+    def _post_tool(self, name: str, arguments: dict[str, Any],
+                   out: dict[str, Any]) -> str | None:
+        ctx = {"tool": name, "args": arguments, "result": out, "state": self.state}
+        notes = [o.context for _h, o in self.hooks.run("post_tool_use", ctx) if o.context]
+        return "\n".join(notes) or None
 
-            self.messages.append(self._assistant_message(response))
-            done = False
-            for call in response.tool_calls:
-                call_id = call.id or f"call_{step}_{call.name}"
-                if call.name == SUBMIT_TOOL:
-                    observation, done = self._on_submit(call.arguments, state)
-                else:
-                    observation = self._run_tool(call.name, call.arguments, state)
-                self.messages.append({"role": "tool", "tool_call_id": call_id,
-                                      "content": observation})
-            if done:
-                return
-        state.steps.append({"kind": "limit",
-                            "text": f"reached the step budget ({self.max_steps})"})
-
-    def _run_tool(self, name: str, arguments: dict[str, Any],
-                  state: _TurnState) -> str:
-        self._emit({"type": "tool_call", "name": name, "args": arguments})
-        t0 = time.perf_counter()
-        result = self.toolbox.execute(name, arguments)
-        ms = round((time.perf_counter() - t0) * 1000)
-        step = {"kind": "tool", "name": name, "args": arguments,
-                "ok": result["ok"], "summary": result["summary"], "ms": ms}
-        state.steps.append(step)
-        self._emit({"type": "tool_result", **step})
-        return compact({"ok": result["ok"], "summary": result["summary"],
-                        "data": result["data"]})
-
-    def _on_submit(self, arguments: dict[str, Any],
-                   state: _TurnState) -> tuple[str, bool]:
+    def _on_submit(self, arguments: dict[str, Any], state: _TurnState,
+                   loop: LoopResult) -> tuple[dict[str, Any], bool]:
         consult = dict(arguments) if isinstance(arguments, dict) else {}
         if not str(consult.get("reply") or "").strip():
-            return compact({"status": "invalid",
-                            "error": "submit_consult needs a non-empty reply"}), False
+            return {"status": "invalid",
+                    "error": "submit_consult needs a non-empty reply"}, False
         state.submission = consult
-        findings = self.toolbox.review_plan(consult)
+        ctx = {"consult": consult, "facts": self.toolbox.facts, "toolbox": self.toolbox,
+               "state": self.state, "role": self.role}
+        findings: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for hook, outcome in self.hooks.run("stop", ctx):
+            for finding in outcome.findings:
+                if finding.get("rule_id") in seen:
+                    continue
+                seen.add(finding.get("rule_id"))
+                findings.append({**finding, "hook": hook.name})
         state.findings = findings
         answered = {str(r.get("rule_id")) for r in consult.get("rule_responses") or []
                     if isinstance(r, dict)}
         unanswered = [f for f in findings if f["rule_id"] not in answered]
-        state.steps.append({"kind": "submit", "findings": len(findings),
-                            "unanswered": len(unanswered)})
+        loop.steps.append({"kind": "submit", "agent": "lead", "findings": len(findings),
+                           "unanswered": len(unanswered),
+                           "round": state.review_rounds})
         self._emit({"type": "review", "findings": findings,
-                    "unanswered": len(unanswered)})
-        if unanswered and state.review_rounds < self.max_review_rounds:
+                    "unanswered": len(unanswered), "round": state.review_rounds})
+        if unanswered and state.review_rounds < self.config.max_review_rounds:
             state.review_rounds += 1
-            return compact({
+            return {
                 "status": "review",
                 "findings": unanswered,
-                "instruction": "这是规则引擎的复核意见，供你参考，不是硬约束。请逐条判断："
-                               "采纳就修改方案；不采纳就在 rule_responses 写明临床理由。"
-                               "然后再次调用 submit_consult。",
-            }), False
-        return compact({"status": "accepted"}), True
+                "instruction": "这是 hooks（规则引擎、分期一致性、引用/剂量溯源、急症优先）"
+                               "的复核意见，供你参考，不是硬约束。请逐条判断：采纳就修改"
+                               "方案；不采纳就在 rule_responses 写明临床理由。然后再次调用 "
+                               "submit_consult。",
+            }, False
+        return {"status": "accepted"}, True
 
-    def _continue(self, text: str) -> None:
-        self.messages.append({"role": "user", "content": f"[系统] {text}"})
+    @staticmethod
+    def _final_consult(state: _TurnState, loop: LoopResult) -> dict[str, Any]:
+        """A structured submission stands; otherwise the latest plain answer
+        is the answer (a plain-text reply is a valid reply)."""
+        consult = state.submission
+        if loop.stop in ("text", "limit", "cancelled") and loop.text and (
+                consult is None or set(consult) <= {"reply"}):
+            consult = {"reply": loop.text}
+        return consult or {}
 
-    # --------------------------------------------------------------- helpers
-    def _seed_notes(self, message: str) -> None:
-        """Gap-fill the notes from unambiguous patterns in the message; the
-        model sees the notes and corrects them through record_case_facts."""
-        from ..conversation import (
-            extract_facts_deterministic, merge_facts, sanitize_fact_payload,
-        )
-
-        try:
-            extracted = extract_facts_deterministic(message)
-        except Exception:  # noqa: BLE001 - seeding is best effort
-            return
-        cleaned, _notes = sanitize_fact_payload(extracted)
-        merge_facts(self.toolbox.facts, cleaned, overwrite=False)
-
+    # --------------------------------------------------------------- input
     def _user_content(self, message: str, facts: dict[str, Any] | None,
-                      recorded: list[str],
-                      emergency: dict[str, Any] | None) -> Any:
+                      recorded: list[str], contexts: list[str]) -> Any:
         parts = [message or "（无文字，仅附件/结构化事实）"]
         if facts:
             parts.append("【医生录入的结构化事实（已写入病例笔记）】\n"
@@ -329,25 +480,22 @@ class AgentSession:
             notes = [n for n in recorded if isinstance(n, str) and ":" in n]
             if notes:
                 parts.append("【录入校验提示】" + "；".join(notes))
-        if emergency:
-            parts.append("【系统急症筛查·供你判断】命中："
-                         + "、".join(emergency["signals"])
-                         + "。标准处置路径：" + json.dumps(
-                             emergency["pathway"].get("immediate_actions"),
-                             ensure_ascii=False))
+        parts += contexts
+        if self.plan.items:
+            parts.append("【当前会诊计划】\n" + "\n".join(
+                f"- [{i['status']}] {i['content']}" for i in self.plan.items))
         attachments = self.toolbox.attachments
-        n_att = len(attachments["images"]) + len(attachments["reports"])
-        if n_att:
+        vision = getattr(self.llm, "supports_vision", False)
+        if attachments["images"] or attachments["reports"]:
             parts.append(f"【本轮附件】{len(attachments['images'])} 张影像、"
                          f"{len(attachments['reports'])} 份报告图片"
-                         + ("（已直接附上，也可用 read_attachment 结构化读取）"
-                            if getattr(self.llm, "supports_vision", False)
+                         + ("（已直接附上，也可用 read_attachment 结构化读取）" if vision
                             else "（可用 read_attachment 读取）"))
         parts.append("【当前病例笔记】" + json.dumps(self.facts, ensure_ascii=False,
                                                 default=str))
         text = "\n\n".join(parts)
         refs = attachments["images"] + attachments["reports"]
-        if refs and getattr(self.llm, "supports_vision", False):
+        if refs and vision:
             from ..perception.imaging import ImagingError, load_image_refs
 
             try:
@@ -372,86 +520,277 @@ class AgentSession:
                 message["content"] = "\n".join(texts) + (
                     f"\n[{images} 张附件图片已在当轮查看]" if images else "")
 
-    def _compact_history(self, budget_chars: int = 90_000) -> None:
-        """Keep the prompt bounded: older turns collapse into a summary."""
-        if not self.messages or self.messages[0].get("role") != "system":
-            self.messages.insert(0, self._system())
-        else:
-            self.messages[0] = self._system()
-        size = len(json.dumps(self.messages, ensure_ascii=False, default=str))
-        if size <= budget_chars or len(self.turns) < 2:
-            return
-        starts = [i for i, m in enumerate(self.messages)
-                  if m.get("role") == "user"
-                  and not str(m.get("content") or "").startswith("[系统]")
-                  and not str(m.get("content") or "").startswith("【此前会诊摘要】")]
-        if len(starts) < 2:
-            return
-        keep_from = starts[-1]
-        summary = ["【此前会诊摘要】"]
-        for t in self.turns[:-1]:
-            summary.append(f"医生：{t.get('message', '')[:400]}")
-            summary.append(f"你的结论：{t.get('reply', '')[:800]}")
-        self.messages = [self.messages[0],
-                         {"role": "user", "content": "\n".join(summary)},
-                         {"role": "assistant", "content": "好的，我已了解此前的会诊经过。"},
-                         *self.messages[keep_from:]]
+    # ------------------------------------------------------ context window
+    def _turn_starts(self) -> list[int]:
+        return [i for i, m in enumerate(self.messages)
+                if m.get("role") == "user" and isinstance(m.get("content"), str)
+                and not m["content"].startswith((_SYSTEM_PREFIX, _SUMMARY_PREFIX))]
 
-    @staticmethod
-    def _split_reasoning(response: Any) -> tuple[str, str]:
-        text = response.text or ""
-        thinking = ""
-        raw = getattr(response, "raw", None) or {}
-        try:
-            message = (raw.get("choices") or [{}])[0].get("message") or {}
-        except (AttributeError, IndexError, TypeError):
-            message = {}
-        for key in ("reasoning_content", "reasoning"):
-            if isinstance(message.get(key), str) and message[key].strip():
-                thinking = message[key].strip()
-                break
-        found = _THINK_RE.findall(text)
-        if found:
-            thinking = "\n".join([thinking] + [f.strip() for f in found]).strip()
-            text = _THINK_RE.sub("", text)
-        return thinking, text.strip()
+    def _maybe_compact(self) -> dict[str, Any] | None:
+        cfg = self.config
+        if estimate_tokens(self.messages) <= cfg.compact_at * cfg.context_window:
+            return None
+        outcome = self.compact()
+        return outcome if outcome.get("ok") else None
 
-    @staticmethod
-    def _assistant_message(response: Any) -> dict[str, Any]:
+    def compact(self, keep_last: int = 1) -> dict[str, Any]:
+        """Summarise all but the last ``keep_last`` turns into one message
+        (written by the model; deterministic fallback). Checkpoints before
+        the cut are dropped — rewinding across a compaction is impossible."""
+        starts = self._turn_starts()
+        keep_last = max(0, int(keep_last))
+        if len(starts) <= keep_last or len(self.turns) <= keep_last:
+            return {"ok": False, "reason": "没有可压缩的早期轮次"}
+        before = estimate_tokens(self.messages)
+        cut = starts[-keep_last] if keep_last else len(self.messages)
+        older = self.turns[:len(self.turns) - keep_last]
+        self._emit({"type": "compact_start", "turns": len(older)})
+        summary, by_model = summarize(self.llm, older)
+        if by_model:
+            self.usage["calls"] += 1
+        system = self.messages[0] if self.messages and \
+            self.messages[0].get("role") == "system" else self._system()
+        self.messages = [system, {"role": "user", "content": summary},
+                         {"role": "assistant",
+                          "content": "好的，我已了解此前的会诊经过，会在此基础上继续。"},
+                         *self.messages[cut:]]
+        self.checkpoints = []
+        self.compactions += 1
+        info = {"ok": True, "by_model": by_model, "turns": len(older),
+                "before": before, "after": estimate_tokens(self.messages)}
+        self._emit({"type": "compact", **info})
+        return info
+
+    # --------------------------------------------------------- checkpoints
+    def _checkpoint(self, message: str) -> None:
+        self.checkpoints.append({
+            "turn": len(self.turns), "message": message,
+            "messages": len(self.messages), "narrative": len(self.narrative),
+            "facts": copy.deepcopy(self.toolbox.facts),
+            "plan": copy.deepcopy(self.plan.items),
+            "evidence_seen": sorted(self.state["evidence_seen"]),
+            "dosing_seen": sorted(self.state["dosing_seen"]),
+            "proposals": len(self.memory.proposals),
+        })
+
+    def rewind(self, turn: int | None = None) -> dict[str, Any]:
+        """Restore the session to just BEFORE ``turn`` (0-based; default:
+        the last turn): history, case notes, plan and evidence ledger.
+        Returns the rewound message so a surface can put it back in the
+        composer."""
+        if not self.checkpoints:
+            raise ValueError("没有可回退的检查点（会诊尚未开始，或早期轮次已被压缩）")
+        if turn is None:
+            turn = self.checkpoints[-1]["turn"]
+        point = next((c for c in self.checkpoints if c["turn"] == int(turn)), None)
+        if point is None:
+            available = [c["turn"] for c in self.checkpoints]
+            raise ValueError(f"第 {int(turn) + 1} 轮没有检查点（可回退：" +
+                             "、".join(str(t + 1) for t in available) + "）")
+        removed = self.turns[point["turn"]:]
+        del self.messages[point["messages"]:]
+        del self.narrative[point["narrative"]:]
+        del self.turns[point["turn"]:]
+        self.toolbox.facts.clear()
+        self.toolbox.facts.update(copy.deepcopy(point["facts"]))
+        self.plan.items = copy.deepcopy(point["plan"])
+        self.state = {"evidence_seen": set(point["evidence_seen"]),
+                      "dosing_seen": set(point["dosing_seen"]), "emergency": None}
+        del self.memory.proposals[point["proposals"]:]
+        self.checkpoints = [c for c in self.checkpoints if c["turn"] < point["turn"]]
+        self._emit({"type": "rewind", "turn": point["turn"]})
+        return {"turn": point["turn"], "turns": len(self.turns),
+                "removed": len(removed), "message": point["message"],
+                "facts": json.loads(json.dumps(self.facts, default=str)),
+                "plan": copy.deepcopy(self.plan.items)}
+
+    # ------------------------------------------------------------ describe
+    def info(self) -> dict[str, Any]:
+        from .commands import listing
+
+        toolset, _ = self._toolset()
         return {
-            "role": "assistant",
-            "content": response.text or "",
-            "tool_calls": [{
-                "id": call.id or f"call_{i}_{call.name}",
-                "type": "function",
-                "function": {"name": call.name,
-                             "arguments": json.dumps(call.arguments,
-                                                     ensure_ascii=False)},
-            } for i, call in enumerate(response.tool_calls)],
+            "role": self.role, "turns": len(self.turns),
+            "config": self.config.to_dict(), "parallel": self.parallel,
+            "tools": toolset.describe(),
+            "agents": [d.to_dict() for d in self.definitions],
+            "subagents": self.config.subagents,
+            "hooks": self.hooks.describe(),
+            "mcp": self.mcp_status,
+            "plan": copy.deepcopy(self.plan.items),
+            "usage": dict(self.usage), "context": self.context(),
+            "checkpoints": [{"turn": c["turn"], "message": c["message"][:120]}
+                            for c in self.checkpoints],
+            "instructions": self.config.instructions,
+            "builtin_agents": [d.to_dict() for d in BUILTIN_AGENTS],
+            "commands": listing(),
         }
+
+    def local_command(self, name: str, arg: str = "") -> dict[str, Any]:
+        """Run a LOCAL slash command (see :mod:`.commands`); returns
+        ``{"command", "text" (Markdown), "data"}``. ``/clear`` is the
+        surface's job (it starts a new session)."""
+        from .commands import listing
+
+        name = str(name or "").strip().lower()
+        if name == "compact":
+            data = self.compact()
+            text = (f"已压缩 {data['turns']} 轮早期会诊（{'模型撰写摘要' if data['by_model'] else '确定性摘要'}），"
+                    f"上下文 {data['before']} → {data['after']} tokens。"
+                    if data.get("ok") else data.get("reason", "无需压缩"))
+        elif name == "rewind":
+            target = None
+            if str(arg).strip():
+                try:
+                    target = int(str(arg).strip()) - 1
+                except ValueError as exc:
+                    raise ValueError("用法：/rewind [轮次]，例如 /rewind 2") from exc
+            data = self.rewind(target)
+            text = f"已回退到第 {data['turn'] + 1} 轮之前（撤销 {data['removed']} 轮）。"
+        elif name == "usage":
+            ctx = self.context()
+            data = {"usage": dict(self.usage), "context": ctx}
+            text = (f"模型调用 {self.usage['calls']} 次（其中专科子智能体 "
+                    f"{self.usage['subagent_calls']} 次），输入 {self.usage['prompt']} / "
+                    f"输出 {self.usage['completion']} tokens；上下文约 {ctx['tokens']} / "
+                    f"{ctx['window']} tokens（{ctx['ratio']:.0%}），已压缩 {self.compactions} 次。")
+        elif name == "agents":
+            data = {"agents": [d.to_dict() for d in self.definitions],
+                    "enabled": self.config.subagents}
+            text = ("专科子智能体" + ("" if self.config.subagents else "（已停用）") + "：\n"
+                    + "\n".join(f"- **{d.title}** `{d.name}` — {d.description}"
+                                for d in self.definitions))
+        elif name == "tools":
+            toolset, _ = self._toolset()
+            data = {"tools": toolset.describe()}
+            text = "可调用的工具：\n" + "\n".join(
+                f"- `{t['name']}`（{t['label']}，{t['category']}）" for t in data["tools"])
+        elif name == "hooks":
+            data = {"hooks": self.hooks.describe()}
+            text = "Hooks（均为参考意见，不是硬约束）：\n" + "\n".join(
+                f"- {'✓' if h['enabled'] else '✗'} **{h['title']}** `{h['name']}` "
+                f"[{h['event']}] — {h['description']}" for h in data["hooks"])
+        elif name == "memory":
+            data = {"instructions": self.config.instructions,
+                    "proposals": list(self.memory.proposals)}
+            text = ("已载入的机构规范与用户偏好：\n\n" + self.config.instructions
+                    if self.config.instructions.strip() else "尚未载入记忆（NSCLC.md / 记忆面板）。")
+            if self.memory.proposals:
+                text += "\n\n本次会诊中智能体提议记住：\n" + "\n".join(
+                    f"- {p}" for p in self.memory.proposals)
+        elif name == "help":
+            data = {"commands": listing()}
+            text = "命令：\n" + "\n".join(
+                f"- `/{c['name']}{(' ' + c['args']) if c['args'] else ''}` — {c['description']}"
+                for c in data["commands"])
+        else:
+            raise ValueError(f"/{name} 不是本地命令")
+        return {"command": name, "text": text, "data": data}
 
     # ------------------------------------------------------- serialization
     def to_dict(self) -> dict[str, Any]:
         return {"format": SESSION_FORMAT, "mode": "agent",
                 "facts": self.facts, "narrative": self.narrative,
-                "turns": self.turns, "messages": self.messages[1:]}
+                "turns": self.turns, "messages": self.messages[1:],
+                "plan": self.plan.items,
+                "ledger": {"evidence_seen": sorted(self.state["evidence_seen"]),
+                           "dosing_seen": sorted(self.state["dosing_seen"])},
+                "checkpoints": self.checkpoints, "usage": self.usage,
+                "compactions": self.compactions}
 
     @classmethod
     def load(cls, data: dict[str, Any], llm: Any, *, role: str = "oncologist",
              vision_llm: Any | None = None, **kwargs: Any) -> "AgentSession":
-        """Resume a session. Authority (role) comes from the CALLER, never
-        from the file; the system prompt is rebuilt, never restored."""
-        if not isinstance(data, dict) or data.get("format") != SESSION_FORMAT:
+        """Resume a session. Authority (role, configuration) comes from the
+        CALLER, never from the file; the system prompt is rebuilt, never
+        restored; facts are re-validated."""
+        if not isinstance(data, dict) or data.get("format") not in _READABLE_FORMATS:
             raise ValueError("not an NSCLC-Agent agent session")
         session = cls(llm, role=role, vision_llm=vision_llm, **kwargs)
-        from ..conversation import merge_facts, sanitize_fact_payload
-
-        cleaned, _ = sanitize_fact_payload(dict(data.get("facts") or {}))
-        merge_facts(session.toolbox.facts, cleaned, overwrite=True)
+        session.toolbox.facts.update(_clean_facts(data.get("facts")))
         session.narrative = [str(x) for x in data.get("narrative") or []]
         session.turns = [t for t in data.get("turns") or [] if isinstance(t, dict)]
         messages = [m for m in data.get("messages") or []
-                    if isinstance(m, dict)
-                    and m.get("role") in ("user", "assistant", "tool")]
+                    if isinstance(m, dict) and m.get("role") in ("user", "assistant", "tool")]
         session.messages = [session._system(), *messages]
+        repair_history(session.messages, "not executed")
+        session.plan.items = Plan(data.get("plan") if isinstance(data.get("plan"), list)
+                                  else []).items
+        ledger = data.get("ledger") if isinstance(data.get("ledger"), dict) else {}
+        for key in ("evidence_seen", "dosing_seen"):
+            session.state[key] = {str(x) for x in ledger.get(key) or []}
+        usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        for key in session.usage:
+            try:
+                session.usage[key] = max(0, int(usage.get(key, 0)))
+            except (TypeError, ValueError):
+                pass
+        session.compactions = int(data.get("compactions") or 0) \
+            if str(data.get("compactions") or "0").isdigit() else 0
+        session.checkpoints = _clean_checkpoints(data.get("checkpoints"), session)
         return session
+
+
+def _clean_facts(raw: Any) -> dict[str, Any]:
+    from ..conversation import merge_facts, sanitize_fact_payload
+
+    cleaned, _ = sanitize_fact_payload(dict(raw) if isinstance(raw, dict) else {})
+    out: dict[str, Any] = {}
+    merge_facts(out, cleaned, overwrite=True)
+    return out
+
+
+def _clean_checkpoints(raw: Any, session: AgentSession) -> list[dict[str, Any]]:
+    """Checkpoints from a file are re-validated; any inconsistency drops
+    them all (the session still loads, it just cannot rewind)."""
+    out: list[dict[str, Any]] = []
+    try:
+        for item in raw or []:
+            point = {"turn": int(item["turn"]), "message": str(item.get("message") or ""),
+                     "messages": int(item["messages"]), "narrative": int(item["narrative"]),
+                     "facts": _clean_facts(item.get("facts")),
+                     "plan": Plan(item.get("plan") or []).items,
+                     "evidence_seen": [str(x) for x in item.get("evidence_seen") or []],
+                     "dosing_seen": [str(x) for x in item.get("dosing_seen") or []],
+                     "proposals": 0}
+            if not (0 <= point["turn"] < len(session.turns) + 1
+                    and 1 <= point["messages"] <= len(session.messages)
+                    and 0 <= point["narrative"] <= len(session.narrative)):
+                return []
+            out.append(point)
+    except (KeyError, TypeError, ValueError):
+        return []
+    return out
+
+
+def runtime_catalog(config: AgentConfig | dict[str, Any] | None = None) -> dict[str, Any]:
+    """What a consult would run with — tools, specialists, hooks, commands —
+    without a model or a session (settings panels, ``/help`` before the
+    first turn)."""
+    from .commands import listing
+
+    cfg = config if isinstance(config, AgentConfig) else AgentConfig.from_dict(config)
+    toolbox = AgentToolbox()
+    disabled = set(cfg.disabled_agents)
+    agents = {d.name: d for d in BUILTIN_AGENTS if d.name not in disabled}
+    for raw in cfg.custom_agents:
+        try:
+            custom = AgentDefinition.from_dict(raw)
+        except (ValueError, TypeError):
+            continue
+        if custom.name not in disabled:
+            agents[custom.name] = custom
+    tools = Toolset.of(toolbox.as_tools(), [Plan().tool(), MemoryNotes().tool()]).describe()
+    if cfg.subagents and agents:
+        tools.append({"name": "delegate", "category": "delegation", "label": "请专科会诊",
+                      "description": "Delegate a focused question to a specialist sub-agent"})
+    tools.append({"name": SUBMIT_TOOL, "category": "control", "label": "提交会诊结论",
+                  "description": "Submit the consult conclusion (terminal)"})
+    return {"role": None, "turns": 0, "config": cfg.to_dict(), "tools": tools,
+            "agents": [d.to_dict() for d in agents.values()],
+            "builtin_agents": [d.to_dict() for d in BUILTIN_AGENTS],
+            "subagents": cfg.subagents,
+            "hooks": HookRunner(builtin_hooks(), cfg.hooks).describe(),
+            "mcp": [], "plan": [], "usage": {}, "context": {},
+            "checkpoints": [], "instructions": cfg.instructions,
+            "commands": listing()}
