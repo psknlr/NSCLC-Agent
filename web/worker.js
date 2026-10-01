@@ -15,6 +15,12 @@ const PYODIDE_BASE = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/
 let api = null;
 let pyodide = null;
 
+/* Live agent progress: Python calls this mid-turn (js.agentEvent); the page
+   receives each event while the worker is still busy with the turn. */
+self.agentEvent = (json) => {
+  try { self.postMessage({ type: "event", data: JSON.parse(json) }); } catch (_) { /* ignore */ }
+};
+
 function progress(stage, detail) {
   self.postMessage({ type: "progress", stage, detail });
 }

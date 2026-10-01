@@ -52,6 +52,15 @@ const patient = call("run_case", Object.assign({}, call("examples")[0].case, { r
 check("patient role returns the patient view only", Object.keys(patient.views).join() === "patient");
 
 call("configure_llm", { provider: "mock" });
+const agentEvents = [];
+globalThis.agentEvent = (json) => agentEvents.push(JSON.parse(json));
+call("agent_new", { role: "oncologist" });
+const agentTurn = call("agent_turn", { message: "68岁女性，肺腺癌 cT2bN2bM0，EGFR L858R，ALK阴性，不可切除，脑MRI阴性，无咯血。" });
+check("model-led agent turn (tool loop + review)", agentTurn.mode === "agent"
+  && agentTurn.steps.some((s) => s.kind === "tool") && (agentTurn.consult || {}).stage_group === "IIIB",
+  `${agentTurn.steps.length} steps · ${agentTurn.llm_calls} model calls`);
+check("live agent events stream from the worker", agentEvents.some((e) => e.type === "tool_call")
+  && agentEvents[agentEvents.length - 1].type === "turn_end", `${agentEvents.length} events`);
 const panel = call("run_case", Object.assign({}, call("examples")[1].case, { role: "oncologist", enable_panel: true }));
 check("mock model + MDT panel (serial scheduling)", Boolean(panel.release_status), panel.release_status);
 call("chat_new", { role: "oncologist" });

@@ -1,5 +1,10 @@
 """Provider-neutral LLM interface for the NSCLC harness.
 
+Two ways a model is used. In agent mode (``nsclc_agent.agentic``) the model
+LEADS the consult — it reasons, calls tools and decides, and the
+deterministic kernel serves it as tools and an advisory reviewer. In
+governed mode, the rest of this docstring holds:
+
 The model is an *advisory* component inside a hard control plane: it may
 propose a task plan, choose tools within its skill's grant, compose interview
 questions and draft treatment reasoning — but it can never assign a stage
