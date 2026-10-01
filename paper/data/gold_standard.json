@@ -40,6 +40,12 @@
   "pipeline": 42,
   "audit": 28
  },
+ "releases": {
+  "treatment_recommendation": 35,
+  "needs_more_information": 5,
+  "needs_staging_workup": 1,
+  "emergency_action_plan": 1
+ },
  "passed": 70,
  "total": 70,
  "error_taxonomy": {

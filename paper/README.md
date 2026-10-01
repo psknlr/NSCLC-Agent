@@ -5,7 +5,7 @@ running this repository. Nothing is typed in by hand.
 
 ```bash
 pip install matplotlib python-docx pdfplumber pypdf pillow
-python paper/analysis.py      # experiments → paper/data/*.json   (~3 min)
+python paper/analysis.py      # experiments → paper/data/*.json   (~3 min; or name steps)
 python paper/make_figures.py  # → paper/figures/*.pdf|svg|png   (183 mm, final size)
 python paper/make_tables.py   # → paper/tables/*.docx|tex|md    (three-line, editable)
 python paper/qc.py            # Nature display-item QC → paper/QC.md
@@ -15,15 +15,19 @@ python paper/qc.py            # Nature display-item QC → paper/QC.md
 
 | Item | Message | Data |
 |---|---|---|
-| **Fig. 1** | What the system is: a model-led agent runtime on a deterministic clinical kernel | Architecture; guideline KB (2,960 recommendations, 6 guidelines); kernel inventory |
+| **Fig. 1** | What the system is: a model-led agent runtime on a deterministic clinical kernel | Full framework: interfaces, agent runtime (lead, specialists, tools, hooks, session, providers), kernel, evaluation; counts read from the code |
 | **Fig. 2** | Stage is computed, never generated; ambiguity is refused | AJCC/UICC 9th-edition T×N×M matrix; gold-standard accuracy with exact 95% CIs (70 cases) |
 | **Fig. 3** | Advisory hooks cover the defect space of agent consults | Perturbation study: 35 released plans × 7 injected defect classes; clean baseline 2/35 |
 | **Fig. 4** | The runtime scales and stays bounded | Wall clock vs number of specialists (serial vs concurrent); prompt size with and without compaction |
+| **Fig. 5** | A worked consult: the hooks catch real errors and the model revises | Unresectable IIIB EGFR L858R: timed MDT trace, draft → 3 findings → revision with none; all 40 library regimens checked against the case |
 | **Extended Data Fig. 1** | Each specialist reads only what it needs | Lead and specialist × tool access matrix |
+| **Extended Data Fig. 2** | What the kernel knows | Guideline KB by source and topic; trial registry by setting and stage; kernel inventory |
+| **Extended Data Fig. 3** | How governed mode decides what may be released | Release state machine with the gold-standard count in each state |
 | **Table 1** | The runtime, mapped to mainstream agent-runtime patterns | — |
 | **Table 2** | The hooks that hold the clinical safety nets | — |
 | **Extended Data Table 1** | Gold-standard evaluation | 70 cases, Clopper–Pearson CIs |
 | **Extended Data Table 2** | Bilingual emergency screen | 25-phrase battery (positive, negated, third-party, hypothetical) |
+| **Extended Data Table 3** | The deterministic safety rules | 20 rules, 23 finding identifiers, severities, audit probes raising each |
 
 Legends are in [`legends.md`](legends.md) (each under 300 words, with n, the
 interval definition and the method stated). The QC report is in [`QC.md`](QC.md).
@@ -55,6 +59,11 @@ substitution as a warning.
   real models make these errors.
 - **Runtime scaling (Fig. 4a).** Model latency is simulated at 250 ms per call;
   the tools are real. Concurrency is capped at six worker threads.
+- **Case study (Fig. 5).** The model's decisions are scripted by the authors to
+  reproduce a common error (8th-edition stage; PACIFIC consolidation in EGFR-mutant
+  disease). Tools, sub-agents, hooks and the review loop are the real runtime. Model
+  latency is simulated at 0.6 s per call. The figure shows what the runtime does with
+  such an error; it does not show how often a real model makes it.
 - **Context study (Fig. 4b).** Uses the offline mock model. Token counts are
   provider-neutral estimates.
 - **Model quality.** Agent-mode clinical quality with real models has not been

@@ -7,7 +7,7 @@
 > 内容寻址的记录/重放日志，以及模型驱动的规划、ReAct 工具循环、主动问诊与
 > 多学科会诊。
 
-**两种会诊模式（v1.1.0 · 中文 / English）**
+**两种会诊模式（v1.1.1 · 中文 / English）**
 
 * **模型主导（agent，接入模型后的默认）**：一个按主流智能体架构（Claude Code / Grok CLI /
   Codex / OpenAI Agents SDK）构建的**智能体运行时**——主诊智能体自主思考、用 `update_plan`
@@ -75,6 +75,11 @@ Source 选 "GitHub Actions"**。它取代了 Jekyll 渲染 README 的工作流�
 ---
 
 ## 架构
+
+![NSCLC-Agent 智能体框架（论文 Fig. 1）](paper/figures/Fig1.png)
+
+*智能体框架（论文 Fig. 1）：界面层 → 智能体运行时（主诊模型、7 位专科子智能体、20 个确定性临床工具、8 个 hooks、会话状态）→ 两种模式共用的确定性临床内核。
+分期、适应证、规则判定与剂量只来自内核，从不由模型生成。下方为受治理模式的控制层。*
 
 ```
  认知层（可替换，仅提案）              控制层（不可绕过）                     确定性内核
@@ -742,13 +747,20 @@ tools: prognosis, check_organ_function, interaction_check
 修复后金标准评测仍为 70/70，不安全放行仍为 0/35。
 
 **论文图表（`paper/`）。** 全部图表都由脚本复现，所有数值均来自运行本仓库，没有手工填写的数字：
-- **Fig. 1** 系统与知识底座；
+- **Fig. 1** 完整智能体框架：界面层、智能体运行时（主诊、专科子智能体、工具、hooks、会话状态、模型接入）、确定性临床内核与评测；
 - **Fig. 2** AJCC/UICC 第 9 版分期矩阵（含拒绝）与金标准精确 95% 置信区间；
 - **Fig. 3** Hooks 缺陷注入实验：35 例放行方案 × 7 类缺陷全部检出，无缺陷基线 2/35；
 - **Fig. 4** 专科并行的耗时，以及上下文压缩；
-- **Extended Data Fig. 1**；
-- 4 张三线表（可编辑 Word / LaTeX / Markdown）；
+- **Fig. 5** 完整案例（IIIB 不可切除 · EGFR L858R）：带时间轴的 MDT 会诊轨迹；草稿给出第 8 版分期与度伐利尤单抗巩固，
+  hooks 提出 3 条意见，模型改为 IIIB + 奥希替尼巩固（LAURA）后无意见；方案库 40 个方案逐条适应证核对（2 个适用）；
+- **Extended Data Fig. 1–3**：专科工具权限矩阵；知识底座（指南 × 主题、试验 × 分期覆盖）；受治理模式的放行状态机（含金标准各状态计数）；
+- 5 张三线表（可编辑 Word / LaTeX / Markdown），新增 Extended Data Table 3：20 条安全规则及其触发的 23 种意见；
 - 图注见 `paper/legends.md`，按 Nature 规范自检的报告见 `paper/QC.md`。
+
+**规则引擎修复（v1.1.1）。** 制作案例图时发现一处误报：“同步放化疗，随后度伐利尤单抗巩固”这类按先后顺序书写的方案，
+因同一分句里同时出现 “concurrent” 与 “durvalumab”，被 `NO_CONCURRENT_DURVALUMAB` 误判为同步用药。
+现在有两条判断路径，任一命中即拦截：一是按 then / followed by / after / 随后 / 之后 等顺序词把分句切成步骤，逐步判断；二是把“同步放化疗 / concurrent chemoradiation”当作治疗名称，再看整句是否仍把度伐利尤单抗与放疗放在一起（如 “…alongside the remaining RT”）。真正的同步用药仍会拦截。
+已补充回归测试，金标准与缺陷注入实验的结果不变。
 
 图表规格：183 mm 双栏，文字 5–7 pt，Okabe–Ito 色盲安全配色，矢量 PDF 保留可编辑文字。
 当前环境没有 Arial，图中字体用的是度量完全一致的 Liberation Sans；在装有 Arial 的机器上重跑 `make_figures.py` 即会自动换成 Arial。
@@ -887,7 +899,7 @@ paper/       论文图表：analysis.py → make_figures.py / make_tables.py / q
 
 ```bash
 pip install pytest
-python -m pytest -q            # 674 passed，全离线
+python -m pytest -q            # 682 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 43/43
 python -m nsclc_agent eval     # 金标准 70/70：分期40/40 路由11/11 方案35/35
                                # 安全42/42 · unsafe_release_rate 0/35 · 分类学全零

@@ -1,0 +1,214 @@
+{
+ "rules": [
+  {
+   "function": "_rule_n3_no_surgery",
+   "violations": [
+    [
+     "N3_NO_SURGERY",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_driver_excludes_periop_io",
+   "violations": [
+    [
+     "DRIVER_EXCLUDES_PERIOP_IO",
+     "warn"
+    ],
+    [
+     "DRIVER_EXCLUDES_PERIOP_IO",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_egfr_variant_mismatch",
+   "violations": [
+    [
+     "EGFR_VARIANT_MISMATCH",
+     "block"
+    ],
+    [
+     "EGFR_VARIANT_MISMATCH",
+     "warn"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_egfr_iii_consolidation",
+   "violations": [
+    [
+     "EGFR_III_CONSOLIDATION",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_no_concurrent_durvalumab",
+   "violations": [
+    [
+     "NO_CONCURRENT_DURVALUMAB",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_rt_dose",
+   "violations": [
+    [
+     "NO_RT_DOSE_ESCALATION",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_trial_stage_boundary",
+   "violations": [
+    [
+     "TRIAL_EDITION_MIGRATION",
+     "warn"
+    ],
+    [
+     "TRIAL_STAGE_EXTRAPOLATION",
+     "warn"
+    ],
+    [
+     "TRIAL_STAGE_BOUNDARY",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_stage0_no_systemic",
+   "violations": [
+    [
+     "STAGE0_NO_SYSTEMIC",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_indication_predicate",
+   "violations": [
+    [
+     "INDICATION_UNDECLARED",
+     "block"
+    ],
+    [
+     "INDICATION_PREDICATE",
+     "block"
+    ],
+    [
+     "INDICATION_PREDICATE",
+     "warn"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_driver_first_line",
+   "violations": [
+    [
+     "DRIVER_FIRST_LINE",
+     "warn"
+    ],
+    [
+     "DRIVER_FIRST_LINE",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_option_drug_unbound",
+   "violations": [
+    [
+     "OPTION_DRUG_UNBOUND",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_consolidation_requires_crt",
+   "violations": [
+    [
+     "CONSOLIDATION_WITHOUT_CRT",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_progression_same_drug",
+   "violations": [
+    [
+     "PROGRESSION_SAME_DRUG",
+     "warn"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_cns_untreated_symptomatic",
+   "violations": [
+    [
+     "CNS_UNTREATED_SYMPTOMATIC",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_cns_tnm_consistency",
+   "violations": [
+    [
+     "CNS_TNM_INCONSISTENT",
+     "warn"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_organ_function",
+   "violations": [
+    [
+     "ORGAN_FUNCTION_GATE",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_ici_comorbidity",
+   "violations": [
+    [
+     "ICI_COMORBIDITY_CAUTION",
+     "warn"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_ps_gate",
+   "violations": [
+    [
+     "PS_GATE",
+     "warn"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_biomarker_before_systemic",
+   "violations": [
+    [
+     "BIOMARKER_GAP",
+     "block"
+    ]
+   ]
+  },
+  {
+   "function": "_rule_dose_scan",
+   "violations": [
+    [
+     "DOSE_IN_MODEL_OUTPUT",
+     "block"
+    ]
+   ]
+  }
+ ],
+ "n_functions": 20,
+ "n_ids": 23
+}

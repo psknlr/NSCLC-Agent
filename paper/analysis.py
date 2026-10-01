@@ -21,7 +21,12 @@ Experiments
   compaction (offline mock model);
 * emergency screen: a bilingual phrasing battery (positive, negated,
   third-party, hypothetical);
-* specialist × tool access matrix.
+* specialist × tool access matrix;
+* worked case (Fig. 5): an MDT consult on the IIIB EGFR example with scripted
+  model decisions and simulated latency — real tools, sub-agents, hooks and
+  review loop — plus every library regimen checked against the case;
+* safety-rule catalogue (finding identifiers and severities read from the
+  rule source).
 """
 
 from __future__ import annotations
@@ -121,12 +126,15 @@ def gold_standard() -> None:
         "Unsafe-release rate": ratio(summary["unsafe_release_rate"]),
     }
     kinds = Counter(r["kind"] for r in report["results"])
+    releases = Counter(r["release_status"] for r in report["results"]
+                       if r["kind"] == "pipeline")
     violations = Counter()
     for r in report["results"]:
         for rule_id, severity in r.get("violations") or []:
             violations[(rule_id, severity)] += 1
     save("gold_standard", {
-        "metrics": metrics, "kinds": dict(kinds), "passed": summary["passed"],
+        "metrics": metrics, "kinds": dict(kinds), "releases": dict(releases),
+        "passed": summary["passed"],
         "total": summary["total"], "error_taxonomy": summary["error_taxonomy"],
         "unsafe_release_breakdown": summary["unsafe_release_breakdown"],
         "audit_violations": [{"rule_id": r, "severity": s, "count": c}
@@ -182,10 +190,30 @@ def knowledge() -> None:
     by_gv = Counter(r.get("gv") for r in recs)
     topics = Counter(r.get("topic") or "other" for r in recs)
     gold = json.loads((ROOT / "nsclc_agent/eval/golden/cases.json").read_text(encoding="utf-8"))
+    order = [gv for gv, _n in by_gv.most_common()]
+    top = [t for t, _n in topics.most_common(9)]
+    by_topic = Counter((r.get("gv"), r.get("topic") if r.get("topic") in top else "other")
+                       for r in recs)
+    stages = ["IA1", "IA2", "IA3", "IB", "IIA", "IIB", "IIIA", "IIIB", "IIIC", "IVA", "IVB"]
+    settings = [s for s, _n in Counter(t.setting for t in trials.TRIALS).most_common()]
+    coverage = [[sum(1 for t in trials.TRIALS if t.setting == s and g in t.stage_groups)
+                 for g in stages] for s in settings]
+    from nsclc_agent.agentic.commands import COMMANDS
+    import subprocess
+
+    collected = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q"],
+                               cwd=ROOT, capture_output=True, text=True).stdout
+    tests = sum(1 for line in collected.splitlines() if "::" in line)
     save("knowledge", {
         "guidelines": [{"id": gv, "label": meta["guidelines"].get(gv, gv), "recommendations": n}
                        for gv, n in by_gv.most_common()],
         "topics": topics.most_common(),
+        "topic_matrix": {"guidelines": order, "topics": top + ["other"],
+                         "counts": [[by_topic[(gv, t)] for t in top + ["other"]]
+                                    for gv in order]},
+        "trial_coverage": {"stages": stages, "settings": settings, "counts": coverage,
+                           "trials": len(trials.TRIALS)},
+        "commands": len(COMMANDS), "tests": tests,
         "kg_total": len(recs), "kg_clusters": meta.get("clusters"),
         "assets": {"Trials (registry)": len(trials.TRIALS), "Regimens (library)": len(regimens.REGIMENS),
                    "Indication predicates": len(indications.INDICATIONS),
@@ -466,6 +494,196 @@ def emergency_battery() -> None:
         for (c, l), v in sorted(groups.items())]})
 
 
+# --------------------------------------------------------------- case study
+CASE_ID = "iiib_egfr"
+CASE_LATENCY = 0.6  # simulated seconds per model call
+DRAFT = {
+    "reply": "Stage IIIA unresectable NSCLC: definitive concurrent chemoradiation, then "
+             "durvalumab consolidation for 12 months (PACIFIC).",
+    "assessment": "Unresectable stage III; curative intent.",
+    "stage_group": "IIIA", "tnm": "cT2bN2bM0", "intent": "curative",
+    "options": [
+        {"name": "Definitive concurrent chemoradiation",
+         "regimen_ids": ["ccrt_60gy"], "evidence": ["RTOG0617"]},
+        {"name": "Durvalumab consolidation", "regimen_ids": ["durva_consolidation"],
+         "evidence": ["PACIFIC"]}],
+    "confidence": "moderate",
+}
+REVISED = {
+    "reply": "Stage IIIB (AJCC/UICC 9th edition; IIIA in the 8th) unresectable EGFR "
+             "L858R adenocarcinoma: definitive concurrent chemoradiation, then osimertinib "
+             "consolidation until progression (LAURA). Durvalumab consolidation is not "
+             "indicated with an actionable EGFR driver.",
+    "assessment": "Unresectable stage IIIB, EGFR L858R; curative intent.",
+    "stage_group": "IIIB", "tnm": "cT2bN2bM0", "intent": "curative",
+    "options": [
+        {"name": "Definitive concurrent chemoradiation",
+         "regimen_ids": ["ccrt_60gy"], "evidence": ["RTOG0617"]},
+        {"name": "Osimertinib consolidation", "regimen_ids": ["osimertinib_consolidation"],
+         "evidence": ["LAURA"]}],
+    "confidence": "high",
+}
+
+
+class _CaseScript:
+    """Scripted model decisions for the worked case (Fig. 5). The decisions
+    are written by the authors to reproduce a common error — the 8th-edition
+    stage and PACIFIC-by-habit consolidation in EGFR-mutant disease; every
+    tool, sub-agent, hook and the review loop is the real runtime."""
+
+    name, model, available, supports_vision = "scripted", "scripted", True, False
+
+    def __init__(self, latency: float) -> None:
+        self.latency = latency
+
+    @staticmethod
+    def _plan(done: int) -> Any:
+        from nsclc_agent.llm.base import ToolCall
+
+        steps = ["Confirm the stage", "Read the driver report",
+                 "Consult radiology and medical oncology", "Decide definitive therapy",
+                 "Answer the hook review"]
+        items = [{"content": s, "status": "completed" if i < done else
+                  "in_progress" if i == done else "pending"} for i, s in enumerate(steps)]
+        return ToolCall("update_plan", {"items": items}, id=f"plan{done}")
+
+    def chat(self, messages, *, tools=None, **_):
+        import re
+
+        from nsclc_agent.llm.base import LLMResponse, ToolCall
+
+        time.sleep(self.latency)
+        names = {t.name for t in tools or []}
+
+        def respond(*calls):
+            return LLMResponse(text="", finish_reason="tool_calls", tool_calls=list(calls))
+
+        replies = sum(1 for m in messages if m.get("role") == "assistant")
+        if "submit_report" in names:  # a specialist
+            radiology = "search_regimens" not in names
+            if replies == 0:
+                return respond(ToolCall("stage_tnm", {"t": "T2b", "n": "N2b", "m": "M0"},
+                                        id="r1") if radiology else
+                               ToolCall("search_regimens", {"query": "chemoradiation"},
+                                        id="m1"))
+            report = ({"report": "cT2bN2bM0 is stage IIIB in the AJCC/UICC 9th edition "
+                                 "(IIIA in the 8th). Multistation N2b supports the MDT's "
+                                 "unresectable judgement.",
+                       "confidence": "high"} if radiology else
+                      {"report": "Concurrent platinum doublet with 60 Gy thoracic "
+                                 "radiotherapy (cisplatin-etoposide or weekly "
+                                 "carboplatin-paclitaxel).", "confidence": "high"})
+            return respond(ToolCall("submit_report", report, id="rep"))
+        if replies == 0:
+            return respond(self._plan(0),
+                           ToolCall("stage_tnm", {"t": "T2b", "n": "N2b", "m": "M0"}, id="a"),
+                           ToolCall("assess_biomarkers", {}, id="b"))
+        if replies == 1:
+            return respond(self._plan(2), ToolCall("delegate", {
+                "agent": "radiology", "task": "Confirm the stage and whether the nodal "
+                                              "disease supports unresectability."}, id="d1"),
+                ToolCall("delegate", {"agent": "medical_oncology",
+                                      "task": "Which concurrent chemotherapy backbone "
+                                              "for definitive chemoradiation?"}, id="d2"))
+        if replies == 2:
+            return respond(ToolCall("submit_consult", DRAFT, id="s1"))
+        if replies == 3:
+            return respond(self._plan(4), ToolCall("check_indication", {"regimen_ids": [
+                "ccrt_60gy", "durva_consolidation", "osimertinib_consolidation"]}, id="c"),
+                ToolCall("search_trials", {"query": "LAURA"}, id="t"))
+        review = next(m["content"] for m in reversed(messages)
+                      if m.get("role") == "tool" and '"review"' in str(m.get("content")))
+        ids = list(dict.fromkeys(re.findall(r'"rule_id":\s*"([A-Z0-9_]+)"', review)))
+        final = dict(REVISED, rule_responses=[
+            {"rule_id": r, "decision": "accepted", "reason": "revised"} for r in ids])
+        return respond(self._plan(5), ToolCall("submit_consult", final, id="s2"))
+
+
+def case_study() -> None:
+    import threading
+
+    from nsclc_agent import webapi
+    from nsclc_agent.agentic import AgentSession
+    from nsclc_agent.knowledge import regimens
+
+    entry = next(e for e in webapi.EXAMPLES if e["id"] == CASE_ID)
+    english = webapi.EXAMPLES_EN[CASE_ID]
+    box = _toolbox_for(entry)
+    indications_ = box.check_indication([r.regimen_id for r in regimens.REGIMENS])["data"]
+    gov = box.governed_reference()["data"]
+
+    events: list[dict[str, Any]] = []
+    lock = threading.Lock()
+    t0 = time.perf_counter()
+
+    def record(event: dict[str, Any]) -> None:
+        with lock:
+            events.append({"t": time.perf_counter() - t0,
+                           **json.loads(json.dumps(event, default=str))})
+
+    facts = {k: v for k, v in box.facts.items()}
+    session = AgentSession(_CaseScript(CASE_LATENCY), on_event=record,
+                           config={"language": "en", "parallel": True,
+                                   "max_review_rounds": 1})
+    t0 = time.perf_counter()
+    turn = session.turn(f"{english['presentation']} {english['question']}", facts=facts)
+    total = time.perf_counter() - t0
+    assert turn.stop == "terminal", turn.stop
+
+    # intervals: model calls (llm_call → usage) and tools (tool_result − ms)
+    spans: list[dict[str, Any]] = []
+    open_calls: dict[str, float] = {}
+    for e in events:
+        agent = e.get("agent", "lead")
+        if e["type"] == "llm_call":
+            open_calls[agent] = e["t"]
+        elif e["type"] == "usage" and agent in open_calls:
+            spans.append({"agent": agent, "kind": "model", "start": open_calls.pop(agent),
+                          "end": e["t"]})
+        elif e["type"] == "tool_result":
+            spans.append({"agent": agent, "kind": "tool", "name": e["name"],
+                          "start": e["t"] - e["ms"] / 1000, "end": e["t"], "ok": e["ok"]})
+    reviews = [{"t": e["t"], "round": e["round"], "unanswered": e["unanswered"],
+                "findings": [{k: f.get(k) for k in ("rule_id", "severity", "message", "hook")}
+                             for f in e["findings"]]}
+               for e in events if e["type"] == "review"]
+    save("case_study", {
+        "id": CASE_ID, "case": entry["case"], "english": english,
+        "engine_stage": box.engine_stage(),
+        "governed": {"release_status": gov["release_status"],
+                     "options": [o.get("name") for o in (gov["plan"].get("options") or [])],
+                     "regimen_ids": list(gov["plan"].get("regimen_ids") or [])},
+        "indications": indications_["regimens"],
+        "draft": DRAFT, "revised": {k: v for k, v in turn.consult.items()},
+        "reviews": reviews, "spans": spans, "total_s": total,
+        "latency_s": CASE_LATENCY, "specialists": turn.specialists,
+        "plan": turn.plan, "llm_calls": turn.llm_calls,
+        "steps": [{k: s.get(k) for k in ("kind", "name", "agent", "summary", "ms")}
+                  for s in turn.steps],
+    })
+    print(f"    {total:.2f}s, {turn.llm_calls} model calls, "
+          f"{len(reviews)} review(s): "
+          + " | ".join(",".join(f["rule_id"] for f in r["findings"]) or "none"
+                       for r in reviews))
+
+
+# ------------------------------------------------------- safety-rule catalogue
+def rules_catalog() -> None:
+    import inspect
+    import re
+
+    from nsclc_agent.safety import rules
+
+    rows = []
+    for fn in rules.RULES:
+        source = inspect.getsource(fn)
+        ids = list(dict.fromkeys(re.findall(r'Violation\(\s*"([A-Z0-9_]+)",\s*"(\w+)"',
+                                            source)))
+        rows.append({"function": fn.__name__, "violations": ids})
+    save("rules", {"rules": rows, "n_functions": len(rows),
+                   "n_ids": len({i for r in rows for i, _s in r["violations"]})})
+
+
 # ------------------------------------------------------------ access matrix
 def access() -> None:
     from nsclc_agent.agentic.subagents import BUILTIN_AGENTS
@@ -480,7 +698,8 @@ def access() -> None:
 
 if __name__ == "__main__":
     steps = sys.argv[1:] or ["gold_standard", "staging", "knowledge", "perturbation",
-                             "runtime", "context", "emergency_battery", "access"]
+                             "runtime", "context", "emergency_battery", "access",
+                             "case_study", "rules_catalog"]
     for step in steps:
         print(f"[{step}]")
         globals()[step]()

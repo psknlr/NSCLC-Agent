@@ -219,7 +219,67 @@ def ed_table2() -> None:
           widths_cm=[6.0, 1.6, 2.0, 2.8, 2.8, 1.2])
 
 
+RULE_TEXT = {
+    "_rule_n3_no_surgery": "No resection proposed for N3 disease",
+    "_rule_driver_excludes_periop_io":
+        "No perioperative or adjuvant immunotherapy with an EGFR or ALK alteration",
+    "_rule_egfr_variant_mismatch":
+        "An EGFR-directed regimen matches the reported variant class (exon 20, C797S, uncommon)",
+    "_rule_egfr_iii_consolidation":
+        "EGFR-mutant unresectable stage III: osimertinib (LAURA), not durvalumab, consolidation",
+    "_rule_no_concurrent_durvalumab": "Durvalumab follows chemoradiation; it is never concurrent",
+    "_rule_rt_dose": "Thoracic radiotherapy dose above the definitive standard (RTOG 0617)",
+    "_rule_trial_stage_boundary":
+        "A cited trial enrolled the case's stage; edition migration and extrapolation flagged",
+    "_rule_stage0_no_systemic": "No systemic therapy for stage 0",
+    "_rule_indication_predicate":
+        "Every regimen meets its declared, machine-executable indication; undeclared ones flagged",
+    "_rule_driver_first_line":
+        "Stage IV with an actionable driver: driver-directed first line, not immunotherapy",
+    "_rule_option_drug_unbound": "An option named after a systemic drug carries a library regimen",
+    "_rule_consolidation_requires_crt": "Consolidation (PACIFIC, LAURA) only after chemoradiation",
+    "_rule_progression_same_drug": "Re-proposing a drug the disease progressed on",
+    "_rule_cns_untreated_symptomatic":
+        "Symptomatic untreated brain or leptomeningeal metastases are addressed first",
+    "_rule_cns_tnm_consistency": "CNS metastases on record while the descriptors say M0",
+    "_rule_organ_function": "Organ-function and comorbidity gates of each regimen",
+    "_rule_ici_comorbidity":
+        "Checkpoint inhibitor with interstitial lung disease or active autoimmune disease",
+    "_rule_ps_gate": "Performance status fits concurrent chemoradiation or perioperative therapy",
+    "_rule_biomarker_before_systemic": "Tier-A biomarkers are known before systemic therapy",
+    "_rule_dose_scan": "No dose figures in model-authored text",
+}
+
+
+def ed_table3() -> None:
+    rl = load("rules")
+    gs = load("gold_standard")
+    probes: dict[str, int] = {}
+    for v in gs["audit_violations"]:
+        probes[v["rule_id"]] = probes.get(v["rule_id"], 0) + v["count"]
+    rows = []
+    for rule in rl["rules"]:
+        ids = list(dict.fromkeys(i for i, _s in rule["violations"]))
+        for k, rule_id in enumerate(ids):
+            severities = sorted({s for i, s in rule["violations"] if i == rule_id})
+            rows.append([rule_id, "/".join(severities),
+                         RULE_TEXT.get(rule["function"], "") if k == 0 else "(same rule)",
+                         str(probes.get(rule_id, 0))])
+    write("ExtendedDataTable3", "Extended Data Table 3 | The deterministic safety rules",
+          ["Finding", "Severity*", "What the rule checks", "Audit probes (n)†"], rows,
+          [f"The {rl['n_functions']} rules raise {rl['n_ids']} finding identifiers; "
+           "'(same rule)' marks a further identifier raised by the rule in the row above.",
+           "*Severity is the rule's own grading. In governed mode a block finding stops "
+           "release (after the bounded repair loop); in agent mode every finding is advisory "
+           "and returns to the model, which must revise or justify an override.",
+           f"†Gold-standard audit probes (n = {gs['kinds'].get('audit', 0)}; deliberately "
+           "unsafe plans given directly to the rule engine) that raised the finding; a probe "
+           "may raise several.",
+           "CNS, central nervous system; ICI, immune checkpoint inhibitor."],
+          spec="p{4.4cm}p{1.4cm}p{7.6cm}p{1.6cm}", widths_cm=[4.6, 1.5, 8.2, 1.8])
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
-    for build in (table1, table2, ed_table1, ed_table2):
+    for build in (table1, table2, ed_table1, ed_table2, ed_table3):
         build()
