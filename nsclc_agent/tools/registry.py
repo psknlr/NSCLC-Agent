@@ -157,6 +157,16 @@ def tool_specs() -> list[ToolSpec]:
     return list(TOOL_SPECS)
 
 
+#: Tools that are pure functions of the local registries/library: replay
+#: re-executes them and compares (network-backed tools are served from the
+#: journal as recorded).
+_DETERMINISTIC_LOCAL_TOOLS = frozenset({
+    "stage_lookup", "trial_lookup", "regimen_lookup", "protocol_lookup",
+    "interaction_check", "emergency_pathway", "regimen_detail",
+    "dose_gate_check",
+})
+
+
 class ToolRegistry:
     """Tool implementations + brokered, journaled, retried dispatch."""
 
@@ -195,6 +205,16 @@ class ToolRegistry:
             hit, recorded = journal.next_result("tool", name, kwargs)
             if hit:
                 broker.charge()  # a replayed call still consumes the run budget
+                if name in _DETERMINISTIC_LOCAL_TOOLS:
+                    # Pure local tools are RE-EXECUTED and compared: the
+                    # journal proves the run, it may not author the result.
+                    live = self._execute_with_retry(name, kwargs)
+                    from ..journal import canonical_json
+
+                    if canonical_json(live.to_journal()) \
+                            != canonical_json(recorded):
+                        journal.result_divergence("tool", name, recorded,
+                                                  live.to_journal())
                 replayed = ToolResult.from_journal(name, recorded)
                 if replayed.ok:
                     broker.health.record_success(name)
@@ -271,7 +291,7 @@ class ToolRegistry:
                 {"match": "none", "trials": [],
                  "note": "not in the curated registry — verify via citation_verify/pubmed_search "
                          "before citing, or state the claim qualitatively"},
-                evidence_level=EvidenceLevel.TOOL.value,
+                evidence_level=EvidenceLevel.NO_MATCH.value,
             )
         return ToolResult(
             "trial_lookup", True,
@@ -289,6 +309,8 @@ class ToolRegistry:
             f"{len(found)} regimen(s): " + ", ".join(r.regimen_id for r in found)
             if found else f"no regimen match for {query!r}",
             {"regimens": [r.summary() for r in found]},
+            evidence_level=(EvidenceLevel.TOOL.value if found
+                            else EvidenceLevel.NO_MATCH.value),
             source_version=regimen_lib.LIBRARY_VERSION,
         )
 
@@ -491,9 +513,18 @@ class ToolRegistry:
 
         from ..knowledge.biomarkers import gene_status
 
+        from ..knowledge.organ_gates import evaluate_gate, regimen_gates
+
         results: list[dict[str, Any]] = []
-        for gate in regimen.dose_gates:
+        for gate in regimen_gates(regimen):
             status, note = "unverified", "no matching fact on record"
+            organ = evaluate_gate(gate, facts)
+            if organ is not None:
+                # Organ/comorbidity gates: one deterministic evaluator
+                # shared with the critic and the planner (quantitative
+                # thresholds, label-cited notes).
+                results.append(organ)
+                continue
             if gate == "egfr_alk_negative":
                 egfr, alk = gene_status(facts, "egfr"), gene_status(facts, "alk")
                 if "positive" in (egfr, alk):
@@ -505,16 +536,97 @@ class ToolRegistry:
                     # the dose plan carries it forward for the tumor board.
                     status, note = "unverified", (
                         f"EGFR {egfr} / ALK {alk} — Tier-A testing incomplete")
-            elif gate == "egfr_positive":
-                status, note = (
-                    ("pass", "EGFR alteration on record")
-                    if gene_status(facts, "egfr") == "positive"
-                    else ("fail", "no EGFR alteration on record"))
-            elif gate == "alk_positive":
-                status, note = (
-                    ("pass", "ALK alteration on record")
-                    if gene_status(facts, "alk") == "positive"
-                    else ("fail", "no ALK alteration on record"))
+            elif gate == "egfr_classical_sensitizing":
+                # Variant-aware: FLAURA/ADAURA/LAURA regimens require
+                # ex19del/L858R — "EGFR positive" is not the question.
+                from ..knowledge.biomarkers import (
+                    EGFR_UNCOMMON_SENSITIZING, egfr_classes, egfr_classical,
+                )
+
+                classes = egfr_classes(facts)
+                if egfr_classical(facts):
+                    status, note = "pass", (
+                        f"classical sensitizing EGFR ({'/'.join(sorted(classes))})")
+                elif classes & {"exon20ins", "c797s"}:
+                    status, note = "fail", (
+                        f"EGFR {'/'.join(sorted(classes))} — outside the "
+                        f"classical-sensitizing population (exon20ins → "
+                        f"PAPILLON pathway)")
+                elif classes & EGFR_UNCOMMON_SENSITIZING:
+                    status, note = "unverified", (
+                        f"uncommon-sensitizing EGFR "
+                        f"({'/'.join(sorted(classes))}) — different evidence "
+                        f"base; MDT confirmation required")
+                elif classes:
+                    status, note = "unverified", (
+                        "EGFR positive but variant unclassified — confirm "
+                        "sensitizing status before dosing")
+                else:
+                    status, note = "fail", "no EGFR alteration on record"
+            elif gate == "egfr_exon20ins":
+                from ..knowledge.biomarkers import egfr_classes
+
+                classes = egfr_classes(facts)
+                if "exon20ins" in classes:
+                    status, note = "pass", "EGFR exon 20 insertion on record"
+                elif classes:
+                    status, note = "fail", (
+                        f"EGFR {'/'.join(sorted(classes))} is not an exon 20 "
+                        f"insertion")
+                else:
+                    status, note = "fail", "no EGFR alteration on record"
+            elif gate == "egfr_uncommon_sensitizing":
+                from ..knowledge.biomarkers import (
+                    EGFR_UNCOMMON_SENSITIZING, egfr_classes,
+                )
+
+                classes = egfr_classes(facts)
+                if classes & EGFR_UNCOMMON_SENSITIZING \
+                        and not (classes & {"exon20ins", "c797s"}):
+                    status, note = "pass", (
+                        f"uncommon sensitizing EGFR "
+                        f"({'/'.join(sorted(classes))})")
+                elif classes:
+                    status, note = "fail", (
+                        f"EGFR {'/'.join(sorted(classes))} not in "
+                        f"G719X/L861Q/S768I")
+                else:
+                    status, note = "fail", "no EGFR alteration on record"
+            elif gate == "met_ex14_confirmed":
+                from ..knowledge.biomarkers import _MET_EX14_RE
+
+                from ..knowledge.biomarkers import (
+                    _normalized_drivers, positive_evidence,
+                )
+
+                value = _normalized_drivers(facts).get("met")
+                if value is not None and gene_status(facts, "met") == "positive":
+                    status, note = (
+                        ("pass", "MET exon 14 skipping on record")
+                        if _MET_EX14_RE.search(positive_evidence(value))
+                        else ("fail", "MET positive but not exon 14 skipping"))
+            elif gate == "braf_v600e_confirmed":
+                from ..knowledge.biomarkers import _BRAF_V600_RE
+
+                from ..knowledge.biomarkers import (
+                    _normalized_drivers, positive_evidence,
+                )
+
+                value = _normalized_drivers(facts).get("braf")
+                if value is not None and gene_status(facts, "braf") == "positive":
+                    status, note = (
+                        ("pass", "BRAF V600E on record")
+                        if _BRAF_V600_RE.search(positive_evidence(value))
+                        else ("fail", "BRAF positive but not V600"))
+            elif gate.endswith("_positive") and gate[:-9] in (
+                    "alk", "ros1", "ret", "ntrk", "erbb2", "kras"):
+                gene = gate[:-9]
+                aliased = {"ntrk": ("ntrk", "ntrk1", "ntrk2", "ntrk3"),
+                           "erbb2": ("erbb2", "her2")}.get(gene, (gene,))
+                if any(gene_status(facts, g) == "positive" for g in aliased):
+                    status, note = "pass", f"{gene.upper()} alteration on record"
+                else:
+                    status, note = "fail", f"no {gene.upper()} alteration on record"
             elif gate == "pd_l1_tps_ge_50":
                 tps = pd_l1.get("tps")
                 if isinstance(tps, (int, float)):
@@ -528,12 +640,6 @@ class ToolRegistry:
                     status, note = "fail", "active autoimmune disease on record"
                 elif "autoimmune_disease" in comorbid or "active_autoimmune" in comorbid:
                     status, note = "pass", "autoimmune screen negative"
-            elif gate == "renal_function":
-                renal = str((facts.get("organ_function") or {}).get("renal") or "").lower()
-                if renal in ("normal", "adequate"):
-                    status, note = "pass", "renal function adequate on record"
-                elif renal:
-                    status, note = "fail", f"renal function: {renal}"
             elif gate == "ecog_0_1":
                 ecog = facts.get("ecog_ps")
                 if isinstance(ecog, int):

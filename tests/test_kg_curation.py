@@ -289,7 +289,7 @@ def test_verified_row_is_releasable_in_a_run(curated):
     verified_eids = {eid for eid, e in rows.items()
                      if e.level == EvidenceLevel.GUIDELINE.value}
     plan = state.outputs["treatment_plan"]
-    assert verified_eids <= set(plan["citations"])
+    assert verified_eids <= set(plan["guideline_citations"])  # system context, not the author's citation
     statuses = {h["curation_status"]
                 for h in state.outputs["guideline_context"]["supporting"]}
     assert "clinician_verified" in statuses

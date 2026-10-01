@@ -25,13 +25,20 @@ _STATUS_EXPLANATION = {
 }
 
 
+#: Statuses whose plan content may be shown to a patient.
+_PATIENT_RELEASED = ("treatment_recommendation", "draft_for_tumor_board",
+                     "approved_by_tumor_board")
+
+
 def render(state: CaseRunState, role: str | None = None) -> dict[str, Any]:
-    role = role or state.role
-    if role == "patient":
-        return _patient_view(state)
+    role = str(role or state.role or "").strip().lower()
+    if role == "oncologist":
+        return _oncologist_view(state)
     if role == "researcher":
         return _researcher_view(state)
-    return _oncologist_view(state)
+    # Unknown role strings ("Patient", "患者", typos) fail closed to the
+    # most restrictive view.
+    return _patient_view(state)
 
 
 def _base(state: CaseRunState) -> dict[str, Any]:
@@ -50,11 +57,18 @@ def _patient_view(state: CaseRunState) -> dict[str, Any]:
         view["emergency_plan"] = state.outputs.get("emergency_plan")
         return view
     plan = state.outputs.get("treatment_plan") or {}
-    view["summary"] = plan.get("summary", "")
-    view["options"] = [
-        {"name": o.get("name"), "rationale": o.get("rationale")}
-        for o in plan.get("options") or []
-    ]
+    if state.release_status in _PATIENT_RELEASED:
+        view["summary"] = plan.get("summary", "")
+        view["options"] = [
+            {"name": o.get("name"), "rationale": o.get("rationale")}
+            for o in plan.get("options") or []
+        ]
+    else:
+        # A plan the harness did not release (blocked, insufficient
+        # evidence, needs more information) is never shown to a patient
+        # as if it were a recommendation.
+        view["summary"] = ""
+        view["options"] = []
     view["questions_for_you"] = list(state.open_questions)
     view["next_tests"] = [
         step.get("test") for step in

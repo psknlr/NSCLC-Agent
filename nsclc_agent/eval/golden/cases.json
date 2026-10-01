@@ -3,181 +3,2376 @@
   "cases": [
     {
       "id": "migration_t1n1_iia",
-      "case": {"t": "T1b", "n": "N1", "m": "M0",
-               "presentation": "Resected pT1bN1M0 adenocarcinoma. No hemoptysis, no leg weakness, no fever.",
-               "tnm_prefix": "p", "clinical_scenario": "POSTOP_RESECTED",
-               "histologic_category": "adenocarcinoma",
-               "driver_mutations": {"egfr": "negative", "alk": "negative"},
-               "pd_l1": {"tps": 5, "tc": 5}},
-      "expect": {"stage_group": "IIA", "module": "stage2",
-                 "migration_contains": "downstaged",
-                 "regimens_any": ["adjuvant_platinum_doublet"],
-                 "release_status": ["treatment_recommendation"]}
+      "case": {
+        "t": "T1b",
+        "n": "N1",
+        "m": "M0",
+        "presentation": "Resected pT1bN1M0 adenocarcinoma. No hemoptysis, no leg weakness, no fever.",
+        "tnm_prefix": "p",
+        "clinical_scenario": "POSTOP_RESECTED",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "pd_l1": {
+          "tps": 5,
+          "tc": 5
+        }
+      },
+      "expect": {
+        "stage_group": "IIA",
+        "module": "stage2",
+        "migration_contains": "downstaged",
+        "regimens_any": [
+          "adjuvant_platinum_doublet"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
     },
     {
       "id": "migration_t1n2a_iib",
-      "case": {"t": "T1c", "n": "N2a", "m": "M0",
-               "presentation": "Single-station N2a on EBUS. PET-CT and brain MRI negative. No red flags: no hemoptysis, no weakness, no fever.",
-               "histologic_category": "adenocarcinoma",
-               "driver_mutations": {"egfr": "negative", "alk": "negative"},
-               "pd_l1": {"tps": 30}},
-      "expect": {"stage_group": "IIB", "module": "stage2",
-                 "migration_contains": "N2 discipline"}
+      "case": {
+        "t": "T1c",
+        "n": "N2a",
+        "m": "M0",
+        "presentation": "Single-station N2a on EBUS. PET-CT and brain MRI negative. No red flags: no hemoptysis, no weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "pd_l1": {
+          "tps": 30
+        }
+      },
+      "expect": {
+        "stage_group": "IIB",
+        "module": "stage2",
+        "migration_contains": "N2 discipline"
+      }
     },
     {
       "id": "migration_t3n2a_iiia",
-      "case": {"t": "T3", "n": "N2a", "m": "M0",
-               "presentation": "T3 with single-station N2a, MDT resectable, operable. PET-CT/brain MRI negative. No hemoptysis, no weakness, no fever.",
-               "histologic_category": "adenocarcinoma",
-               "driver_mutations": {"egfr": "negative", "alk": "negative"},
-               "resectability_category": "RESECTABLE"},
-      "expect": {"stage_group": "IIIA", "module": "stage3a",
-                 "regimens_any": ["pembro_perioperative"],
-                 "regimens_none": ["nivo_chemo_neoadjuvant"]}
+      "case": {
+        "t": "T3",
+        "n": "N2a",
+        "m": "M0",
+        "presentation": "T3 with single-station N2a, MDT resectable, operable. PET-CT/brain MRI negative. No hemoptysis, no weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "resectability_category": "RESECTABLE"
+      },
+      "expect": {
+        "stage_group": "IIIA",
+        "module": "stage3a",
+        "regimens_any": [
+          "pembro_perioperative"
+        ],
+        "regimens_none": [
+          "nivo_chemo_neoadjuvant"
+        ]
+      }
     },
     {
       "id": "migration_t2bn2b_iiib_egfr_consolidation",
-      "case": {"t": "T2b", "n": "N2b", "m": "M0",
-               "presentation": "Multi-station N2b, unresectable per MDT. PET-CT and brain MRI confirm M0. EGFR L858R. ECOG 1. No hemoptysis, no leg weakness, no fever.",
-               "histologic_category": "adenocarcinoma",
-               "driver_mutations": {"egfr": "L858R", "alk": "negative"},
-               "resectability_category": "UNRESECTABLE", "ecog_ps": 1},
-      "expect": {"stage_group": "IIIB", "module": "stage3b",
-                 "migration_contains": "upstaged",
-                 "regimens_any": ["osimertinib_consolidation"],
-                 "regimens_none": ["durva_consolidation"],
-                 "trial_refs_any": ["LAURA"],
-                 "release_status": ["treatment_recommendation"]}
+      "case": {
+        "t": "T2b",
+        "n": "N2b",
+        "m": "M0",
+        "presentation": "Multi-station N2b, unresectable per MDT. PET-CT and brain MRI confirm M0. EGFR L858R. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "resectability_category": "UNRESECTABLE",
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IIIB",
+        "module": "stage3b",
+        "migration_contains": "upstaged",
+        "regimens_any": [
+          "osimertinib_consolidation"
+        ],
+        "regimens_none": [
+          "durva_consolidation"
+        ],
+        "trial_refs_any": [
+          "LAURA"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
     },
     {
       "id": "n3_iiic_no_surgery",
-      "case": {"t": "T4", "n": "N3", "m": "M0",
-               "presentation": "Contralateral mediastinal and supraclavicular nodes, biopsy-confirmed N3. Encompassable, ECOG 1. PET-CT/brain MRI negative. EGFR/ALK negative. No hemoptysis, no weakness, no fever.",
-               "histologic_category": "squamous",
-               "driver_mutations": {"egfr": "negative", "alk": "negative"},
-               "pd_l1": {"tps": 15}, "ecog_ps": 1},
-      "expect": {"stage_group": "IIIC", "module": "stage3c",
-                 "regimens_any": ["ccrt_60gy", "durva_consolidation"],
-                 "plan_must_not_mention": ["lobectomy", "pneumonectomy", "upfront surgery"],
-                 "no_violations": ["N3_NO_SURGERY"]}
+      "case": {
+        "t": "T4",
+        "n": "N3",
+        "m": "M0",
+        "presentation": "Contralateral mediastinal and supraclavicular nodes, biopsy-confirmed N3. Encompassable, ECOG 1. PET-CT/brain MRI negative. EGFR/ALK negative. No hemoptysis, no weakness, no fever.",
+        "histologic_category": "squamous",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "pd_l1": {
+          "tps": 15
+        },
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IIIC",
+        "module": "stage3c",
+        "regimens_any": [
+          "ccrt_60gy",
+          "durva_consolidation"
+        ],
+        "plan_must_not_mention": [
+          "lobectomy",
+          "pneumonectomy",
+          "upfront surgery"
+        ],
+        "no_violations": [
+          "N3_NO_SURGERY"
+        ]
+      }
     },
     {
       "id": "iv_egfr_first_line",
-      "case": {"t": "T2a", "n": "N0", "m": "M1b",
-               "presentation": "Single adrenal metastasis, brain MRI negative. EGFR exon 19 deletion, NGS complete. ECOG 0. No hemoptysis, no weakness, no fever.",
-               "histologic_category": "adenocarcinoma",
-               "driver_mutations": {"egfr": "Ex19del", "alk": "negative"},
-               "pd_l1": {"tps": 5}, "ngs_done": true, "ecog_ps": 0,
-               "disease_extent": "OLIGOMETASTATIC"},
-      "expect": {"stage_group": "IVA", "module": "stage4a",
-                 "regimens_any": ["osimertinib_first_line"],
-                 "regimens_none": ["pembro_pemetrexed_platinum", "pembro_monotherapy"],
-                 "regimens_any_2": ["sbrt_oligomet_lct"],
-                 "no_violations": ["DRIVER_FIRST_LINE"]}
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1b",
+        "presentation": "Single adrenal metastasis, brain MRI negative. EGFR exon 19 deletion, NGS complete. ECOG 0. No hemoptysis, no weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "Ex19del",
+          "alk": "negative"
+        },
+        "pd_l1": {
+          "tps": 5
+        },
+        "ngs_done": true,
+        "ecog_ps": 0,
+        "disease_extent": "OLIGOMETASTATIC"
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "module": "stage4a",
+        "regimens_any": [
+          "osimertinib_first_line"
+        ],
+        "regimens_none": [
+          "pembro_pemetrexed_platinum",
+          "pembro_monotherapy"
+        ],
+        "regimens_any_2": [
+          "sbrt_oligomet_lct"
+        ],
+        "no_violations": [
+          "DRIVER_FIRST_LINE"
+        ]
+      }
     },
     {
       "id": "iv_alk_first_line",
-      "case": {"t": "T1c", "n": "N2b", "m": "M1c1",
-               "presentation": "Multiple hepatic metastases (single organ system). Brain MRI negative. ALK fusion positive. ECOG 1. No hemoptysis, no weakness, no fever.",
-               "histologic_category": "adenocarcinoma",
-               "driver_mutations": {"egfr": "negative", "alk": "fusion_positive"},
-               "ngs_done": true, "ecog_ps": 1},
-      "expect": {"stage_group": "IVB", "module": "stage4b",
-                 "regimens_any": ["lorlatinib_first_line"],
-                 "regimens_none": ["nivo_ipi_chemo"]}
+      "case": {
+        "t": "T1c",
+        "n": "N2b",
+        "m": "M1c1",
+        "presentation": "Multiple hepatic metastases (single organ system). Brain MRI negative. ALK fusion positive. ECOG 1. No hemoptysis, no weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "fusion_positive"
+        },
+        "ngs_done": true,
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "module": "stage4b",
+        "regimens_any": [
+          "lorlatinib_first_line"
+        ],
+        "regimens_none": [
+          "nivo_ipi_chemo"
+        ]
+      }
     },
     {
       "id": "ivb_squamous_driver_negative",
-      "case": {"t": "T3", "n": "N2b", "m": "M1c2",
-               "presentation": "Liver, bone and adrenal metastases (multiple organ systems). Brain MRI negative. Squamous histology, PD-L1 TPS 5. ECOG 1. No hemoptysis, no weakness, no fever.",
-               "histologic_category": "squamous",
-               "driver_mutations": {"egfr": "not_tested", "alk": "not_tested"},
-               "pd_l1": {"tps": 5}, "ecog_ps": 1},
-      "expect": {"stage_group": "IVB", "module": "stage4b",
-                 "regimens_any": ["pembro_carbo_taxane"]}
+      "case": {
+        "t": "T3",
+        "n": "N2b",
+        "m": "M1c2",
+        "presentation": "Liver, bone and adrenal metastases (multiple organ systems). Brain MRI negative. Squamous histology, PD-L1 TPS 5. ECOG 1. No hemoptysis, no weakness, no fever.",
+        "histologic_category": "squamous",
+        "driver_mutations": {
+          "egfr": "not_tested",
+          "alk": "not_tested"
+        },
+        "pd_l1": {
+          "tps": 5
+        },
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "module": "stage4b",
+        "regimens_any": [
+          "pembro_carbo_taxane"
+        ]
+      }
     },
     {
       "id": "ivb_pdl1_high_mono",
-      "case": {"t": "T2a", "n": "N3", "m": "M1c1",
-               "presentation": "Multiple bone metastases. Brain MRI negative. PD-L1 TPS 80, EGFR/ALK negative, NGS complete. ECOG 1. No hemoptysis, no weakness, no fever.",
-               "histologic_category": "adenocarcinoma",
-               "driver_mutations": {"egfr": "negative", "alk": "negative"},
-               "pd_l1": {"tps": 80}, "ngs_done": true, "ecog_ps": 1},
-      "expect": {"stage_group": "IVB",
-                 "regimens_any": ["pembro_monotherapy"]}
+      "case": {
+        "t": "T2a",
+        "n": "N3",
+        "m": "M1c1",
+        "presentation": "Multiple bone metastases. Brain MRI negative. PD-L1 TPS 80, EGFR/ALK negative, NGS complete. ECOG 1. No hemoptysis, no weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "pd_l1": {
+          "tps": 80
+        },
+        "ngs_done": true,
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "pembro_monotherapy"
+        ]
+      }
     },
     {
       "id": "stage0_ais_no_systemic",
-      "case": {"t": "Tis", "n": "N0", "m": "M0",
-               "presentation": "8 mm pure ground-glass nodule, resected wedge shows AIS. No red flags: no hemoptysis, no weakness, no fever.",
-               "histologic_category": "adenocarcinoma",
-               "driver_mutations": {"egfr": "negative", "alk": "negative"}},
-      "expect": {"stage_group": "0", "module": "stage0",
-                 "regimens_none": ["adjuvant_platinum_doublet", "pembro_adjuvant",
-                                    "osimertinib_adjuvant"],
-                 "no_violations": ["STAGE0_NO_SYSTEMIC"]}
+      "case": {
+        "t": "Tis",
+        "n": "N0",
+        "m": "M0",
+        "presentation": "8 mm pure ground-glass nodule, resected wedge shows AIS. No red flags: no hemoptysis, no weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        }
+      },
+      "expect": {
+        "stage_group": "0",
+        "module": "stage0",
+        "regimens_none": [
+          "adjuvant_platinum_doublet",
+          "pembro_adjuvant",
+          "osimertinib_adjuvant"
+        ],
+        "no_violations": [
+          "STAGE0_NO_SYSTEMIC"
+        ]
+      }
     },
     {
       "id": "ib_egfr_postop_adaura",
-      "case": {"t": "T2a", "n": "N0", "m": "M0", "tnm_prefix": "p",
-               "presentation": "Lobectomy, pT2aN0M0 R0, 3.5 cm adenocarcinoma. EGFR L858R. PD-L1 TPS 30. No hemoptysis, no weakness, no fever.",
-               "clinical_scenario": "POSTOP_RESECTED",
-               "histologic_category": "adenocarcinoma",
-               "driver_mutations": {"egfr": "L858R", "alk": "negative"},
-               "pd_l1": {"tps": 30}},
-      "expect": {"stage_group": "IB", "module": "stage1",
-                 "regimens_any": ["osimertinib_adjuvant"],
-                 "trial_refs_any": ["ADAURA"]}
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M0",
+        "tnm_prefix": "p",
+        "presentation": "Lobectomy, pT2aN0M0 R0, 3.5 cm adenocarcinoma. EGFR L858R. PD-L1 TPS 30. No hemoptysis, no weakness, no fever.",
+        "clinical_scenario": "POSTOP_RESECTED",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "pd_l1": {
+          "tps": 30
+        }
+      },
+      "expect": {
+        "stage_group": "IB",
+        "module": "stage1",
+        "regimens_any": [
+          "osimertinib_adjuvant"
+        ],
+        "trial_refs_any": [
+          "ADAURA"
+        ]
+      }
     },
     {
       "id": "occult_routes_to_workup",
-      "case": {"t": "TX", "n": "N0", "m": "M0",
-               "presentation": "Positive sputum cytology, no localized primary on CT. No hemoptysis, no weakness, no fever.",
-               "histologic_category": "adenocarcinoma",
-               "driver_mutations": {"egfr": "not_tested", "alk": "not_tested"}},
-      "expect": {"stage_group": "Occult", "module": "workup",
-                 "release_status": ["needs_more_information",
-                                     "needs_staging_workup"]}
+      "case": {
+        "t": "TX",
+        "n": "N0",
+        "m": "M0",
+        "presentation": "Positive sputum cytology, no localized primary on CT. No hemoptysis, no weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "not_tested",
+          "alk": "not_tested"
+        }
+      },
+      "expect": {
+        "stage_group": "Occult",
+        "module": "workup",
+        "release_status": [
+          "needs_more_information",
+          "needs_staging_workup"
+        ]
+      }
     },
     {
       "id": "missing_m_refused",
-      "case": {"t": "T2a", "n": "N0",
-               "presentation": "3.5 cm lesion, no metastatic workup done yet. No hemoptysis, no weakness, no fever.",
-               "histologic_category": "adenocarcinoma"},
-      "expect": {"release_status": ["needs_staging_workup"],
-                 "flag_contains": "STAGING_ERROR",
-                 "workup_mentions": "brain MRI"}
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "presentation": "3.5 cm lesion, no metastatic workup done yet. No hemoptysis, no weakness, no fever.",
+        "histologic_category": "adenocarcinoma"
+      },
+      "expect": {
+        "release_status": [
+          "needs_staging_workup"
+        ],
+        "flag_contains": "STAGING_ERROR",
+        "workup_mentions": "brain MRI"
+      }
     },
     {
       "id": "biomarker_gap_blocks_systemic",
-      "case": {"t": "T2b", "n": "N2b", "m": "M0",
-               "presentation": "Multi-station N2b adenocarcinoma, unresectable. PET-CT/brain MRI negative. Biomarkers pending. No hemoptysis, no weakness, no fever.",
-               "histologic_category": "adenocarcinoma",
-               "driver_mutations": {"egfr": "not_tested", "alk": "not_tested"},
-               "resectability_category": "UNRESECTABLE"},
-      "expect": {"stage_group": "IIIB",
-                 "plan_intent": "workup",
-                 "release_status": ["needs_more_information"]}
+      "case": {
+        "t": "T2b",
+        "n": "N2b",
+        "m": "M0",
+        "presentation": "Multi-station N2b adenocarcinoma, unresectable. PET-CT/brain MRI negative. Biomarkers pending. No hemoptysis, no weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "not_tested",
+          "alk": "not_tested"
+        },
+        "resectability_category": "UNRESECTABLE"
+      },
+      "expect": {
+        "stage_group": "IIIB",
+        "plan_intent": "workup",
+        "release_status": [
+          "needs_more_information"
+        ]
+      }
     },
     {
       "id": "emergency_cord_compression",
-      "case": {"presentation": "肺癌病史，这两天双腿无力加重，今天尿潴留，会阴发麻。",
-               "question": "怎么办？"},
-      "expect": {"release_status": ["emergency_action_plan"],
-                 "risk_mode": "emergency"}
+      "case": {
+        "presentation": "肺癌病史，这两天双腿无力加重，今天尿潴留，会阴发麻。",
+        "question": "怎么办？"
+      },
+      "expect": {
+        "release_status": [
+          "emergency_action_plan"
+        ],
+        "risk_mode": "emergency"
+      }
     },
     {
       "id": "resectable_iiib_periop_covers",
-      "case": {"t": "T4", "n": "N2a", "m": "M0",
-               "presentation": "T4N2a, MDT judges R0 achievable, operable. PET-CT/brain MRI negative. EGFR/ALK negative. PD-L1 TPS 40. ECOG 0. No hemoptysis, no weakness, no fever.",
-               "histologic_category": "adenocarcinoma",
-               "driver_mutations": {"egfr": "negative", "alk": "negative"},
-               "pd_l1": {"tps": 40},
-               "resectability_category": "RESECTABLE", "ecog_ps": 0},
-      "expect": {"stage_group": "IIIB",
-                 "regimens_any": ["pembro_perioperative"],
-                 "trial_refs_any": ["KEYNOTE671"],
-                 "no_violations": ["TRIAL_STAGE_BOUNDARY"]}
+      "case": {
+        "t": "T4",
+        "n": "N2a",
+        "m": "M0",
+        "presentation": "T4N2a, MDT judges R0 achievable, operable. PET-CT/brain MRI negative. EGFR/ALK negative. PD-L1 TPS 40. ECOG 0. No hemoptysis, no weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "pd_l1": {
+          "tps": 40
+        },
+        "resectability_category": "RESECTABLE",
+        "ecog_ps": 0
+      },
+      "expect": {
+        "stage_group": "IIIB",
+        "regimens_any": [
+          "pembro_perioperative"
+        ],
+        "trial_refs_any": [
+          "KEYNOTE671"
+        ],
+        "no_violations": [
+          "TRIAL_STAGE_BOUNDARY"
+        ]
+      }
+    },
+    {
+      "id": "redteam_iv_egfr_exon20ins_not_osimertinib",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, single adrenal metastasis, brain MRI negative. NGS: EGFR exon 20 insertion. PD-L1 TPS 80. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "exon 20 insertion",
+          "alk": "negative"
+        },
+        "pd_l1": {
+          "tps": 80
+        },
+        "ngs_done": true,
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "amivantamab_chemo_first_line"
+        ],
+        "regimens_none": [
+          "osimertinib_first_line",
+          "pembro_monotherapy",
+          "pembro_pemetrexed_platinum"
+        ],
+        "trial_refs_any": [
+          "PAPILLON"
+        ],
+        "no_violations": [
+          "EGFR_VARIANT_MISMATCH",
+          "DRIVER_FIRST_LINE"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
+    },
+    {
+      "id": "redteam_iii_exon20ins_no_laura",
+      "case": {
+        "t": "T2b",
+        "n": "N2b",
+        "m": "M0",
+        "presentation": "Multi-station N2b, unresectable per MDT. PET-CT and brain MRI confirm M0. EGFR exon20 insertion. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "EGFR exon20 insertion",
+          "alk": "negative"
+        },
+        "resectability_category": "UNRESECTABLE",
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IIIB",
+        "regimens_any": [
+          "ccrt_60gy"
+        ],
+        "regimens_none": [
+          "osimertinib_consolidation",
+          "durva_consolidation"
+        ],
+        "no_violations": [
+          "EGFR_VARIANT_MISMATCH"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
+    },
+    {
+      "id": "redteam_iv_ros1_not_pembro",
+      "case": {
+        "t": "T2a",
+        "n": "N2b",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, bone metastases, brain MRI negative. NGS: CD74-ROS1 fusion. PD-L1 TPS 80. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "CD74-ROS1 fusion"
+        },
+        "pd_l1": {
+          "tps": 80
+        },
+        "ngs_done": true,
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "repotrectinib_first_line"
+        ],
+        "regimens_none": [
+          "pembro_monotherapy",
+          "pembro_pemetrexed_platinum"
+        ],
+        "trial_refs_any": [
+          "TRIDENT1"
+        ],
+        "no_violations": [
+          "DRIVER_FIRST_LINE"
+        ]
+      }
+    },
+    {
+      "id": "redteam_iv_ret_not_pembro",
+      "case": {
+        "t": "T1c",
+        "n": "N2a",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, hepatic metastases. Brain MRI negative. NGS: KIF5B-RET fusion. PD-L1 TPS 60. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ret": "KIF5B-RET fusion"
+        },
+        "pd_l1": {
+          "tps": 60
+        },
+        "ngs_done": true,
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "selpercatinib_first_line"
+        ],
+        "regimens_none": [
+          "pembro_monotherapy",
+          "pembro_pemetrexed_platinum"
+        ],
+        "trial_refs_any": [
+          "LIBRETTO431"
+        ]
+      }
+    },
+    {
+      "id": "redteam_iv_met_ex14",
+      "case": {
+        "t": "T2a",
+        "n": "N1",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, adrenal metastasis. Brain MRI negative. NGS: MET exon 14 skipping. PD-L1 TPS 90. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "met": "MET exon 14 skipping"
+        },
+        "pd_l1": {
+          "tps": 90
+        },
+        "ngs_done": true,
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "capmatinib_first_line"
+        ],
+        "regimens_none": [
+          "pembro_monotherapy"
+        ],
+        "trial_refs_any": [
+          "GEOMETRY"
+        ]
+      }
+    },
+    {
+      "id": "redteam_iv_braf_v600e",
+      "case": {
+        "t": "T2a",
+        "n": "N2a",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, bone metastasis. Brain MRI negative. NGS: BRAF V600E. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "braf": "BRAF V600E"
+        },
+        "ngs_done": true,
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "dabrafenib_trametinib_first_line"
+        ],
+        "trial_refs_any": [
+          "BRF113928"
+        ]
+      }
+    },
+    {
+      "id": "redteam_iv_ntrk_fusion",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, adrenal metastasis. Brain MRI negative. NGS: NTRK1 fusion. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ntrk1": "TPM3-NTRK1 fusion"
+        },
+        "ngs_done": true,
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "larotrectinib_first_line"
+        ],
+        "regimens_none": [
+          "pembro_pemetrexed_platinum"
+        ]
+      }
+    },
+    {
+      "id": "redteam_iv_egfr_uncommon_g719x",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, adrenal metastasis, brain MRI negative. NGS: EGFR G719X. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "G719X",
+          "alk": "negative"
+        },
+        "ngs_done": true,
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "afatinib_uncommon_first_line"
+        ],
+        "regimens_none": [
+          "osimertinib_first_line",
+          "pembro_pemetrexed_platinum"
+        ],
+        "trial_refs_any": [
+          "LUXLUNG_UNCOMMON"
+        ]
+      }
+    },
+    {
+      "id": "redteam_iv_kras_g12c_chemoio_correct",
+      "case": {
+        "t": "T2b",
+        "n": "N2b",
+        "m": "M1c2",
+        "presentation": "Adenocarcinoma, multi-organ metastases. Brain MRI negative. NGS: KRAS G12C, no other drivers. PD-L1 TPS 20. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "negative",
+          "kras": "G12C"
+        },
+        "pd_l1": {
+          "tps": 20
+        },
+        "ngs_done": true,
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "no_violations": [
+          "DRIVER_FIRST_LINE"
+        ]
+      }
+    },
+    {
+      "id": "redteam_iv_her2_first_line_stays_chemo",
+      "case": {
+        "t": "T2a",
+        "n": "N2a",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, bone metastasis. Brain MRI negative. NGS: HER2 (ERBB2) exon 20 insertion YVMA. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "her2": "ERBB2 exon 20 insertion (YVMA)"
+        },
+        "ngs_done": true,
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "regimens_none": [
+          "tdxd_subsequent_line"
+        ],
+        "no_violations": [
+          "DRIVER_FIRST_LINE"
+        ]
+      }
+    },
+    {
+      "id": "redteam_edition_migration_adaura_iiib",
+      "case": {
+        "t": "T2b",
+        "n": "N2b",
+        "m": "M0",
+        "presentation": "Multi-station N2b but MDT judges R0 achievable, operable. PET-CT/brain MRI M0. EGFR L858R. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "histologic_category": "adenocarcinoma",
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "resectability_category": "RESECTABLE",
+        "ecog_ps": 1
+      },
+      "expect": {
+        "stage_group": "IIIB",
+        "regimens_any": [
+          "osimertinib_adjuvant"
+        ],
+        "trial_refs_any": [
+          "ADAURA"
+        ],
+        "no_violations": [
+          "TRIAL_STAGE_BOUNDARY"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
+    },
+    {
+      "id": "iv_egfr_cns_asymptomatic_tki_first",
+      "_comment": "CNS stratification: asymptomatic untreated brain mets + CNS-active TKI — upfront systemic with deferred local therapy releases, with the surveillance caution.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, three small asymptomatic brain lesions on MRI. EGFR ex19del. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "ex19del",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "cns_metastases": {
+            "status": "present",
+            "symptomatic": false,
+            "treated": false,
+            "burden": "limited"
+          }
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "osimertinib_first_line"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "plan_mentions": [
+          "CNS-active"
+        ],
+        "violations_forbidden": [
+          "CNS_UNTREATED_SYMPTOMATIC"
+        ]
+      }
+    },
+    {
+      "id": "ivb_squamous_cns_symptomatic_local_first",
+      "_comment": "CNS stratification: symptomatic untreated brain mets — the plan must lead with the CNS-directed option; systemic-only would be the blocked shape.",
+      "case": {
+        "t": "T3",
+        "n": "N2b",
+        "m": "M1c2",
+        "presentation": "Squamous, multiple brain metastases with headache and confusion controlled on steroids. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative"
+          },
+          "histologic_category": "squamous",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "pd_l1": {
+            "tps": 5
+          },
+          "cns_metastases": {
+            "status": "present",
+            "symptomatic": true,
+            "treated": false,
+            "burden": "extensive"
+          }
+        },
+        "question": "如何安排治疗顺序？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "pembro_carbo_taxane"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "plan_mentions": [
+          "CNS-directed local therapy first"
+        ],
+        "violations_forbidden": [
+          "CNS_UNTREATED_SYMPTOMATIC"
+        ]
+      }
+    },
+    {
+      "id": "iv_egfr_leptomeningeal_referral",
+      "_comment": "CNS stratification: leptomeningeal disease is an honest boundary — the recommendation is the dedicated referral, never padded strategy.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, MRI leptomeningeal enhancement. EGFR L858R. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "cns_metastases": {
+            "status": "present",
+            "symptomatic": false,
+            "treated": false,
+            "leptomeningeal": true
+          }
+        },
+        "question": "下一步？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "plan_mentions": [
+          "Leptomeningeal disease: dedicated neuro-oncology"
+        ],
+        "violations_forbidden": [
+          "CNS_UNTREATED_SYMPTOMATIC"
+        ]
+      }
+    },
+    {
+      "id": "iv_egfr_post_osimertinib_mariposa2",
+      "_comment": "Later-line sequencing: post-osimertinib progression with the resistance question already asked — MARIPOSA-2 and the KEYNOTE-789-informed chemo backbone, never the failed TKI again.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, progression on first-line osimertinib. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "progression_ngs_done": true,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "osimertinib"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "下一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "amivantamab_chemo_subsequent"
+        ],
+        "regimens_none": [
+          "osimertinib_first_line",
+          "pembro_pemetrexed_platinum"
+        ],
+        "trial_refs_any": [
+          "MARIPOSA2"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "violations_forbidden": [
+          "PROGRESSION_SAME_DRUG",
+          "DRIVER_FIRST_LINE"
+        ]
+      }
+    },
+    {
+      "id": "iv_egfr_progression_without_rebiopsy_workup",
+      "_comment": "Sequencing discipline: progression without the resistance-mechanism question routes to workup — provisional options, not a guess.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, progression on osimertinib. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "osimertinib"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "下一步？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "release_status": [
+          "needs_more_information"
+        ],
+        "plan_mentions": [
+          "AT PROGRESSION"
+        ]
+      }
+    },
+    {
+      "id": "ivb_post_chemoio_docetaxel_and_g12c",
+      "_comment": "Later-line sequencing: post-chemo-IO progression — REVEL docetaxel±ramucirumab plus the KRAS-G12C-directed option now that it IS the line where it applies.",
+      "case": {
+        "t": "T3",
+        "n": "N2b",
+        "m": "M1c2",
+        "presentation": "Adenocarcinoma, progression after pembrolizumab + pemetrexed-carboplatin. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "kras": "G12C"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "pembrolizumab",
+                "pemetrexed",
+                "carboplatin"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "二线选择？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "sotorasib_subsequent_line"
+        ],
+        "regimens_any_2": [
+          "docetaxel_ramucirumab_second_line"
+        ],
+        "trial_refs_any": [
+          "REVEL"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "violations_forbidden": [
+          "PROGRESSION_SAME_DRUG"
+        ]
+      }
+    },
+    {
+      "id": "iv_egfr_sclc_transformation_platinum_etoposide",
+      "_comment": "Mechanism-directed: small-cell transformation is a change of biology — SCLC-style chemo treats the transformed clone, the EGFR-directed second line correctly absent.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, progression on osimertinib, re-biopsy shows small cell transformation. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "osimertinib"
+              ],
+              "status": "progression"
+            }
+          ],
+          "progression_findings": {
+            "small_cell_transformation": true
+          }
+        },
+        "question": "转化后如何治疗？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "platinum_etoposide_transformation"
+        ],
+        "regimens_none": [
+          "amivantamab_chemo_subsequent",
+          "osimertinib_first_line"
+        ],
+        "trial_refs_any": [
+          "MARCOUX_SERIES"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
+    },
+    {
+      "id": "iv_egfr_met_amp_insight2_continuation",
+      "_comment": "Mechanism-directed: MET-amplified resistance — INSIGHT-2 continuation deliberately carries the same-drug warn as its documentation demand.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, progression on osimertinib, plasma NGS shows MET amplification. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "osimertinib"
+              ],
+              "status": "progression"
+            }
+          ],
+          "progression_findings": {
+            "met_amplification": true
+          }
+        },
+        "question": "MET扩增耐药怎么办？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "tepotinib_osimertinib_met_amp"
+        ],
+        "regimens_any_2": [
+          "amivantamab_chemo_subsequent"
+        ],
+        "trial_refs_any": [
+          "INSIGHT2"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "violations_required": [
+          {
+            "rule_id": "PROGRESSION_SAME_DRUG",
+            "severity": "warn"
+          }
+        ]
+      }
+    },
+    {
+      "id": "iv_egfr_third_line_dato_dxd",
+      "_comment": "Third line: TKI and platinum both exhausted — Dato-DXd (TROPION-Lung05 accelerated approval) plus the REVEL fallback.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, progression on osimertinib then on carboplatin-pemetrexed. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "progression_ngs_done": true,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "osimertinib"
+              ],
+              "status": "progression"
+            },
+            {
+              "line": 2,
+              "agents": [
+                "carboplatin",
+                "pemetrexed"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "三线选择？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "dato_dxd_egfr_subsequent"
+        ],
+        "regimens_any_2": [
+          "docetaxel_ramucirumab_second_line"
+        ],
+        "trial_refs_any": [
+          "TROPION_LUNG05"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "violations_forbidden": [
+          "PROGRESSION_SAME_DRUG"
+        ]
+      }
+    },
+    {
+      "id": "iv_renal_impaired_pemetrexed_dropped",
+      "_comment": "Organ gates: CrCl 38 — the population fits, the body does not. The pemetrexed backbone is dropped loudly and the case routes to MDT/pharmacist instead of a silently adjusted dose.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, adrenal met, brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "organ_function": {
+            "renal": {
+              "crcl_ml_min": 38
+            }
+          }
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_none": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "release_status": [
+          "insufficient_evidence",
+          "needs_more_information"
+        ],
+        "plan_mentions": [
+          "器官功能/合并症闸门不合格"
+        ]
+      }
+    },
+    {
+      "id": "iv_renal_adequate_pemetrexed_released",
+      "_comment": "Organ gates control: adequate CrCl on record — the same case releases, with the pending dose-channel gates listed, not blocking.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, adrenal met, brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "organ_function": {
+            "renal": {
+              "crcl_ml_min": 72
+            }
+          }
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ],
+        "violations_forbidden": [
+          "ORGAN_FUNCTION_GATE"
+        ]
+      }
+    },
+    {
+      "id": "audit071_egfr_tki_naive_after_chemo_gets_tki",
+      "_comment": "v0.7.1 audit (critical): EGFR+ found after first-line chemo — the TKI is the next line; v0.7.0 routed this patient to docetaxel.",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, EGFR L858R found after first-line chemotherapy. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "carboplatin",
+                "pemetrexed"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "下一步治疗？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "osimertinib_first_line"
+        ],
+        "regimens_none": [
+          "docetaxel_second_line",
+          "docetaxel_ramucirumab_second_line",
+          "osimertinib_chemo_first_line"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
+    },
+    {
+      "id": "audit071_first_gen_egfr_t790m_aura3",
+      "_comment": "v0.7.1 audit: gefitinib progression with acquired T790M — AURA3 osimertinib (was unmapped).",
+      "case": {
+        "t": "T2a",
+        "n": "N0",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, progression on gefitinib, plasma NGS T790M. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R + T790M",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "gefitinib"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "耐药后方案？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "osimertinib_t790m_subsequent"
+        ],
+        "trial_refs_any": [
+          "AURA3"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
+    },
+    {
+      "id": "audit071_negated_t790m_is_still_egfr_positive",
+      "_comment": "v0.7.1 audit (critical): 'L858R detected; T790M not detected' read as EGFR-NEGATIVE and released pembrolizumab at TPS 80.",
+      "case": {
+        "t": "T2a",
+        "n": "N2a",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma. Brain MRI negative. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "L858R detected; T790M not detected",
+            "alk": "negative"
+          },
+          "histologic_category": "adenocarcinoma",
+          "pd_l1": {
+            "tps": 80
+          },
+          "ecog_ps": 1,
+          "ngs_done": true
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "osimertinib_first_line"
+        ],
+        "regimens_none": [
+          "pembro_monotherapy",
+          "pembro_pemetrexed_platinum"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
+    },
+    {
+      "id": "audit071_no_alk_rearrangement_is_negative",
+      "_comment": "v0.7.1 audit: 'No ALK rearrangement' read as ALK-POSITIVE and released lorlatinib.",
+      "case": {
+        "t": "T2a",
+        "n": "N2a",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma. Brain MRI negative. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "No ALK rearrangement"
+          },
+          "histologic_category": "adenocarcinoma",
+          "pd_l1": {
+            "tps": 80
+          },
+          "ecog_ps": 1,
+          "ngs_done": true
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "pembro_monotherapy"
+        ],
+        "regimens_none": [
+          "lorlatinib_first_line"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
+    },
+    {
+      "id": "audit_exon20ins_osimertinib_must_block",
+      "_comment": "Safety-net golden case: crafted WRONG plan straight to the rule engine. unsafe_release if the net stays silent.",
+      "audit_staging": {
+        "stage_group": "IVA"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "exon 20 insertion",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma"
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "osimertinib_first_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "EGFR_VARIANT_MISMATCH",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_ros1_pembro_must_block",
+      "audit_staging": {
+        "stage_group": "IVA"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "CD74-ROS1 fusion"
+        },
+        "histologic_category": "adenocarcinoma",
+        "pd_l1": {
+          "tps": 80
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembro_monotherapy"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "DRIVER_FIRST_LINE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_exon20ins_laura_must_block",
+      "audit_staging": {
+        "stage_group": "IIIB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "ex20ins",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "resectability_category": "UNRESECTABLE"
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "ccrt_60gy",
+          "osimertinib_consolidation"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "EGFR_VARIANT_MISMATCH",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_tps20_pembro_mono_must_block",
+      "audit_staging": {
+        "stage_group": "IVA"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "pd_l1": {
+          "tps": 20
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembro_monotherapy"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_squamous_pemetrexed_must_block",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "squamous",
+        "pd_l1": {
+          "tps": 10
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_egfr_durva_consolidation_must_block",
+      "audit_staging": {
+        "stage_group": "IIIB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "resectability_category": "UNRESECTABLE"
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "ccrt_60gy",
+          "durva_consolidation"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "EGFR_III_CONSOLIDATION",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_n3_surgery_prose_must_block",
+      "audit_staging": {
+        "stage_group": "IIIC"
+      },
+      "audit_facts": {
+        "tnm": {
+          "t": "T4",
+          "n": "N3",
+          "m": "M0"
+        },
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "squamous"
+      },
+      "audit_plan": {
+        "regimen_ids": [],
+        "options": [
+          {
+            "name": "Upfront surgery",
+            "rationale": "recommend lobectomy with mediastinal dissection"
+          }
+        ]
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "N3_NO_SURGERY",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_concurrent_durvalumab_prose_must_block",
+      "audit_staging": {
+        "stage_group": "IIIB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma"
+      },
+      "audit_plan": {
+        "regimen_ids": [],
+        "options": [
+          {
+            "name": "CRT plan",
+            "rationale": "give durvalumab concurrent with chemoradiation from day 1"
+          }
+        ]
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "NO_CONCURRENT_DURVALUMAB",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_kras_g12c_chemoio_must_not_block",
+      "_comment": "False-alarm control: correct plan, the driver rule must stay silent.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "kras": "G12C",
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "pd_l1": {
+          "tps": 20
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_forbidden": [
+          "DRIVER_FIRST_LINE",
+          "INDICATION_PREDICATE"
+        ]
+      }
+    },
+    {
+      "id": "audit_met_amplification_chemoio_must_not_block",
+      "_comment": "False-alarm control: MET amplification is not the exon-14 indication.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "met": "high-level amplification",
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "pd_l1": {
+          "tps": 30
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_forbidden": [
+          "DRIVER_FIRST_LINE"
+        ]
+      }
+    },
+    {
+      "id": "audit_cns_symptomatic_systemic_only_must_block",
+      "_comment": "Safety-net probe: symptomatic untreated brain mets with a systemic-only plan — the net must fire.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "squamous",
+        "pd_l1": {
+          "tps": 5
+        },
+        "cns_metastases": {
+          "status": "present",
+          "symptomatic": true,
+          "treated": false
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembro_carbo_taxane"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "CNS_UNTREATED_SYMPTOMATIC",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_cns_addressed_must_not_block",
+      "_comment": "False-alarm control: the same record with a CNS-directed option in the plan is the correct shape.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "squamous",
+        "pd_l1": {
+          "tps": 5
+        },
+        "cns_metastases": {
+          "status": "present",
+          "symptomatic": true,
+          "treated": false
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembro_carbo_taxane"
+        ],
+        "options": [
+          {
+            "name": "CNS-directed local therapy first (neurosurgery / radiation oncology)",
+            "regimen_ids": []
+          }
+        ]
+      },
+      "expect": {
+        "violations_forbidden": [
+          "CNS_UNTREATED_SYMPTOMATIC"
+        ]
+      }
+    },
+    {
+      "id": "audit_cns_m0_contradiction_warns",
+      "_comment": "Descriptor/fact contradiction: brain mets on record with M0 TNM — named, never silently repaired.",
+      "audit_staging": {
+        "stage_group": "IIIA"
+      },
+      "audit_facts": {
+        "tnm": {
+          "t": "T2a",
+          "n": "N2a",
+          "m": "M0"
+        },
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "cns_metastases": {
+          "status": "present",
+          "symptomatic": false
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "CNS_TNM_INCONSISTENT",
+            "severity": "warn"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_osimertinib_rechallenge_must_warn",
+      "_comment": "Safety-net probe: re-proposing the agent the disease just progressed on — rechallenge is never a silent default.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "osimertinib"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "osimertinib_first_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "PROGRESSION_SAME_DRUG",
+            "severity": "warn"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_docetaxel_post_chemoio_must_not_warn",
+      "_comment": "False-alarm control: docetaxel after chemo-IO progression shares no agent with the failed line.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "pembrolizumab",
+              "pemetrexed",
+              "carboplatin"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "docetaxel_ramucirumab_second_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_forbidden": [
+          "PROGRESSION_SAME_DRUG"
+        ]
+      }
+    },
+    {
+      "id": "audit_dato_dxd_without_prior_platinum_must_block",
+      "_comment": "Safety-net probe: Dato-DXd requires prior platinum — proposing it straight after the TKI line skips a whole line of therapy.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "osimertinib"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "dato_dxd_egfr_subsequent"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_renal_impaired_pemetrexed_must_block",
+      "_comment": "Safety-net probe: a crafted plan pushes the pemetrexed backbone past CrCl 38 — the organ gate must block.",
+      "audit_staging": {
+        "stage_group": "IVA"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "organ_function": {
+          "renal": {
+            "crcl_ml_min": 38
+          }
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "ORGAN_FUNCTION_GATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_ram_bleeding_risk_must_block_mono_must_not",
+      "_comment": "Safety-net probe: hemoptysis history — ramucirumab blocks; the docetaxel-monotherapy alternative exists for exactly this record and must not false-alarm.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "bleeding_risk": {
+          "hemoptysis_history": true
+        },
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "pembrolizumab",
+              "carboplatin",
+              "pemetrexed"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "docetaxel_second_line"
+        ],
+        "options": [
+          {
+            "name": "Docetaxel + ramucirumab (rejected here)",
+            "regimen_ids": []
+          }
+        ]
+      },
+      "expect": {
+        "violations_forbidden": [
+          "ORGAN_FUNCTION_GATE"
+        ]
+      }
+    },
+    {
+      "id": "audit_ild_history_tdxd_must_block",
+      "_comment": "Safety-net probe: ILD history with an ILD-prone ADC — found by this release's own probing (the ADCs' gate lists were missing ild_history).",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "erbb2": "YVMA insertion",
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "comorbidities": {
+          "ild": true
+        },
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "carboplatin",
+              "pemetrexed"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "tdxd_subsequent_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "ORGAN_FUNCTION_GATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit071_chemo_io_egfr_after_chemo_only_must_block",
+      "_comment": "v0.7.1 audit: DRIVER_FIRST_LINE must stay a BLOCK when the only progression was on chemo (the TKI was never given).",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "carboplatin",
+              "pemetrexed"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "DRIVER_FIRST_LINE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit071_mariposa2_without_osimertinib_must_block",
+      "_comment": "v0.7.1 audit: MARIPOSA-2's population is post-osimertinib — after chemo alone the predicate must block.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "carboplatin"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "amivantamab_chemo_subsequent"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit071_cns_word_outside_options_must_still_block",
+      "_comment": "v0.7.1 audit: 'SRS not indicated' in an uncertainty must not disarm the CNS block — CNS-directed care has to be an option.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "squamous",
+        "pd_l1": {
+          "tps": 5
+        },
+        "cns_metastases": {
+          "status": "present",
+          "symptomatic": true,
+          "treated": false
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembro_carbo_taxane"
+        ],
+        "options": [],
+        "uncertainties": [
+          "SRS not indicated at this time."
+        ]
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "CNS_UNTREATED_SYMPTOMATIC",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit071_docetaxel_hepatic_must_block",
+      "_comment": "v0.7.1 audit: docetaxel's hepatic warning was missing from the hand-maintained gate list; component-derived gates now enforce it.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "organ_function": {
+          "hepatic": {
+            "bilirubin_uln": 2.0
+          }
+        },
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "pembrolizumab",
+              "carboplatin",
+              "pemetrexed"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "docetaxel_second_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "ORGAN_FUNCTION_GATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit071_free_text_pembro_on_egfr_must_block",
+      "_comment": "v0.7.1 audit (critical): an option NAMED pembrolizumab with empty regimen_ids released on EGFR+ with zero violations.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma"
+      },
+      "audit_plan": {
+        "regimen_ids": [],
+        "options": [
+          {
+            "name": "Pembrolizumab monotherapy",
+            "regimen_ids": []
+          }
+        ]
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "OPTION_DRUG_UNBOUND",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit071_unknown_regimen_id_must_block",
+      "_comment": "v0.7.1 audit: an unknown regimen id only warned.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma"
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembrolizumab_monotherapy"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_UNDECLARED",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit071_n3_trimodality_wording_must_block",
+      "_comment": "v0.7.1 audit: 'induction chemoradiation followed by surgery' evaded the N3 rule.",
+      "audit_staging": {
+        "stage_group": "IIIC",
+        "n_category": "N3"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "tnm": {
+          "t": "T2a",
+          "n": "N3",
+          "m": "M0"
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "ccrt_60gy"
+        ],
+        "options": [
+          {
+            "name": "Induction chemoradiation followed by surgery",
+            "regimen_ids": [
+              "ccrt_60gy"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "N3_NO_SURGERY",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit071_blank_extrapolation_must_not_silence_boundary",
+      "_comment": "v0.7.1 audit: a one-space justification declared LAURA onto stage IV and silenced the boundary block.",
+      "audit_staging": {
+        "stage_group": "IVA"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma"
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "osimertinib_consolidation"
+        ],
+        "options": [],
+        "extrapolations": [
+          {
+            "trial_id": "LAURA",
+            "justification": " "
+          }
+        ]
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "TRIAL_STAGE_BOUNDARY",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit071_ib_adjuvant_io_must_block",
+      "_comment": "v0.7.1 audit: KEYNOTE-091 enrolled IB >=4 cm (AJCC 7) = 9th-edition IIA; 9th-edition IB is outside it.",
+      "audit_staging": {
+        "stage_group": "IB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "pd_l1": {
+          "tps": 10
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pembro_adjuvant"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
     }
   ]
 }

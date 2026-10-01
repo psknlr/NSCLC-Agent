@@ -1,0 +1,581 @@
+"""Machine-executable indication predicates — one declaration per regimen.
+
+The clinical red-team review's core structural recommendation: stop encoding
+regimen eligibility as planner if/else plus separately-written safety regex,
+and instead declare each regimen's population ONCE, machine-executably, and
+evaluate that declaration everywhere a regimen is proposed or audited.
+
+Three-valued logic, because clinical facts are often simply absent:
+
+* ``eligible``   — every declared condition is met;
+* ``ineligible`` — at least one condition is confidently NOT met;
+* ``unknown``    — nothing failed, but a condition rests on a fact the case
+  does not carry. **Unknown routes to workup, never to a guess**: the
+  planner keeps the option only as provisional and asks for the missing
+  fact; the critic warns with the missing fact named.
+
+One evaluator, three call sites — the planner's ``opt()`` gate, the
+attach-layer report (``outputs["indication_report"]``), and the critic rule
+``INDICATION_PREDICATE``. The declarations are the shared source of truth;
+what stays independent is *what each caller does* with a verdict (drop /
+annotate / block). Stage conditions are TNM-edition-aware through the same
+8th-edition back-mapping the boundary rule uses, so an edition migration is
+an annotation and never a false ``ineligible``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from ..staging.legacy8 import eighth_edition_group
+from .sequencing import (
+    ANY_TKI,
+    _EARLY_GEN_EGFR,
+    _SECOND_GEN_ALK,
+    _THIRD_GEN_EGFR,
+    DRIVER_DIRECTED_AGENTS,
+)
+from .biomarkers import (
+    EGFR_UNCOMMON_SENSITIZING,
+    _BRAF_V600_RE,
+    _KRAS_G12C_RE,
+    _MET_EX14_RE,
+    _normalized_drivers,
+    driver_status,
+    positive_evidence,
+    egfr_classes,
+    egfr_classical,
+    first_line_actionable_drivers,
+)
+
+ELIGIBLE = "eligible"
+INELIGIBLE = "ineligible"
+UNKNOWN = "unknown"
+
+_MET = "met"
+_NOT_MET = "not_met"
+_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class Indication:
+    """Declared population for one regimen. Absent fields mean "no
+    requirement" — a predicate states what the evidence requires, nothing
+    more."""
+
+    regimen_id: str
+    #: 9th-edition stage groups where use is on-evidence.
+    stage_groups: frozenset[str]
+    #: Edition the underlying trials enrolled under (for back-mapping).
+    tnm_edition: int = 8
+    histology: str = "any"  # any | nonsquamous | squamous
+    #: Required driver gene (normalized key: egfr/alk/ros1/ret/met/braf/
+    #: ntrk/erbb2), optionally refined by class.
+    driver: str | None = None
+    driver_class: str | None = None  # egfr_classical | egfr_exon20ins |
+    #                                  egfr_uncommon | met_ex14 |
+    #                                  braf_v600e | kras_g12c
+    #: ICI-first regimens: no first-line actionable driver may be present.
+    requires_no_actionable_driver: bool = False
+    pd_l1_tps_ge: float | None = None
+    pd_l1_tc_ge: float | None = None
+    resectability: str | None = None  # RESECTABLE | UNRESECTABLE
+    #: Resectability that EXCLUDES the regimen when recorded (adjuvant
+    #: therapy never applies to UNRESECTABLE disease; PACIFIC consolidation
+    #: never to RESECTABLE) — silent when resectability is not recorded.
+    forbid_resectability: str | None = None
+    requires_inoperable: bool = False
+    requires_oligometastatic: bool = False
+    requires_prior_systemic: bool = False
+    #: Approval requires prior PLATINUM-based chemotherapy specifically
+    #: (e.g. Dato-DXd's third-line position) — checked against the
+    #: recorded treatment history, not just "previously treated".
+    requires_prior_platinum: bool = False
+    #: Approval requires PROGRESSION on one of these agents specifically
+    #: (MARIPOSA-2 = post-osimertinib; AURA3 = post-first/second-gen
+    #: TKI) — "previously treated" with something else is not enough.
+    requires_prior_agents: tuple[str, ...] = ()
+    prior_agents_label: str = ""
+    note: str = ""
+
+
+def _cond(name: str, requirement: str, verdict: str, why: str) -> dict[str, Any]:
+    return {"condition": name, "requirement": requirement,
+            "verdict": verdict, "why": why}
+
+
+# ------------------------------------------------------------ evaluators
+
+def _eval_stage(ind: Indication, stage_group: str | None,
+                facts: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    requirement = "/".join(sorted(ind.stage_groups))
+    if not stage_group:
+        return _cond("stage", requirement, _UNKNOWN,
+                     "case stage not computed"), False
+    stage = str(stage_group).upper()
+    if stage in ind.stage_groups:
+        return _cond("stage", requirement, _MET, f"stage {stage}"), False
+    if ind.tnm_edition == 8:
+        tnm = facts.get("tnm") or {}
+        legacy = eighth_edition_group(tnm.get("t"), tnm.get("n"), tnm.get("m"))
+        if legacy and legacy in ind.stage_groups:
+            return _cond(
+                "stage", requirement, _MET,
+                f"9th-edition {stage} maps to {legacy} under the trial's "
+                f"8th-edition enrollment (edition migration)"), True
+    return _cond("stage", requirement, _NOT_MET,
+                 f"stage {stage} outside {requirement}"), False
+
+
+def _eval_histology(ind: Indication, facts: dict[str, Any]) -> dict[str, Any]:
+    from .kg_eligibility import _classify_histology
+
+    case = _classify_histology(str(facts.get("histologic_category") or ""))
+    if ind.histology == "nonsquamous":
+        if case in ("adenocarcinoma", "non_squamous"):
+            return _cond("histology", "nonsquamous", _MET, str(case))
+        if case == "squamous":
+            return _cond("histology", "nonsquamous", _NOT_MET,
+                         "case is squamous")
+        return _cond("histology", "nonsquamous", _UNKNOWN,
+                     f"case histology {case or 'not recorded'}")
+    if ind.histology == "squamous":
+        if case == "squamous":
+            return _cond("histology", "squamous", _MET, "squamous")
+        if case in ("adenocarcinoma", "non_squamous"):
+            return _cond("histology", "squamous", _NOT_MET,
+                         f"case is {case}")
+        return _cond("histology", "squamous", _UNKNOWN,
+                     f"case histology {case or 'not recorded'}")
+    return _cond("histology", "any", _MET, "no histology requirement")
+
+
+def _eval_driver(ind: Indication, facts: dict[str, Any]) -> dict[str, Any]:
+    gene = str(ind.driver or "").lower()
+    drivers = _normalized_drivers(facts)
+    value = drivers.get(gene)
+    status = driver_status(value) if value is not None else "unknown"
+    label = ind.driver_class or f"{gene} positive"
+    if status == "unknown":
+        return _cond("driver", label, _UNKNOWN, f"{gene.upper()} not tested "
+                                                f"/ not on record")
+    if status == "negative":
+        return _cond("driver", label, _NOT_MET, f"{gene.upper()} negative")
+    if ind.driver_class is None:
+        return _cond("driver", label, _MET, f"{gene.upper()} positive")
+    classes = egfr_classes(facts) if gene == "egfr" else frozenset()
+    text = positive_evidence(value)
+    if ind.driver_class == "egfr_classical":
+        if egfr_classical(facts):
+            return _cond("driver", label, _MET,
+                         "/".join(sorted(classes)))
+        return _cond("driver", label, _NOT_MET,
+                     f"EGFR {'/'.join(sorted(classes)) or 'unclassified'} "
+                     f"is outside the ex19del/L858R population")
+    if ind.driver_class == "egfr_exon20ins":
+        return _cond("driver", label,
+                     _MET if "exon20ins" in classes else _NOT_MET,
+                     "/".join(sorted(classes)) or "unclassified")
+    if ind.driver_class == "egfr_uncommon":
+        ok = bool(classes & EGFR_UNCOMMON_SENSITIZING) \
+            and not (classes & {"exon20ins", "c797s"})
+        return _cond("driver", label, _MET if ok else _NOT_MET,
+                     "/".join(sorted(classes)) or "unclassified")
+    if ind.driver_class == "met_ex14":
+        return _cond("driver", label,
+                     _MET if _MET_EX14_RE.search(text) else _NOT_MET,
+                     text[:60])
+    if ind.driver_class == "braf_v600e":
+        return _cond("driver", label,
+                     _MET if _BRAF_V600_RE.search(text) else _NOT_MET,
+                     text[:60])
+    if ind.driver_class == "egfr_t790m":
+        ok = "t790m" in classes and not (classes & {"exon20ins", "c797s"})
+        return _cond("driver", label, _MET if ok else _NOT_MET,
+                     "/".join(sorted(classes)) or "unclassified")
+    if ind.driver_class == "kras_g12c":
+        return _cond("driver", label,
+                     _MET if _KRAS_G12C_RE.search(text) else _NOT_MET,
+                     text[:60])
+    return _cond("driver", label, _UNKNOWN,
+                 f"declaration error: unknown driver_class "
+                 f"{ind.driver_class!r}")
+
+
+def _eval_no_actionable_driver(ind: Indication,
+                               facts: dict[str, Any]) -> dict[str, Any]:
+    found = first_line_actionable_drivers(facts)
+    if found:
+        names = ", ".join(d["gene"] for d in found)
+        return _cond("no_actionable_driver", "no first-line actionable driver",
+                     _NOT_MET, f"actionable driver on record: {names}")
+    from .kg_eligibility import _classify_histology
+
+    case_hist = _classify_histology(str(facts.get("histologic_category") or ""))
+    tier_a_unknown = [g.upper() for g in ("egfr", "alk")
+                      if driver_status(_normalized_drivers(facts).get(g))
+                      == "unknown"]
+    if tier_a_unknown and case_hist != "squamous":
+        return _cond("no_actionable_driver",
+                     "no first-line actionable driver", _UNKNOWN,
+                     f"Tier-A testing incomplete: "
+                     f"{'/'.join(tier_a_unknown)} unknown in non-squamous "
+                     f"disease")
+    return _cond("no_actionable_driver", "no first-line actionable driver",
+                 _MET,
+                 "no actionable driver on record"
+                 + ("" if not tier_a_unknown else
+                    " (squamous: Tier-A testing optional per guidelines)"))
+
+
+def _eval_scalars(ind: Indication, facts: dict[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    pd_l1 = facts.get("pd_l1") or {}
+    if ind.pd_l1_tps_ge is not None:
+        tps = pd_l1.get("tps")
+        if isinstance(tps, (int, float)):
+            out.append(_cond("pd_l1_tps", f"TPS ≥ {ind.pd_l1_tps_ge:g}%",
+                             _MET if tps >= ind.pd_l1_tps_ge else _NOT_MET,
+                             f"TPS {tps:g}%"))
+        else:
+            out.append(_cond("pd_l1_tps", f"TPS ≥ {ind.pd_l1_tps_ge:g}%",
+                             _UNKNOWN, "PD-L1 TPS not on record"))
+    if ind.pd_l1_tc_ge is not None:
+        tc = pd_l1.get("tc", pd_l1.get("tps"))
+        if isinstance(tc, (int, float)):
+            out.append(_cond("pd_l1_tc", f"TC ≥ {ind.pd_l1_tc_ge:g}%",
+                             _MET if tc >= ind.pd_l1_tc_ge else _NOT_MET,
+                             f"TC {tc:g}%"))
+        else:
+            out.append(_cond("pd_l1_tc", f"TC ≥ {ind.pd_l1_tc_ge:g}%",
+                             _UNKNOWN, "PD-L1 TC not on record"))
+    if ind.resectability:
+        resect = str(facts.get("resectability_category")
+                     or facts.get("resectability") or "").upper()
+        if resect in ("RESECTABLE", "UNRESECTABLE"):
+            out.append(_cond("resectability", ind.resectability,
+                             _MET if resect == ind.resectability
+                             else _NOT_MET, resect.lower()))
+        else:
+            out.append(_cond("resectability", ind.resectability, _UNKNOWN,
+                             "resectability not on record"))
+    if ind.forbid_resectability:
+        resect = str(facts.get("resectability_category")
+                     or facts.get("resectability") or "").upper()
+        if resect == ind.forbid_resectability:
+            out.append(_cond("resectability",
+                             f"not {ind.forbid_resectability.lower()}",
+                             _NOT_MET, resect.lower()))
+    if ind.requires_inoperable:
+        operable = facts.get("operable")
+        if operable is False:
+            out.append(_cond("operability", "medically inoperable / declines "
+                                            "surgery", _MET, "operable=False"))
+        elif operable is True:
+            out.append(_cond("operability", "medically inoperable / declines "
+                                            "surgery", _NOT_MET,
+                             "case is operable — surgery is the standard"))
+        else:
+            out.append(_cond("operability", "medically inoperable / declines "
+                                            "surgery", _UNKNOWN,
+                             "operability not assessed"))
+    if ind.requires_oligometastatic:
+        extent = str(facts.get("disease_extent") or "").upper()
+        if extent == "OLIGOMETASTATIC":
+            out.append(_cond("disease_extent", "oligometastatic (≤3 sites)",
+                             _MET, "oligometastatic"))
+        elif extent:
+            out.append(_cond("disease_extent", "oligometastatic (≤3 sites)",
+                             _NOT_MET, extent.lower()))
+        else:
+            out.append(_cond("disease_extent", "oligometastatic (≤3 sites)",
+                             _UNKNOWN, "disease extent not on record"))
+    if ind.requires_prior_systemic:
+        prior = facts.get("prior_systemic_therapy")
+        if prior is None:
+            # A structured treatment history IS prior systemic therapy —
+            # the two fact channels stay consistent without double entry.
+            from .sequencing import history_summary, treatment_history
+
+            if treatment_history(facts):
+                prior = history_summary(facts)
+        if prior:
+            out.append(_cond("prior_therapy", "previously treated", _MET,
+                             str(prior)[:60]))
+        elif prior is False:
+            out.append(_cond("prior_therapy", "previously treated", _NOT_MET,
+                             "treatment-naïve — this is a later-line regimen"))
+        else:
+            out.append(_cond("prior_therapy", "previously treated", _UNKNOWN,
+                             "treatment history not on record"))
+    if ind.requires_prior_agents:
+        from .sequencing import progressed_on, treatment_history
+
+        label = ind.prior_agents_label or "/".join(ind.requires_prior_agents)
+        if progressed_on(facts, ind.requires_prior_agents):
+            out.append(_cond("prior_agents", f"progression on {label}",
+                             _MET, "documented in the treatment history"))
+        elif treatment_history(facts):
+            out.append(_cond("prior_agents", f"progression on {label}",
+                             _NOT_MET,
+                             f"no documented progression on {label} — "
+                             f"this regimen's evidence is specifically "
+                             f"post-{label}"))
+        else:
+            out.append(_cond("prior_agents", f"progression on {label}",
+                             _UNKNOWN, "treatment history not on record"))
+    if ind.requires_prior_platinum:
+        from .sequencing import treatment_history
+
+        history = treatment_history(facts)
+        platinum_terms = ("platinum", "carboplatin", "cisplatin",
+                          "卡铂", "顺铂", "铂")
+        agents = [a for e in history for a in e["agents"]]
+        prior_text = str(facts.get("prior_systemic_therapy") or "").lower()
+        if any(t in a for a in agents for t in platinum_terms) \
+                or any(t in prior_text for t in platinum_terms):
+            out.append(_cond("prior_platinum",
+                             "prior platinum-based chemotherapy", _MET,
+                             "platinum on the treatment record"))
+        elif history:
+            # The recorded history IS the record: no platinum listed
+            # means no platinum received, not "unknown".
+            out.append(_cond("prior_platinum",
+                             "prior platinum-based chemotherapy", _NOT_MET,
+                             "treatment history carries no platinum — "
+                             "this regimen comes AFTER the platinum line"))
+        else:
+            out.append(_cond("prior_platinum",
+                             "prior platinum-based chemotherapy", _UNKNOWN,
+                             "treatment history not on record"))
+    return out
+
+
+def evaluate_indication(
+    regimen_id: str,
+    stage_group: str | None,
+    facts: dict[str, Any],
+) -> dict[str, Any]:
+    """Evaluate one regimen's declared population against one case.
+
+    Returns ``{"regimen_id", "declared", "verdict", "conditions",
+    "unknown_conditions", "edition_migration"}``; ``declared`` is False for
+    a regimen with no declaration (itself a finding — every regimen in the
+    library is supposed to carry one).
+    """
+    ind = INDICATIONS.get(str(regimen_id))
+    if ind is None:
+        return {"regimen_id": regimen_id, "declared": False,
+                "verdict": UNKNOWN, "conditions": [],
+                "unknown_conditions": ["indication declaration missing"],
+                "edition_migration": False}
+    conditions: list[dict[str, Any]] = []
+    stage_cond, migrated = _eval_stage(ind, stage_group, facts)
+    conditions.append(stage_cond)
+    if ind.histology != "any":
+        conditions.append(_eval_histology(ind, facts))
+    if ind.driver:
+        conditions.append(_eval_driver(ind, facts))
+    if ind.requires_no_actionable_driver:
+        conditions.append(_eval_no_actionable_driver(ind, facts))
+    conditions.extend(_eval_scalars(ind, facts))
+
+    if any(c["verdict"] == _NOT_MET for c in conditions):
+        verdict = INELIGIBLE
+    elif any(c["verdict"] == _UNKNOWN for c in conditions):
+        verdict = UNKNOWN
+    else:
+        verdict = ELIGIBLE
+    return {
+        "regimen_id": regimen_id,
+        "declared": True,
+        "verdict": verdict,
+        "conditions": conditions,
+        "unknown_conditions": [
+            f"{c['condition']}: {c['why']}" for c in conditions
+            if c["verdict"] == _UNKNOWN
+        ],
+        "failed_conditions": [
+            f"{c['condition']}: {c['why']} (requires {c['requirement']})"
+            for c in conditions if c["verdict"] == _NOT_MET
+        ],
+        "edition_migration": migrated,
+        "note": ind.note,
+    }
+
+
+# ----------------------------------------------------------- declarations
+
+def _s(*groups: str) -> frozenset[str]:
+    return frozenset(groups)
+
+
+_EARLY = _s("IB", "IIA", "IIB", "IIIA")
+#: "IB (≥4 cm)–IIIA" under AJCC 7 (ALINA, KEYNOTE-091, CheckMate 816,
+#: IMpower010): a ≥4 cm N0 tumor is T2b = IIA in the 8th/9th editions,
+#: so 9th-edition IB (T2a, 3–4 cm) is outside these trials.
+_EARLY_GE4CM = _s("IIA", "IIB", "IIIA")
+_PERIOP = _s("IIA", "IIB", "IIIA", "IIIB")
+_III = _s("IIIA", "IIIB", "IIIC")
+_II_III = _s("IIA", "IIB", "IIIA", "IIIB", "IIIC")
+_IV = _s("IVA", "IVB")
+
+INDICATIONS: dict[str, Indication] = {i.regimen_id: i for i in (
+    # ---------------------------------------------------- adjuvant targeted
+    Indication("osimertinib_adjuvant", _EARLY, histology="nonsquamous",
+               driver="egfr", driver_class="egfr_classical",
+               forbid_resectability="UNRESECTABLE",
+               note="ADAURA: resected IB–IIIA, EGFR ex19del/L858R"),
+    Indication("alectinib_adjuvant", _EARLY_GE4CM, driver="alk",
+               forbid_resectability="UNRESECTABLE",
+               note="ALINA: resected IB(≥4cm, AJCC7)–IIIA = 8th/9th IIA–IIIA, "
+                    "ALK+"),
+    # ---------------------------------------------------- periop / adjuvant IO
+    Indication("nivo_chemo_neoadjuvant", _EARLY_GE4CM,
+               requires_no_actionable_driver=True,
+               resectability="RESECTABLE",
+               note="CheckMate 816: resectable, EGFR/ALK excluded"),
+    Indication("pembro_perioperative", _PERIOP,
+               requires_no_actionable_driver=True,
+               resectability="RESECTABLE",
+               note="KEYNOTE-671: resectable II–IIIB(N2)"),
+    Indication("durva_perioperative", _PERIOP,
+               requires_no_actionable_driver=True,
+               resectability="RESECTABLE", note="AEGEAN"),
+    Indication("nivo_perioperative", _PERIOP,
+               requires_no_actionable_driver=True,
+               resectability="RESECTABLE", note="CheckMate 77T"),
+    Indication("adjuvant_platinum_doublet", _s("IB", "IIA", "IIB", "IIIA",
+                                               "IIIB"),
+               forbid_resectability="UNRESECTABLE",
+               note="LACE: resected node-positive / high-risk"),
+    Indication("atezolizumab_adjuvant", _s("IIA", "IIB", "IIIA"),
+               requires_no_actionable_driver=True, pd_l1_tc_ge=1,
+               forbid_resectability="UNRESECTABLE",
+               note="IMpower010: adjuvant atezolizumab after chemo, TC≥1%"),
+    Indication("pembro_adjuvant", _EARLY_GE4CM,
+               requires_no_actionable_driver=True,
+               forbid_resectability="UNRESECTABLE",
+               note="KEYNOTE-091 (PEARLS)"),
+    # ------------------------------------------------------ definitive local
+    Indication("ccrt_60gy", _II_III,
+               note="Definitive concurrent chemoradiation, locally advanced"),
+    Indication("durva_consolidation", _III,
+               requires_no_actionable_driver=True,
+               forbid_resectability="RESECTABLE",
+               note="PACIFIC: after cCRT without progression; driver-positive "
+                    "disease has no established benefit"),
+    Indication("osimertinib_consolidation", _III, histology="nonsquamous",
+               driver="egfr", driver_class="egfr_classical",
+               resectability="UNRESECTABLE",
+               note="LAURA: unresectable III, EGFR ex19del/L858R, post-cCRT"),
+    Indication("sbrt_definitive", _s("IA1", "IA2", "IA3", "IB"),
+               requires_inoperable=True,
+               note="Stage I, medically inoperable / declines surgery"),
+    Indication("sbrt_oligomet_lct", _s("IVA"),
+               requires_oligometastatic=True,
+               note="Gomez LCT: ≤3 sites controlled on systemic therapy"),
+    # -------------------------------------------------- stage IV, driver+
+    Indication("osimertinib_first_line", _IV, driver="egfr",
+               driver_class="egfr_classical", note="FLAURA"),
+    Indication("osimertinib_chemo_first_line", _IV, histology="nonsquamous",
+               driver="egfr", driver_class="egfr_classical", note="FLAURA2"),
+    Indication("amivantamab_lazertinib", _IV, driver="egfr",
+               driver_class="egfr_classical", note="MARIPOSA"),
+    Indication("amivantamab_chemo_first_line", _IV, histology="nonsquamous",
+               driver="egfr", driver_class="egfr_exon20ins",
+               note="PAPILLON: EGFR exon 20 insertion"),
+    Indication("afatinib_uncommon_first_line", _IV, driver="egfr",
+               driver_class="egfr_uncommon",
+               note="LUX-Lung pooled: G719X/L861Q/S768I"),
+    Indication("lorlatinib_first_line", _IV, driver="alk", note="CROWN"),
+    Indication("repotrectinib_first_line", _IV, driver="ros1",
+               note="TRIDENT-1: ROS1 fusion"),
+    Indication("selpercatinib_first_line", _IV, driver="ret",
+               note="LIBRETTO-431: RET fusion"),
+    Indication("capmatinib_first_line", _IV, driver="met",
+               driver_class="met_ex14",
+               note="GEOMETRY: MET exon 14 skipping"),
+    Indication("dabrafenib_trametinib_first_line", _IV, driver="braf",
+               driver_class="braf_v600e", note="BRF113928: BRAF V600E"),
+    Indication("larotrectinib_first_line", _IV, driver="ntrk",
+               note="NAVIGATE: NTRK fusion"),
+    # ------------------------------------------------ stage IV, driver-negative
+    Indication("pembro_monotherapy", _IV, pd_l1_tps_ge=50,
+               requires_no_actionable_driver=True,
+               note="KEYNOTE-024: TPS≥50%, driver-negative"),
+    Indication("pembro_pemetrexed_platinum", _IV, histology="nonsquamous",
+               requires_no_actionable_driver=True, note="KEYNOTE-189"),
+    Indication("pembro_carbo_taxane", _IV, histology="squamous",
+               requires_no_actionable_driver=True, note="KEYNOTE-407"),
+    Indication("nivo_ipi_chemo", _IV, requires_no_actionable_driver=True,
+               note="CheckMate 9LA"),
+    # ------------------------------------------------------------ later line
+    Indication("tdxd_subsequent_line", _IV, driver="erbb2",
+               requires_prior_systemic=True,
+               note="DESTINY-Lung02: previously treated HER2-mutant"),
+    Indication("amivantamab_chemo_subsequent", _IV, driver="egfr",
+               driver_class="egfr_classical", requires_prior_systemic=True,
+               histology="nonsquamous",
+               requires_prior_agents=_THIRD_GEN_EGFR,
+               prior_agents_label="osimertinib",
+               note="MARIPOSA-2: ex19del/L858R after osimertinib "
+                    "progression"),
+    Indication("platinum_pemetrexed_post_tki", _IV, histology="nonsquamous",
+               requires_prior_systemic=True,
+               requires_prior_agents=ANY_TKI,
+               prior_agents_label="a targeted TKI",
+               note="Post-TKI chemo backbone; KEYNOTE-789 answered the "
+                    "IO question negatively"),
+    Indication("lorlatinib_post_second_gen", _IV, driver="alk",
+               requires_prior_systemic=True,
+               requires_prior_agents=_SECOND_GEN_ALK,
+               prior_agents_label="a second-generation ALK TKI",
+               note="Post second-generation ALK TKI (phase 2 EXP "
+                    "cohorts) — distinct from CROWN first line"),
+    Indication("docetaxel_ramucirumab_second_line", _IV,
+               requires_prior_systemic=True,
+               note="REVEL: second line after platinum-based therapy, "
+                    "all histologies"),
+    Indication("docetaxel_second_line", _IV,
+               requires_prior_systemic=True,
+               note="Ramucirumab-free second-line alternative"),
+    Indication("sotorasib_subsequent_line", _IV, driver="kras",
+               driver_class="kras_g12c", requires_prior_systemic=True,
+               note="CodeBreaK 100: KRAS G12C, previously treated — "
+                    "never first line"),
+    Indication("platinum_etoposide_transformation", _IV, driver="egfr",
+               requires_prior_systemic=True,
+               note="Small-cell transformation (re-biopsy finding) — "
+                    "retrospective evidence, tumor-board framing; the "
+                    "transformation itself is gated in sequencing, not "
+                    "expressible as a predicate field"),
+    Indication("tepotinib_osimertinib_met_amp", _IV, driver="egfr",
+               requires_prior_systemic=True,
+               requires_prior_agents=_THIRD_GEN_EGFR,
+               prior_agents_label="osimertinib",
+               note="INSIGHT 2: MET-amplified osimertinib resistance "
+                    "(phase 2, not approved) — the MET-amp finding is "
+                    "gated in sequencing"),
+    Indication("dato_dxd_egfr_subsequent", _IV, driver="egfr",
+               requires_prior_systemic=True, requires_prior_platinum=True,
+               requires_prior_agents=DRIVER_DIRECTED_AGENTS["EGFR"],
+               prior_agents_label="EGFR-directed therapy",
+               note="TROPION-Lung05: EGFR-mutant after EGFR-directed "
+                    "therapy AND platinum — third line, never earlier"),
+    Indication("osimertinib_t790m_subsequent", _IV, driver="egfr",
+               driver_class="egfr_t790m", requires_prior_systemic=True,
+               requires_prior_agents=_EARLY_GEN_EGFR,
+               prior_agents_label="a first/second-generation EGFR TKI",
+               note="AURA3: acquired T790M after first/second-generation "
+                    "TKI progression"),
+)}
+
+
+def undeclared_regimens() -> list[str]:
+    """Library regimens without an indication declaration — should be []."""
+    from . import regimens as regimen_lib
+
+    return sorted(r.regimen_id for r in regimen_lib.REGIMENS
+                  if r.regimen_id not in INDICATIONS)

@@ -121,7 +121,8 @@ def test_vision_autodetects_poe_gemini(monkeypatch):
     info = describe_client(client)
     assert info["auto_selected"] is True
     assert info["vision"] is True
-    assert "Gemini" in info["model"]
+    # Poe's live catalog ids are lower-case (verified against /v1/models).
+    assert info["model"] == "gemini-3.1-pro"
 
 
 def test_vision_explicit_provider_beats_autodetect(monkeypatch):

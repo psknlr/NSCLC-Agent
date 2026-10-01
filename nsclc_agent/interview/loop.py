@@ -39,10 +39,7 @@ ADVICE_RE = re.compile(
     r"you should (?:take|start|receive)|the diagnosis is|i recommend",
     re.IGNORECASE,
 )
-DOSE_RE = re.compile(
-    r"\d+(?:\.\d+)?\s*(?:mg/m2|mg/m²|mg/kg|mg\b|毫克|g\b|克|Gy\b)|AUC\s*\d",
-    re.IGNORECASE,
-)
+from ..safety.rules import DOSE_RE  # one shared, hardened scanner
 
 ASK_TOOL = ToolSpec(
     "ask_case_question",

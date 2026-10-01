@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import ssl
 import time
 import urllib.error
 import urllib.request
@@ -22,7 +21,50 @@ from .base import LLMError, LLMResponse, ToolCall, ToolSpec
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
-def _ssl_context() -> ssl.SSLContext:
+class _TransportError(Exception):
+    """The request never produced an HTTP response."""
+
+
+class _RetryableProviderError(Exception):
+    """A provider reported a transient error inside a 200 response."""
+
+
+def _browser_post(url: str, headers: dict[str, str], payload: bytes,
+                  timeout: float) -> tuple[int, str]:
+    """Synchronous XHR — allowed inside a Web Worker, which is where the
+    browser build runs the agent."""
+    from js import XMLHttpRequest  # type: ignore[import-not-found]
+
+    xhr = XMLHttpRequest.new()
+    xhr.open("POST", url, False)
+    for key, value in headers.items():
+        xhr.setRequestHeader(key, value)
+    try:
+        xhr.timeout = int(timeout * 1000)
+    except Exception:  # noqa: BLE001 - not settable in every context
+        pass
+    try:
+        xhr.send(payload.decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - JS NetworkError surfaces here
+        raise _TransportError(
+            f"browser request failed ({exc}) — network down or the "
+            f"provider refused this origin (CORS)") from exc
+    if int(xhr.status) == 0:
+        raise _TransportError(
+            "browser request blocked (status 0) — network down or the "
+            "provider refused this origin (CORS)")
+    return int(xhr.status), str(xhr.responseText)
+
+
+def _ssl_context() -> Any:
+    """Native TLS context; None in the browser build (the browser's own
+    TLS stack carries the XHR, and Pyodide does not preload ``ssl``)."""
+    from ..platform_caps import IN_BROWSER
+
+    if IN_BROWSER:
+        return None
+    import ssl
+
     ctx = ssl.create_default_context()
     ca = os.environ.get("SSL_CERT_FILE") or os.environ.get("REQUESTS_CA_BUNDLE")
     if ca and os.path.isfile(ca):
@@ -119,31 +161,56 @@ class OpenAICompatibleClient:
         )).encode("utf-8")
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
-            request = urllib.request.Request(
-                self._endpoint(), data=payload, headers=self._headers(),
-                method="POST",
-            )
             try:
-                with urllib.request.urlopen(
-                    request, timeout=self.timeout, context=self._ctx
-                ) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                return self._parse(data)
-            except urllib.error.HTTPError as exc:
-                body = exc.read().decode("utf-8", errors="replace")[:600]
-                last_error = LLMError(
-                    f"{self.name}: HTTP {exc.code} from {self._endpoint()}: {body}")
-                if exc.code not in _RETRYABLE_STATUS:
-                    raise last_error from exc
-            except (urllib.error.URLError, TimeoutError) as exc:
+                status, body = self._post(payload)
+            except _TransportError as exc:
                 last_error = LLMError(
                     f"{self.name}: connection error to {self._endpoint()}: {exc}")
-            except json.JSONDecodeError as exc:
-                raise LLMError(
-                    f"{self.name}: non-JSON response from {self._endpoint()}") from exc
+            else:
+                if status >= 400:
+                    last_error = LLMError(
+                        f"{self.name}: HTTP {status} from {self._endpoint()}: "
+                        f"{body[:600]}")
+                    if status not in _RETRYABLE_STATUS:
+                        raise last_error
+                else:
+                    try:
+                        data = json.loads(body)
+                    except json.JSONDecodeError as exc:
+                        raise LLMError(
+                            f"{self.name}: non-JSON response from "
+                            f"{self._endpoint()}") from exc
+                    try:
+                        return self._parse(data)
+                    except _RetryableProviderError as exc:
+                        last_error = LLMError(str(exc))
             if attempt < self.max_retries:
                 time.sleep(min(2.0 ** attempt, 8.0))
         raise last_error or LLMError(f"{self.name}: request failed")
+
+    def _post(self, payload: bytes) -> tuple[int, str]:
+        """(HTTP status, body text). Native: urllib. Browser (Pyodide in a
+        Web Worker): a synchronous XMLHttpRequest — the provider's CORS
+        policy decides whether the call is allowed (Poe and MiniMax allow
+        browser origins; a status of 0 means the browser refused it)."""
+        from ..platform_caps import IN_BROWSER
+
+        if IN_BROWSER:
+            return _browser_post(self._endpoint(), self._headers(), payload,
+                                 self.timeout)
+        request = urllib.request.Request(
+            self._endpoint(), data=payload, headers=self._headers(),
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(
+                request, timeout=self.timeout, context=self._ctx
+            ) as resp:
+                return resp.status, resp.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode("utf-8", errors="replace")
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise _TransportError(str(exc)) from exc
 
     def _parse(self, data: dict[str, Any]) -> LLMResponse:
         try:

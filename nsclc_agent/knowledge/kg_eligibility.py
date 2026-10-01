@@ -192,8 +192,10 @@ def _eval_gene(crit: dict[str, Any], facts: dict[str, Any]) -> tuple[str, str]:
     if not gene:
         m = _GENE_RE.search(f"{feature} {span}")
         gene = m.group(1).upper() if m else ""
-    drivers = facts.get("driver_mutations") or {}
-    statuses = {g: driver_status(str(v)) for g, v in drivers.items()}
+    from .biomarkers import _normalized_drivers
+
+    statuses = {g: driver_status(v)
+                for g, v in _normalized_drivers(facts).items()}
     if not gene:
         # "no actionable driver" / "driver positive" without a named gene.
         if not statuses:

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 STAGE_CORES: dict[str, str] = {
     "stage0": """\
-STAGE 0 (Tis — AIS/MIA spectrum) DECISION CORE
+STAGE 0 (Tis = AIS; MIA is T1mi → stage IA1) DECISION CORE
 1. AIS is a precursor lesion (WHO 5th ed.); MIA (≤3 cm, lepidic-predominant,
    ≤5 mm invasion) approaches 100% disease-specific survival after resection.
 2. The decision fork is surveillance vs resection extent — NOT systemic therapy.

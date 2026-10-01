@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>NSCLC-Agent · IMPF-AI</title>
+  <meta name="description" content="IMPF-AI 研发的非小细胞肺癌多学科会诊智能体：描述病例即可获得确定性分期、循证方案与安全终审，全部在浏览器内运行。">
+  <meta name="author" content="IMPF-AI">
+  <meta property="og:title" content="NSCLC-Agent · IMPF-AI 研发">
+  <meta property="og:description" content="非小细胞肺癌多学科会诊智能体 — 分期确定、证据治理、安全终审，浏览器内运行，零服务器。">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" content="#0b7f8a">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+  <div class="boot" id="boot">
+    <div class="boot-card">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v7"/><path d="M12 10c-1.5 2-3 2.5-5 2.5"/><path d="M12 10c1.5 2 3 2.5 5 2.5"/><path d="M7 6.5C4.5 7.5 3 11 3 15c0 3 1.5 5 4 5 2 0 3.5-1.5 3.5-4V11"/><path d="M17 6.5c2.5 1 4 4.5 4 8.5 0 3-1.5 5-4 5-2 0-3.5-1.5-3.5-4V11"/></svg>
+      </div>
+      <h2>NSCLC-Agent</h2>
+      <div class="muted small">IMPF-AI 研发 · 肺癌多学科会诊智能体</div>
+      <div class="boot-bar"><span id="boot-bar"></span></div>
+      <div class="boot-steps" id="boot-steps">
+        <div data-step="runtime"><span class="mark">○</span>加载 WebAssembly Python 运行时</div>
+        <div data-step="package"><span class="mark">○</span>加载智能体</div>
+        <div data-step="init"><span class="mark">○</span>初始化分期引擎、安全规则与指南知识库</div>
+      </div>
+      <div class="muted small boot-note" id="boot-note">首次打开需下载约 10 MB 运行时，之后由浏览器缓存。病例数据只在您的浏览器内处理。</div>
+    </div>
+  </div>
+
+  <div class="shell" id="shell">
+    <aside class="rail" id="rail" aria-label="会诊导航">
+      <div class="rail-head">
+        <a class="brand" href="#/">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v7"/><path d="M12 10c-1.5 2-3 2.5-5 2.5"/><path d="M12 10c1.5 2 3 2.5 5 2.5"/><path d="M7 6.5C4.5 7.5 3 11 3 15c0 3 1.5 5 4 5 2 0 3.5-1.5 3.5-4V11"/><path d="M17 6.5c2.5 1 4 4.5 4 8.5 0 3-1.5 5-4 5-2 0-3.5-1.5-3.5-4V11"/></svg>
+          </span>
+          <span>
+            <span class="brand-name">NSCLC-Agent</span>
+            <span class="brand-sub">IMPF-AI 研发</span>
+          </span>
+        </a>
+      </div>
+      <button class="btn primary new-case" id="new-case" type="button"></button>
+      <div class="rail-search"><input type="search" id="case-search" placeholder="搜索会诊记录" aria-label="搜索会诊记录"></div>
+      <div class="rail-label">会诊记录</div>
+      <div class="case-list" id="case-list"></div>
+      <div class="rail-label">临床工具</div>
+      <nav class="rail-nav" id="tool-nav"></nav>
+      <div class="rail-foot">
+        <button class="model-btn" id="model-btn" type="button" title="模型接入"></button>
+        <div class="rail-foot-row">
+          <span class="impf"><span class="impf-dot"></span><span><strong>IMPF-AI</strong> 研发</span></span>
+          <span class="muted small" id="side-version"></span>
+          <button class="icon-btn ghost" id="theme-btn" type="button" title="切换深色/浅色" aria-label="切换主题"></button>
+        </div>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+    <main class="stage" id="stage"></main>
+  </div>
+  <div class="drawer-host" id="drawer-host"></div>
+  <div class="toast-host" id="toasts"></div>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

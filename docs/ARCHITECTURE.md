@@ -191,6 +191,234 @@ nothing above them; `agents/` composes; `runner.py` orchestrates.
     never opens in a scenario, and hypothetical emergency phrasing obeys
     the screen's hypothetical suppression while stated events escalate
     inside the scenario only.
+18. **"Positive" is not a treatment decision.** External clinical red-team
+    review proved the failure mode this invariant closes: planner and
+    critic shared a boolean gene model and jointly released osimertinib
+    for an EGFR exon20 insertion and pembrolizumab for ROS1+ disease.
+    The driver ontology (`knowledge/biomarkers.py`) makes variant classes
+    first-class — EGFR ex19del/L858R vs uncommon vs exon20ins vs
+    T790M/C797S; MET counts only as exon-14 skipping, BRAF only as V600 —
+    and the full first-line actionable plane
+    (EGFR/ALK/ROS1/RET/MET-ex14/BRAF-V600E/NTRK) is enforced twice from
+    the same vocabulary with independent logic: the planner routes each
+    class to its evidence population (unclassified fails toward the
+    molecular tumor board, never toward a guessed drug), and the rule
+    engine blocks variant-mismatched regimens (`EGFR_VARIANT_MISMATCH`)
+    and ICI-first plans over any actionable driver (`DRIVER_FIRST_LINE`)
+    even when the planner is the one that erred. Trial boundaries are
+    TNM-edition-aware (`staging/legacy8.py`): a case whose descriptors
+    fall inside the trial's 8th-edition enrollment is an edition
+    migration (note), not an extrapolation (block) — while the 9th-edition
+    engine remains the sole authority for the case's actual stage. And
+    prose never redefines disease concepts: AIS=Tis=stage 0,
+    MIA=T1mi=IA1, from one source of truth (`staging/concepts.py`).
+19. **A regimen's population is declared once, machine-executably.** Every
+    library regimen carries an indication predicate
+    (`knowledge/indications.py`: stage with 8th-edition back-mapping,
+    histology, driver class, no-actionable-driver, PD-L1 thresholds,
+    resectability, operability, oligometastatic status, prior therapy)
+    evaluated in three-valued logic. **Unknown routes to workup, never to
+    a guess**: the planner keeps such an option only as provisional with
+    the missing facts pushed into the workup list; the critic warns with
+    the facts named. The single declaration is evaluated at three points —
+    the planner's `opt()` gate (ineligible dropped loudly as a
+    table↔declaration divergence; a declared extrapolation is honored),
+    the published `outputs["indication_report"]`, and the critic rule
+    `INDICATION_PREDICATE` (ineligible → block; an undeclared — including
+    hallucinated — regimen id → warn). A sweep test runs every golden
+    case and asserts the decision table never has to drop its own
+    proposal, so table and declarations cannot drift apart silently.
+    This closed audit gaps no prior rule saw: pembrolizumab monotherapy
+    at TPS 20%, squamous disease on a pemetrexed backbone.
+20. **A citation supports one claim, not the whole plan.** Claims carry a
+    structured subject (intervention regimen ids, population stage,
+    intent) and a support relation; each treatment-option claim cites
+    only the trial-registry rows whose trial covers its own regimens
+    (structural entailment, deterministic), regimen-free options are
+    protocol-grounded and borrow nothing, and prognosis claims are
+    population statistics. The critic's claim guard verifies the
+    relation per claim: dangling evidence ids, regimen-bearing claims
+    with no releasable entailed support, and citations borrowed from a
+    different claim are each named (`CLAIM_DANGLING_EVIDENCE` /
+    `CLAIM_UNSUPPORTED` / `CLAIM_SUPPORT_MISMATCH`). Entailment is
+    two-layered: the structural layer proves a citation covers the
+    claimed REGIMEN; the population-semantic layer (v0.3.4) proves it
+    covers the claimed POPULATION. Claim subjects carry the population's
+    facts (stage + TNM descriptors, histology, a driver signature of
+    positive genes with variant-class tags), and every entailed trial
+    row is checked against them: stage within enrollment (edition-aware
+    via the same 8th-edition back-mapping the plan rule uses, honoring
+    plan-declared extrapolations for stage ONLY — a stage declaration
+    never excuses a driver or histology mismatch), driver class
+    (including co-occurring resistance classes that remove the case
+    from a classical enrollment), gene-level driver requirements,
+    EGFR/ALK-excluded trials, and histology restrictions
+    (`CLAIM_POPULATION_MISMATCH`). Population-statistic prognosis
+    claims must rest on cohort-grade evidence — a trial row is not a
+    survival statistic's source (`CLAIM_STATISTIC_SOURCE`). The
+    narrowing holds across the parallel wave's temp-id remap and the
+    conversation layer's plan reuse; a golden-set sweep pins the honest
+    rule-mode baseline at zero claim issues. Evidence TEXT is still not
+    semantically verified against claim wording — the honest list says
+    so.
+
+21. **The eval grades the safety net itself, and failures are classified
+    clinical events.** Golden entries with `audit_plan` bypass the
+    planner and feed a deliberately wrong (or deliberately fine) crafted
+    plan straight to the rule engine, with `violations_required` /
+    `violations_forbidden` expectations — a required block that does not
+    fire is counted as `unsafe_release` and reported as its own rate,
+    the single number a safety harness must keep at zero. Every eval
+    failure carries one of nine taxonomy classes (major_harmful,
+    unsafe_release, overblocking, false_alarm, omission, missing_workup,
+    incorrect_release, staging_error, routing_error), so "the suite is
+    red" always says which kind of clinical event happened. Human
+    adjudication of golden cases lives in an append-only ledger that is
+    the deliberate inverse of the KG curation ledger: verdicts are
+    content-hash-pinned to the case (edits void them) and NEVER
+    last-wins — every adjudicator's verdict coexists, disagreements are
+    named in the eval report, and disagree/needs_revision require notes.
+    Knowledge upgrades converge; clinical judgment preserves dissent.
+
+22. **Outcome figures are never free.** Every outcome-shaped number in a
+    high-stakes claim's text — a percentage, a hazard ratio, a month
+    span — must be present in the evidence rows that claim cites, or in
+    the claimed regimens' own registry entries (deterministic system
+    knowledge: protocol durations, thresholds). A figure with no
+    provenance is `CLAIM_NUMERIC_UNANCHORED`: a fabricated number
+    cannot ride out on a well-cited claim. The extractor targets
+    outcome shapes only — doses belong to the dose channel, TNM
+    descriptors and stage labels and trial-name digits are structural —
+    so structural numerics never false-alarm. The guard checks the
+    number's PRESENCE in the cited source, not the wording around it;
+    a real number attached to the wrong endpoint is still invisible,
+    and the honest list says so.
+
+23. **The CNS is stratified, never assumed — and never ignored.** One
+    deterministic reading of the CNS facts (`knowledge/cns.py`) serves
+    both the planner and the critic: unstated is unknown (a stage-IV
+    plan without CNS status routes a brain MRI to workup and goes
+    provisional), a negative brain-imaging statement in prose may seed
+    `absent` under the same setdefault discipline as the emergency
+    screen's negations, and a POSITIVE imaging statement seeds nothing
+    — prose never asserts disease. Strategy stratifies instead of
+    prescribing: CNS-active first-line agents may defer local therapy
+    with surveillance named; driver-negative brain mets carry the
+    local-therapy option; symptomatic untreated disease puts
+    CNS-directed care at the head of the option list; leptomeningeal
+    disease is an honest boundary whose recommendation IS the
+    specialist referral. The critic enforces independently:
+    systemic-only planning over symptomatic untreated brain metastases
+    (or LM) blocks (`CNS_UNTREATED_SYMPTOMATIC`) whoever authored the
+    plan, and brain metastases recorded against an M0 TNM is a named
+    contradiction (`CNS_TNM_INCONSISTENT`), never a silent repair —
+    the staging engine remains the only staging authority.
+    Fractionation, radiosurgery selection and steroid dosing stay in
+    the neuro-oncology MDT's channel; nothing here emits them.
+
+24. **Progression ends the first-line table's authority.** One shared
+    reading of the treatment history (`knowledge/sequencing.py`) gates
+    the switch: sequencing triggers only on EXPLICIT progression —
+    exposure without a stated outcome is exposure — and once it
+    triggers, the first-line decision table no longer applies. The
+    sequencing corpus is small and named (post-osimertinib MARIPOSA-2
+    with the KEYNOTE-789 negative result encoded as the reason
+    chemo-IO is not the default; post-second-generation-ALK lorlatinib
+    distinct from its CROWN first-line population; post-lorlatinib
+    chemotherapy with "no established next TKI" said out loud;
+    post-chemo-IO REVEL, with KRAS G12C and HER2 options surfacing in
+    the line where they apply); progression that maps to none of it
+    routes to the molecular tumor board, never to a guess. The EGFR
+    resistance-mechanism question (re-biopsy/plasma NGS) is workup
+    before options, and the critic is line-aware: re-proposing an
+    agent the disease progressed on warns (PROGRESSION_SAME_DRUG —
+    rechallenge is a justified strategy, not a default), and
+    DRIVER_FIRST_LINE stops mislabeling post-progression questions as
+    first-line while still flagging ICI in driver-positive disease
+    with the KEYNOTE-789 message. A structured history satisfies the
+    prior-systemic indication conditions directly — one fact channel,
+    no double entry.
+
+25. **Resistance mechanisms are findings, not guesses.** The
+    progression re-biopsy/plasma NGS result is a structured fact
+    (`progression_findings`) whose presence means the question was
+    ASKED; every unlisted mechanism is false-as-recorded, never
+    unknown. Mechanism-directed coverage is exactly two findings deep
+    and says so: small-cell transformation switches the biology
+    (platinum-etoposide treats the transformed clone, the
+    EGFR-directed second line is deliberately absent, and the
+    retrospective evidence grade is stated, not laundered); MET
+    amplification proposes the INSIGHT-2 continuation, on which the
+    same-drug warn fires BY DESIGN — it is the documentation demand
+    for continuing a progressed drug, and the continuation regimen
+    joins the classical-EGFR family so the variant-mismatch net covers
+    it. C797S gets an honest caution (no approved fourth-generation
+    TKI) while the chemotherapy backbone stays the evidence-based next
+    line — no phantom TKI is ever proposed. The third line requires
+    its record: Dato-DXd's declaration carries `requires_prior_platinum`,
+    so a plan that skips the platinum line is blocked by the predicate,
+    and beyond docetaxel the corpus recommends the honest boundary
+    itself — trial screening, best supportive care, goals of care.
+
+26. **The population fits; the body must too — and unknown is neither
+    pass nor fail.** Organ-function and comorbidity gates live in ONE
+    deterministic evaluator (`knowledge/organ_gates.py`) with three
+    consumers: the dose channel's gate check (quantitative thresholds
+    replace coarse strings, the label threshold cited in every note),
+    the critic's ORGAN_FUNCTION_GATE (a regimen whose gate FAILS on
+    the recorded facts blocks at recommendation time, whoever authored
+    the plan), and the planner (an organ-failed backbone is dropped
+    loudly at the proposal gate and routed to the MDT/pharmacist — the
+    dose is never "adjusted around" a failed gate at any layer).
+    Unknown never blocks a recommendation and never passes a dose
+    gate: recommending is not dosing, so pending gates live in the
+    plan's organ-gate ledger — the named list of numbers the dose
+    channel will demand — and deliberately not in workup_needed, where
+    they would flip the release status of every plan without lab
+    values. Thresholds are label-derived teaching values, not an
+    institution's protocol, and the honest list says so.
+
+27. **One reading of every fact; no authority from text or files.**
+    (v0.7.1 full adversarial audit.) A driver result is parsed ONCE, by
+    one clause-scoped parser that every consumer uses (planner, critic,
+    indication predicates, chat extractor, prognosis, KG, interview
+    axes): negation binds to the variant it sits next to, positive
+    requires positive evidence, assay failures and ambiguous reports
+    are unknown, and variant classes are read only from positive
+    clauses. Anything a plan NAMES must be auditable: an option naming a
+    drug must bind it to a library regimen id, unknown ids block, and
+    every option's own id list is audited. Content findings gate
+    release — claim/numeric guard issues downgrade the status (and
+    withdraw a dose draft), and a plan the harness did not release is
+    never shown to a patient. No file grants authority: a session file
+    carries memory but never role, dose permission or a plan cache; a
+    journal proves a run but may not author a deterministic result
+    (local tools are re-executed on replay and a mismatch fails
+    closed); a curation-ledger upgrade needs a named reviewer, and an
+    adjudicator is one person however their name is spelled. Doses are
+    scanned after NFKC normalization, whole ranges at a time, through
+    one shared scanner.
+
+28. **The browser build is the same harness, not a port.** (v0.8.0,
+    GitHub Pages web app by IMPF-AI.) The web app runs this package
+    UNCHANGED under Pyodide (WebAssembly Python) in a Web Worker and
+    reaches it only through `webapi.call(name, json) -> json` — no
+    JavaScript re-implementation of staging, rules, gates or release,
+    so every invariant above holds in the page by construction (the
+    golden eval runs green inside the browser and in CI under the same
+    Pyodide release, `tests/pyodide_smoke.mjs`). Runtime differences
+    are scheduling and transport only, behind `platform_caps`: no
+    threads → the Treatment∥Panel wave and panel fan-out take their
+    serial path (ledger-identical by invariant); no sockets → model
+    calls are a synchronous XHR from the worker straight to the
+    provider the visitor chose (Poe and MiniMax answer CORS; keys live
+    only in worker memory, never in the page, the URL or GitHub). The
+    bridge keeps the CLI's contracts: a patient-role run returns — and
+    exports — only the patient view; a session import takes role and
+    dose permission from the call, never the file; clients are built
+    from explicit settings, never the environment. Nothing may import
+    a module Pyodide does not ship (`ssl`, `sqlite3`…) at module level
+    — a test runs the package with those imports poisoned.
 
 ## 3. LLM containment table
 

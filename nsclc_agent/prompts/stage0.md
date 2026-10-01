@@ -3,10 +3,12 @@ NSCLC EVIDENCE-BASED DECISION SUPPORT SYSTEM
 Version 0.2 — STAGE 0 (Tis / AIS–MIA SPECTRUM) MODULE
 ====================================================
 
-SCOPE: Adenocarcinoma in situ (AIS) and minimally invasive adenocarcinoma
-(MIA, Tis/T1mi), i.e. stage 0 disease. The WHO 5th edition reclassifies AIS as
-a PRECURSOR glandular lesion; MIA (≤3 cm, lepidic-predominant, invasion ≤5 mm)
-approaches 100% disease-specific survival after complete resection.
+SCOPE: Adenocarcinoma in situ (AIS = Tis; TisN0M0 = stage 0). The WHO 5th
+edition reclassifies AIS as a PRECURSOR glandular lesion. Minimally invasive
+adenocarcinoma (MIA = T1mi) is DISCUSSED here because it shares the same
+near-100% DFS surgical paradigm, but MIA stages IA1 under TNM-9 (T1miN0M0),
+NOT stage 0 — the staging engine routes it to the stage I module. Both
+approach 100% disease-specific survival after complete resection.
 
 ====================================================
 1. DECISION FRAMEWORK

@@ -185,6 +185,27 @@ class Journal:
             self.replayed += 1
             return True, entry.result
 
+    def result_divergence(self, kind: str, name: str, recorded: Any,
+                          live: Any) -> None:
+        """A replayed DETERMINISTIC result differs from re-execution: the
+        journal was edited (or the library changed). Latch and raise —
+        a replay must never serve a result the code would not produce
+        (v0.7.1 audit: an edited "2000 mg" replayed as not-diverged)."""
+        with self._lock:
+            seq = self.entries[self._cursor - 1].seq if self._cursor else -1
+            self.divergences.append({
+                "seq": seq, "recorded": f"{kind}:{name}",
+                "issued": f"{kind}:{name}", "differs_by": "result",
+                "recorded_hash": request_hash(kind, name, recorded)[:16],
+                "issued_hash": request_hash(kind, name, live)[:16],
+            })
+        raise JournalDivergence(
+            seq, kind, request_hash(kind, name, recorded),
+            request_hash(kind, name, live),
+            detail=f"recorded result of deterministic {kind}:{name} differs "
+                   f"from re-execution — the journal was altered or the "
+                   f"library changed")
+
     @property
     def diverged(self) -> bool:
         with self._lock:

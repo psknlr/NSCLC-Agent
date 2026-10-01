@@ -163,7 +163,9 @@ class PanelAgent:
             return result
 
         if self.llm is not None and getattr(self.llm, "available", False):
-            if self.concurrency > 1:
+            from ..platform_caps import THREADS_AVAILABLE
+
+            if self.concurrency > 1 and THREADS_AVAILABLE:
                 with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
                     results = list(pool.map(convene, PERSONAS))
             else:

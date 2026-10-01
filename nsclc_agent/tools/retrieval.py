@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -43,7 +42,9 @@ class RetrievalError(RuntimeError):
     """Transport-level retrieval failure — retryable, never silently absorbed."""
 
 
-def _ssl_context() -> ssl.SSLContext:
+def _ssl_context() -> "ssl.SSLContext":
+    import ssl  # lazily: the browser build (Pyodide) ships without ssl
+
     ctx = ssl.create_default_context()
     ca = os.environ.get("SSL_CERT_FILE") or os.environ.get("REQUESTS_CA_BUNDLE")
     if ca and os.path.isfile(ca):

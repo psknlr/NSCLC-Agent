@@ -151,7 +151,8 @@ def test_rule_mode_plan_carries_kg_context_outside_the_plan():
     # cited by the plan — alongside the releasable trial anchors.
     kg_eids = {eid for eid, e in state.evidence.items()
                if e.level == EvidenceLevel.KG_EXTRACTED.value}
-    assert kg_eids and kg_eids <= set(plan["citations"])
+    assert kg_eids and kg_eids <= set(plan["guideline_citations"])
+    assert not kg_eids & set(plan.get("citations") or [])
     trial_eids = {eid for eid, e in state.evidence.items()
                   if e.level == EvidenceLevel.TRIAL.value}
     assert trial_eids & set(plan["citations"])

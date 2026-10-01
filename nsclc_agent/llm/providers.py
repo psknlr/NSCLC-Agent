@@ -11,10 +11,13 @@ import os
 from typing import Any
 
 from .base import LLMError, LLMResponse, ToolCall, ToolSpec
-from .openai_compatible import OpenAICompatibleClient
+from .openai_compatible import OpenAICompatibleClient, _RetryableProviderError
 
 AZURE_DEFAULT_API_VERSION = "2024-10-21"
 POE_DEFAULT_BASE_URL = "https://api.poe.com/v1"
+#: Poe model ids exactly as the live catalog (GET /v1/models, public)
+#: lists them — lower-case since 2026. Verified: tools + image input.
+POE_DEFAULT_MODEL = "claude-sonnet-4.5"
 MINIMAX_CHINA_BASE_URL = "https://api.minimaxi.com/v1"
 MINIMAX_GLOBAL_BASE_URL = "https://api.minimax.io/v1"
 MINIMAX_DEPRECATED_HOSTS = ("api.minimax.chat",)
@@ -100,6 +103,27 @@ class MiniMaxClient(OpenAICompatibleClient):
             chat_path=chat_path, timeout=timeout, auth_scheme="bearer",
             supports_vision=supports_vision,
         )
+
+    #: MiniMax reports errors INSIDE an HTTP 200 (``base_resp``): 1000
+    #: unknown, 1001 timeout, 1002 rate limit and 1013 internal are
+    #: transient; everything else (1004 auth, 1008 balance, 1027 content,
+    #: 2013 parameters…) fails loudly with MiniMax's own message.
+    _TRANSIENT_CODES = frozenset({1000, 1001, 1002, 1013})
+
+    def _parse(self, data: dict[str, Any]) -> LLMResponse:
+        base = data.get("base_resp") if isinstance(data, dict) else None
+        if isinstance(base, dict):
+            try:
+                code = int(base.get("status_code") or 0)
+            except (TypeError, ValueError):
+                code = -1
+            if code:
+                message = (f"{self.name}: MiniMax error {code}: "
+                           f"{base.get('status_msg') or 'no message'}")
+                if code in self._TRANSIENT_CODES:
+                    raise _RetryableProviderError(message)
+                raise LLMError(message)
+        return super()._parse(data)
 
 
 class LiteLLMClient:
@@ -219,7 +243,7 @@ def build_client(provider: str | None = None, *, model: str | None = None) -> An
         if not key:
             raise LLMError("poe requires POE_API_KEY")
         return PoeClient(
-            "poe", model or _env("POE_MODEL") or "Claude-Sonnet-4.5",
+            "poe", model or _env("POE_MODEL") or POE_DEFAULT_MODEL,
             api_key=key, base_url=_env("POE_BASE_URL") or POE_DEFAULT_BASE_URL,
             supports_vision=_env("NSCLC_LLM_VISION") == "1",
         )
@@ -256,7 +280,7 @@ def build_client(provider: str | None = None, *, model: str | None = None) -> An
 
 #: Default Poe bot for auto-selected film/report reading. Overridable via
 #: NSCLC_VISION_MODEL — set it to whatever Gemini bot your Poe account exposes.
-POE_VISION_DEFAULT_MODEL = "Gemini-2.5-Pro"
+POE_VISION_DEFAULT_MODEL = "gemini-3.1-pro"
 
 
 def build_vision_client(*, provider: str | None = None, model: str | None = None) -> Any:
@@ -304,6 +328,67 @@ def build_vision_client(*, provider: str | None = None, model: str | None = None
 
 build_vision_client.__doc__ = build_vision_client.__doc__.format(
     default=POE_VISION_DEFAULT_MODEL)
+
+
+def poe_model_check(model: str, *, base_url: str = POE_DEFAULT_BASE_URL,
+                    timeout: float = 15.0) -> dict[str, Any]:
+    """Check a Poe model id against Poe's PUBLIC catalog (no key needed).
+
+    Returns ``{"catalog_reachable", "exact", "suggestion", "tools",
+    "image_input"}`` — a wrong-case or retired id is caught before the
+    first consult instead of failing mid-run."""
+    import json as _json
+    import urllib.request
+
+    from ..platform_caps import IN_BROWSER
+
+    out: dict[str, Any] = {"model": model, "catalog_reachable": False,
+                           "exact": False, "suggestion": None}
+    url = f"{base_url.rstrip('/')}/models"
+    try:
+        if IN_BROWSER:
+            from js import XMLHttpRequest  # type: ignore[import-not-found]
+
+            xhr = XMLHttpRequest.new()
+            xhr.open("GET", url, False)
+            xhr.send()
+            if int(xhr.status) != 200:
+                raise OSError(f"HTTP {xhr.status}")
+            catalog = _json.loads(str(xhr.responseText))
+        else:
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                catalog = _json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - offline is a normal state
+        out["error"] = f"catalog unreachable: {exc}"
+        return out
+    out["catalog_reachable"] = True
+    entries = {str(m.get("id")): m for m in catalog.get("data") or []}
+    entry = entries.get(model)
+    if entry is None:
+        folded = {k.lower(): k for k in entries}
+        out["suggestion"] = folded.get(model.lower())
+        entry = entries.get(out["suggestion"] or "")
+    else:
+        out["exact"] = True
+    if entry is not None:
+        arch = entry.get("architecture") or {}
+        out["tools"] = "tools" in (entry.get("supported_features") or [])
+        out["image_input"] = "image" in (arch.get("input_modalities") or [])
+    return out
+
+
+def ping_client(client: Any) -> dict[str, Any]:
+    """One tiny real completion — proves key, endpoint and model together."""
+    if not getattr(client, "available", False):
+        return {"ok": False, "error": "no provider configured"}
+    try:
+        response = client.chat(
+            [{"role": "user", "content": "Reply with the single word: ok"}],
+            max_tokens=8)
+    except LLMError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "reply": (response.text or "")[:40],
+            "model": response.model}
 
 
 def describe_client(client: Any) -> dict[str, Any]:

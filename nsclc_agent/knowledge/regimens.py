@@ -81,7 +81,7 @@ REGIMENS: tuple[Regimen, ...] = (
         (_C("osimertinib", "80 mg", route="PO", schedule="once daily", duration="3 years"),),
         trial_ids=("ADAURA",),
         monitoring=("QTc at baseline and on treatment", "ILD/pneumonitis symptoms", "LVEF if cardiac risk"),
-        dose_gates=("qtc_baseline", "ild_history"),
+        dose_gates=("egfr_classical_sensitizing", "qtc_baseline", "ild_history"),
         label_note="Resected IB–IIIA EGFR ex19del/L858R, after recovery from surgery ± adjuvant chemo",
     ),
     Regimen(
@@ -197,7 +197,7 @@ REGIMENS: tuple[Regimen, ...] = (
         "osimertinib_consolidation", "Consolidation osimertinib (LAURA)", "consolidation",
         (_C("osimertinib", "80 mg", route="PO", schedule="once daily", duration="until progression"),),
         trial_ids=("LAURA",),
-        dose_gates=("egfr_positive", "no_progression_post_crt"),
+        dose_gates=("egfr_classical_sensitizing", "no_progression_post_crt"),
         label_note="Unresectable III EGFR ex19del/L858R after definitive CRT — instead of durvalumab",
     ),
     # -------------------------------------------------------- stage IV
@@ -205,7 +205,7 @@ REGIMENS: tuple[Regimen, ...] = (
         "osimertinib_first_line", "First-line osimertinib (FLAURA)", "first_line",
         (_C("osimertinib", "80 mg", route="PO", schedule="once daily", duration="until progression"),),
         trial_ids=("FLAURA",),
-        dose_gates=("egfr_positive", "qtc_baseline"),
+        dose_gates=("egfr_classical_sensitizing", "qtc_baseline"),
         label_note="Metastatic EGFR ex19del/L858R",
     ),
     Regimen(
@@ -216,7 +216,7 @@ REGIMENS: tuple[Regimen, ...] = (
             _C("cisplatin or carboplatin", "75 mg/m² / AUC 5", schedule="q3w × 4"),
         ),
         trial_ids=("FLAURA2",),
-        dose_gates=("egfr_positive", "renal_function", "b12_folate_started"),
+        dose_gates=("egfr_classical_sensitizing", "renal_function", "b12_folate_started"),
         label_note="Metastatic EGFR+ — option for high burden/CNS disease",
     ),
     Regimen(
@@ -228,7 +228,7 @@ REGIMENS: tuple[Regimen, ...] = (
         trial_ids=("MARIPOSA",),
         monitoring=("infusion reactions (step-up dosing)", "VTE — prophylactic anticoagulation first 4 months",
                     "rash/paronychia"),
-        dose_gates=("egfr_positive",),
+        dose_gates=("egfr_classical_sensitizing",),
         label_note="Metastatic EGFR ex19del/L858R alternative to osimertinib",
     ),
     Regimen(
@@ -296,6 +296,243 @@ REGIMENS: tuple[Regimen, ...] = (
         trial_ids=("GOMEZ_LCT",),
         dose_gates=("oligometastatic_confirmed", "no_progression_on_systemic"),
         label_note="≤3 sites, controlled on first-line systemic therapy, MDT decision",
+    ),
+    # ---------------------- driver-directed pathways beyond EGFR/ALK.
+    # Dosing for these entries is deliberately NOT encoded (weight tiers /
+    # complex ramp-ups): the dose channel serves "per label" and the gate
+    # stays unverified until a pharmacist encodes it — honest absence over
+    # invented numerics.
+    Regimen(
+        "amivantamab_chemo_first_line",
+        "Amivantamab + carboplatin-pemetrexed (PAPILLON)", "first_line",
+        (
+            _C("amivantamab", "per label (weight-tiered — not encoded)",
+               schedule="weekly ×4 then q3w"),
+            _C("carboplatin", "per label (not encoded)", schedule="q3w ×4"),
+            _C("pemetrexed", "per label (not encoded)",
+               schedule="q3w until progression"),
+        ),
+        trial_ids=("PAPILLON",),
+        monitoring=("Infusion reactions (step-up dosing)", "VTE risk",
+                    "rash/paronychia", "renal function"),
+        dose_gates=("egfr_exon20ins", "renal_function", "b12_folate_started"),
+        label_note="First-line metastatic EGFR exon 20 insertion — the "
+                   "classical-EGFR regimens do not apply here",
+    ),
+    Regimen(
+        "afatinib_uncommon_first_line",
+        "Afatinib (uncommon-sensitizing EGFR: G719X/L861Q/S768I)", "first_line",
+        (_C("afatinib", "40 mg", route="PO", schedule="once daily"),),
+        trial_ids=("LUXLUNG_UNCOMMON",),
+        monitoring=("Diarrhea/rash (dose-limiting)", "ILD symptoms"),
+        dose_gates=("egfr_uncommon_sensitizing",),
+        label_note="Uncommon sensitizing mutations only; osimertinib is a "
+                   "reasonable alternative on separate data — MDT choice",
+    ),
+    Regimen(
+        "repotrectinib_first_line", "Repotrectinib (TRIDENT-1)", "first_line",
+        (_C("repotrectinib", "per label (ramp-up — not encoded)", route="PO"),),
+        trial_ids=("TRIDENT1",),
+        monitoring=("Dizziness/ataxia", "CK", "QTc"),
+        dose_gates=("ros1_positive",),
+        label_note="ROS1 fusion+ advanced NSCLC; entrectinib/crizotinib/"
+                   "taletrectinib are alternatives",
+    ),
+    Regimen(
+        "selpercatinib_first_line", "Selpercatinib (LIBRETTO-431)", "first_line",
+        (_C("selpercatinib", "per label (weight-tiered — not encoded)",
+            route="PO", schedule="twice daily"),),
+        trial_ids=("LIBRETTO431",),
+        monitoring=("Hypertension", "QTc", "hepatic function"),
+        dose_gates=("ret_positive",),
+        label_note="RET fusion+ — beat chemo±pembrolizumab head-to-head; "
+                   "PD-L1 level does not redirect to ICI",
+    ),
+    Regimen(
+        "capmatinib_first_line", "Capmatinib (GEOMETRY mono-1)", "first_line",
+        (_C("capmatinib", "400 mg", route="PO", schedule="twice daily"),),
+        trial_ids=("GEOMETRY",),
+        monitoring=("Peripheral edema", "hepatic function", "ILD symptoms"),
+        dose_gates=("met_ex14_confirmed",),
+        label_note="MET exon 14 skipping only (tepotinib is the "
+                   "alternative); amplification is a different question",
+    ),
+    Regimen(
+        "dabrafenib_trametinib_first_line",
+        "Dabrafenib + trametinib (BRF113928)", "first_line",
+        (
+            _C("dabrafenib", "150 mg", route="PO", schedule="twice daily"),
+            _C("trametinib", "2 mg", route="PO", schedule="once daily"),
+        ),
+        trial_ids=("BRF113928",),
+        monitoring=("Pyrexia", "LVEF", "skin toxicity"),
+        dose_gates=("braf_v600e_confirmed",),
+        label_note="BRAF V600E only — non-V600 alterations are not an "
+                   "indication",
+    ),
+    Regimen(
+        "larotrectinib_first_line", "Larotrectinib (NAVIGATE)", "first_line",
+        (_C("larotrectinib", "100 mg", route="PO", schedule="twice daily"),),
+        trial_ids=("NAVIGATE",),
+        monitoring=("Dizziness", "hepatic function", "withdrawal pain on stop"),
+        dose_gates=("ntrk_positive",),
+        label_note="NTRK fusion+ (tumor-agnostic); entrectinib is the "
+                   "CNS-active alternative",
+    ),
+    Regimen(
+        "tdxd_subsequent_line",
+        "Trastuzumab deruxtecan (DESTINY-Lung02)", "subsequent",
+        (_C("trastuzumab deruxtecan", "per label (weight-based — not encoded)",
+            schedule="q3w"),),
+        trial_ids=("DESTINY_LUNG02",),
+        monitoring=("ILD/pneumonitis — key toxicity, hold and image early",
+                    "LVEF", "cytopenias"),
+        dose_gates=("erbb2_positive", "prior_systemic_therapy",
+                    "ild_history"),
+        label_note="Previously treated HER2(ERBB2)-mutant NSCLC — NOT a "
+                   "first-line regimen; first-line stays chemo±IO",
+    ),
+    # ----------------------------------------------- later-line sequencing
+    Regimen(
+        "amivantamab_chemo_subsequent",
+        "Amivantamab + platinum-pemetrexed (MARIPOSA-2)", "subsequent",
+        (_C("amivantamab", "per label (weight-based — not encoded)"),
+         _C("carboplatin", "per label (AUC-based — not encoded)"),
+         _C("pemetrexed", "per label (BSA-based — not encoded)")),
+        trial_ids=("MARIPOSA2",),
+        monitoring=("infusion reactions (first-dose split dosing per label)",
+                    "VTE — prophylactic anticoagulation advised", "rash",
+                    "cytopenias"),
+        dose_gates=("egfr_positive", "prior_systemic_therapy",
+                    "renal_function"),
+        label_note="EGFR ex19del/L858R AFTER osimertinib progression — not "
+                   "a first-line regimen",
+    ),
+    Regimen(
+        "platinum_pemetrexed_post_tki",
+        "Platinum-pemetrexed after TKI progression", "subsequent",
+        (_C("carboplatin", "per label (AUC-based — not encoded)"),
+         _C("pemetrexed", "per label (BSA-based — not encoded)")),
+        trial_ids=("KEYNOTE789",),
+        monitoring=("cytopenias", "renal function (pemetrexed)",
+                    "B12/folate supplementation"),
+        dose_gates=("prior_systemic_therapy", "renal_function"),
+        label_note="Post-TKI chemotherapy backbone (driver-positive, "
+                   "nonsquamous). KEYNOTE-789: ADDING pembrolizumab did "
+                   "not significantly improve OS — cited as the reason "
+                   "chemo-IO is not the default here",
+    ),
+    Regimen(
+        "lorlatinib_post_second_gen",
+        "Lorlatinib after second-generation ALK TKI", "subsequent",
+        (_C("lorlatinib", "per label (not encoded)", schedule="daily"),),
+        trial_ids=("LORLATINIB_P2",),
+        monitoring=("lipids (hypercholesterolemia/hypertriglyceridemia)",
+                    "CNS effects (mood, cognition, speech)", "edema",
+                    "AV conduction"),
+        dose_gates=("alk_positive", "prior_systemic_therapy"),
+        label_note="ALK+ after alectinib/brigatinib/ceritinib progression "
+                   "(phase 2 post-second-generation cohorts); distinct "
+                   "from the CROWN first-line indication",
+    ),
+    Regimen(
+        "docetaxel_ramucirumab_second_line",
+        "Docetaxel + ramucirumab (REVEL)", "subsequent",
+        (_C("docetaxel", "per label (BSA-based — not encoded)",
+            schedule="q3w"),
+         _C("ramucirumab", "per label (weight-based — not encoded)",
+            schedule="q3w")),
+        trial_ids=("REVEL",),
+        monitoring=("neutropenia/febrile neutropenia", "bleeding risk",
+                    "hypertension/proteinuria (ramucirumab)",
+                    "fluid retention"),
+        dose_gates=("prior_systemic_therapy", "bleeding_risk"),
+        label_note="Second line after platinum-based therapy (REVEL "
+                   "enrolled all histologies); screen for hemoptysis "
+                   "history and cavitating central lesions before the "
+                   "ramucirumab component",
+    ),
+    Regimen(
+        "docetaxel_second_line",
+        "Docetaxel monotherapy (second line)", "subsequent",
+        (_C("docetaxel", "per label (BSA-based — not encoded)",
+            schedule="q3w"),),
+        trial_ids=("REVEL",),
+        monitoring=("neutropenia/febrile neutropenia", "fluid retention",
+                    "neuropathy"),
+        dose_gates=("prior_systemic_therapy",),
+        label_note="The ramucirumab-free alternative (bleeding risk, "
+                   "cavitating central lesions); REVEL control arm is the "
+                   "modern reference",
+    ),
+    Regimen(
+        "osimertinib_t790m_subsequent",
+        "Osimertinib for acquired T790M (AURA3)", "subsequent",
+        (_C("osimertinib", "per label (not encoded)", schedule="daily"),),
+        trial_ids=("AURA3",),
+        monitoring=("QTc", "ILD/pneumonitis", "LVEF", "cytopenias"),
+        dose_gates=("egfr_positive", "prior_systemic_therapy",
+                    "qtc_baseline", "ild_history"),
+        label_note="Acquired EGFR T790M after progression on a "
+                   "first/second-generation EGFR TKI — distinct from the "
+                   "FLAURA first-line population",
+    ),
+    Regimen(
+        "platinum_etoposide_transformation",
+        "Platinum-etoposide (small-cell transformation)", "subsequent",
+        (_C("carboplatin", "per label (AUC-based — not encoded)"),
+         _C("etoposide", "per label (BSA-based — not encoded)")),
+        trial_ids=("MARCOUX_SERIES",),
+        monitoring=("cytopenias (deep nadirs typical of SCLC-style "
+                    "chemotherapy)", "febrile neutropenia"),
+        dose_gates=("transformation_confirmed", "prior_systemic_therapy"),
+        label_note="Histologic small-cell transformation of EGFR-mutant "
+                   "NSCLC — treats the TRANSFORMED clone; retrospective "
+                   "evidence, thoracic tumor board framing",
+    ),
+    Regimen(
+        "tepotinib_osimertinib_met_amp",
+        "Tepotinib + osimertinib (MET-amplified resistance)", "subsequent",
+        (_C("tepotinib", "per label (not encoded)", schedule="daily"),
+         _C("osimertinib", "per label (not encoded)", schedule="daily")),
+        trial_ids=("INSIGHT2",),
+        monitoring=("peripheral edema (tepotinib)", "QTc", "ILD",
+                    "hepatotoxicity"),
+        dose_gates=("egfr_positive", "met_amplification_confirmed",
+                    "prior_systemic_therapy"),
+        label_note="MET-amplification-driven osimertinib resistance: "
+                   "phase 2 (INSIGHT 2) — a mechanism-directed "
+                   "CONTINUATION of osimertinib, deliberately carrying "
+                   "the same-drug flag as its documentation demand; not "
+                   "an approved indication, MDT/trial framing",
+    ),
+    Regimen(
+        "dato_dxd_egfr_subsequent",
+        "Datopotamab deruxtecan (TROPION-Lung05)", "subsequent",
+        (_C("datopotamab deruxtecan",
+            "per label (weight-based — not encoded)", schedule="q3w"),),
+        trial_ids=("TROPION_LUNG05",),
+        monitoring=("stomatitis/oral mucositis — key toxicity",
+                    "ILD/pneumonitis", "ocular surface events",
+                    "cytopenias"),
+        dose_gates=("egfr_positive", "prior_systemic_therapy",
+                    "prior_platinum", "ild_history"),
+        label_note="EGFR-mutant NSCLC after BOTH EGFR-directed therapy "
+                   "AND platinum-based chemotherapy (accelerated "
+                   "approval) — a third-line option, never earlier",
+    ),
+    Regimen(
+        "sotorasib_subsequent_line",
+        "Sotorasib (KRAS G12C, CodeBreaK 100)", "subsequent",
+        (_C("sotorasib", "per label (not encoded)", schedule="daily"),),
+        trial_ids=("CODEBREAK100",),
+        monitoring=("hepatotoxicity (ALT/AST — key toxicity)", "diarrhea",
+                    "ILD (uncommon)",
+                    "acid-reducing-agent interaction (absorption)"),
+        dose_gates=("kras_g12c_positive", "prior_systemic_therapy"),
+        label_note="KRAS G12C, previously treated — NOT a first-line "
+                   "regimen (first line remains chemo±IO); adagrasib is "
+                   "the alternative",
     ),
 )
 

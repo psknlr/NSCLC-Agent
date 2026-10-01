@@ -10,11 +10,19 @@ runnable, testable and teachable fully offline.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Optional
 
 from ..interview import InterviewLoop, coverage, workup_plan
 from ..knowledge import regimens as regimen_lib
+from ..knowledge.biomarkers import (
+    EGFR_UNCOMMON_SENSITIZING,
+    egfr_classes,
+    egfr_classical,
+    first_line_actionable_drivers,
+    later_line_actionable_drivers,
+)
 from ..perception import ImagingError, ImagingReader, fold_into_case
 from ..prompts import load_module
 from ..safety import emergencies
@@ -32,6 +40,70 @@ _SCREEN_AXIS_FACTS = {
     "febrile_neutropenia": "emergency_fever_screen",
 }
 
+#: An explicit negative brain-imaging statement in the narrative seeds
+#: ``cns_metastases: absent`` (setdefault only — structured facts win).
+#: The pattern REQUIRES a negative token near the modality; "brain MRI
+#: shows metastases" matches nothing and CNS status stays unknown. This
+#: is the only CNS fact ever read from prose.
+_CNS_NEGATIVE_IMAGING_RE = re.compile(
+    r"(?:brain\s*mri|mri\s*brain|脑\s*mri|颅脑\s*(?:mri|磁共振)|头颅\s*mri)"
+    r"[^.;。；]{0,40}?"
+    r"(?:negative|clear|m0|no\s+(?:brain\s+)?met|unremarkable|"
+    r"阴性|未见|无转移|排除)",
+    re.I,
+)
+
+_CNS_MODALITY_RE = re.compile(
+    r"brain\s*mri|mri\s*brain|脑\s*mri|颅脑\s*(?:mri|磁共振)|头颅\s*mri|"
+    r"brain\s*ct|head\s*ct|头颅\s*ct|颅脑\s*ct",
+    re.I,
+)
+
+#: Positive CNS findings. A sentence that still names one of these after
+#: its negated phrases are removed is NOT a negative report, whatever
+#: else it says ("margins not clear", "unremarkable except for 3
+#: metastases", "未见出血，可见多发转移").
+_CNS_POSITIVE_RE = re.compile(
+    r"metasta\w*|\blesions?\b|\benhanc\w*|\bmass(?:es)?\b|"
+    r"\bnodules?\b|转移|病灶|强化|结节|占位",
+    re.I,
+)
+_CNS_NEGATED_POSITIVE_RE = re.compile(
+    r"(?:\bno\b|\bwithout\b|negative\s+for|free\s+of|未见|无|排除)"
+    r"[^.;。；,，]{0,20}?"
+    r"(?:metasta\w*|\blesions?\b|\benhanc\w*|\bmass(?:es)?\b|"
+    r"\bnodules?\b|转移\w*|病灶|强化|结节|占位)",
+    re.I,
+)
+
+
+def _cns_negative_imaging(text: str) -> bool:
+    """True only for a sentence that states negative brain imaging AND
+    asserts no CNS finding after that statement once its negated phrases
+    are removed."""
+    sentences = re.split(r"[.;。；\n]", text or "")
+    # A positive brain-imaging statement ANYWHERE (e.g. a later turn's
+    # "brain MRI now shows two lesions") vetoes every negative seed —
+    # the cumulative record then reads as unknown, never as absent.
+    for sentence in sentences:
+        mention = _CNS_MODALITY_RE.search(sentence)
+        if mention:
+            tail = _CNS_NEGATED_POSITIVE_RE.sub(" ", sentence[mention.start():])
+            if _CNS_POSITIVE_RE.search(tail):
+                return False
+    for sentence in sentences:
+        match = _CNS_NEGATIVE_IMAGING_RE.search(sentence)
+        if not match:
+            continue
+        # Only what follows the brain-imaging mention describes the
+        # brain ("adrenal metastasis, brain MRI negative" is negative
+        # brain imaging); a finding after it vetoes the seed.
+        residual = _CNS_NEGATED_POSITIVE_RE.sub(" ", sentence[match.start():])
+        if _CNS_POSITIVE_RE.search(residual):
+            continue
+        return True
+    return False
+
 
 # --------------------------------------------------------------------- intake
 
@@ -48,14 +120,28 @@ class IntakeAgent:
         # An explicit narrative answer (positive or negated) closes the
         # corresponding screening axis — "没有咯血" is an answer, and without
         # this a fully cooperative history reads as "screen never done".
+        # Positive hits are written FIRST and unconditionally: two signals
+        # share one axis fact (cord compression / brain-met signs), and an
+        # earlier "没有抽搐" must never outvote a later "突然抽搐" (v0.7.1
+        # audit: the negation won and a dose was drafted over a seizure).
+        for hit in screen.hard_hits + screen.soft_hits:
+            fact = _SCREEN_AXIS_FACTS.get(hit["signal_id"])
+            if fact:
+                state.facts[fact] = f"positive:{hit['signal_id']}"
         for signal in screen.negated:
             fact = _SCREEN_AXIS_FACTS.get(signal)
             if fact:
                 state.facts.setdefault(fact, "negative_by_history")
-        for hit in screen.hard_hits + screen.soft_hits:
-            fact = _SCREEN_AXIS_FACTS.get(hit["signal_id"])
-            if fact:
-                state.facts.setdefault(fact, f"positive:{hit['signal_id']}")
+        for hit in screen.soft_hits:
+            # Soft signals do not short-circuit, but their urgent action is
+            # never silent.
+            state.flags.append(
+                f"URGENT_SIGNAL[{hit['signal_id']}]: {hit['action']}")
+        if _cns_negative_imaging(state.complaint or ""):
+            state.facts.setdefault(
+                "cns_metastases",
+                {"status": "absent",
+                 "source": "presentation_imaging_statement"})
         eid = state.add_evidence(
             EvidenceLevel.OBSERVED, "emergency_screen",
             f"{len(screen.hard_hits)} hard / {len(screen.soft_hits)} soft "
@@ -351,12 +437,37 @@ def _resectability(facts: dict[str, Any]) -> str:
                or facts.get("resectability") or "").upper()
 
 
+def _consolidation_by_driver(plan: dict[str, Any], opt: Any,
+                             facts: dict[str, Any], egfr: bool) -> None:
+    """Post-cCRT consolidation, variant-aware.
+
+    LAURA enrolled EGFR ex19del/L858R — a non-classical EGFR alteration is
+    outside both LAURA and (per the subgroup signal) PACIFIC's benefit, so
+    the consolidation decision goes to the MDT instead of a guessed drug.
+    """
+    if egfr and egfr_classical(facts):
+        opt("Consolidation osimertinib", ["osimertinib_consolidation"],
+            "EGFR ex19del/L858R unresectable III → LAURA, not durvalumab")
+    elif egfr:
+        plan["mdt_referral"] = True
+        plan["uncertainties"].append(
+            f"EGFR {'/'.join(sorted(egfr_classes(facts)))} after cCRT: "
+            f"LAURA applies to ex19del/L858R only, and durvalumab benefit "
+            f"in EGFR+ disease is unclear — consolidation strategy is an "
+            f"individualized MDT decision, none is auto-proposed.")
+    else:
+        opt("Consolidation durvalumab", ["durva_consolidation"],
+            "PACIFIC; start ≤42 days post-CRT; never concurrent")
+
+
 def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any]:
     """The rule-mode treatment plan: conservative, library-anchored, dose-free.
 
     Not a model stub — this is the deterministic decision table distilled from
     the protocol modules, and it must itself pass the safety rule engine.
     """
+    from ..knowledge.cns import tnm_conflict
+
     pd_l1 = facts.get("pd_l1") or {}
     tps = pd_l1.get("tps")
     egfr, alk = _driver_positive(facts, "egfr"), _driver_positive(facts, "alk")
@@ -366,11 +477,107 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         "workup_needed": [], "mdt_referral": False, "uncertainties": [],
         "origin": "rule",
     }
+    cns_conflict = tnm_conflict(facts)
+    if cns_conflict:
+        plan["uncertainties"].append(cns_conflict)
+        plan["mdt_referral"] = True
 
-    def opt(name: str, regimen_ids: list[str], rationale: str) -> None:
-        plan["options"].append({"name": name, "regimen_ids": regimen_ids,
-                                "rationale": rationale})
+    def opt(name: str, regimen_ids: list[str], rationale: str, *,
+            allow_progressed: bool = False) -> None:
+        """Add an option — through the indication-predicate gate.
+
+        The decision table SELECTS candidates; the declared predicates
+        decide whether each may actually be proposed: ``ineligible`` is
+        dropped loudly (a table/declaration divergence to fix, never a
+        silent recommendation), ``unknown`` stays provisional with the
+        missing facts routed to workup, and a stage mismatch that the plan
+        has explicitly declared as an extrapolation is honored as such.
+        """
+        from ..knowledge.indications import (
+            INELIGIBLE, UNKNOWN as IND_UNKNOWN, evaluate_indication,
+        )
+        from ..knowledge.organ_gates import failed_gates
+        from ..knowledge.sequencing import progressed_drugs_in
+
+        kept: list[str] = []
+        organ_dropped: list[str] = []
         for rid in regimen_ids:
+            progressed = progressed_drugs_in(rid, facts)
+            if progressed and not allow_progressed:
+                # The table never re-proposes a drug the disease just
+                # progressed on; a deliberate continuation (INSIGHT-2)
+                # opts in explicitly and carries the critic's warn.
+                plan["uncertainties"].append(
+                    f"决策表提案 {rid} 含已记录进展的药物（"
+                    + ", ".join(progressed) + "）——已剔除。")
+                continue
+            organ_failures = failed_gates(rid, facts)
+            if organ_failures:
+                # The population fits; this BODY does not. Dropped loudly
+                # — a table/organ divergence routes to the MDT, never to
+                # a silently adjusted dose.
+                plan["uncertainties"].append(
+                    f"决策表提案 {rid} 因器官功能/合并症闸门不合格被剔除（"
+                    + "; ".join(f["note"] for f in organ_failures)
+                    + "）——替代骨架属 MDT/药师决策。")
+                plan["mdt_referral"] = True
+                organ_dropped.append(rid)
+                continue
+            verdict = evaluate_indication(rid, stage_group, facts)
+            if verdict["verdict"] == INELIGIBLE:
+                failed = verdict["failed_conditions"]
+                stage_only = all(f.startswith("stage:") for f in failed)
+                declared = {
+                    str(e.get("trial_id")) for e in plan["extrapolations"]
+                    if isinstance(e, dict)
+                }
+                regimen = regimen_lib.get(rid)
+                if stage_only and regimen and declared & set(regimen.trial_ids):
+                    kept.append(rid)  # declared extrapolation: allowed, audited
+                    continue
+                plan["uncertainties"].append(
+                    f"决策表提案 {rid} 被适应证谓词判定不适用（"
+                    + "; ".join(failed)
+                    + "）——已剔除；请修正决策表或声明。")
+                continue
+            kept.append(rid)
+            if verdict["verdict"] == IND_UNKNOWN:
+                provisional = plan.setdefault("provisional_regimens", [])
+                provisional.append({
+                    "regimen_id": rid,
+                    "pending": verdict["unknown_conditions"],
+                })
+                for missing in verdict["unknown_conditions"]:
+                    line = f"Resolve for {rid}: {missing}"
+                    if line not in plan["workup_needed"]:
+                        plan["workup_needed"].append(line)
+                plan["uncertainties"].append(
+                    f"{rid} 为暂定推荐：待补齐 "
+                    + "；".join(verdict["unknown_conditions"]))
+            if verdict["edition_migration"]:
+                note = (f"{rid}: applied via 8th-edition descriptor mapping "
+                        f"(TNM edition migration, not an extrapolation)")
+                if note not in plan["uncertainties"]:
+                    plan["uncertainties"].append(note)
+        if regimen_ids and not kept:
+            if organ_dropped:
+                # The whole option fell to an organ gate: the next step is
+                # an explicit MDT/pharmacist decision, not a release of
+                # whatever non-systemic options remain.
+                plan["workup_needed"].append(
+                    f"MDT/pharmacist review: {name} is excluded by organ "
+                    f"function/comorbidity ({', '.join(organ_dropped)}) — "
+                    f"select a compatible regimen")
+            return  # every regimen failed its predicate — no option
+        if kept != list(regimen_ids):
+            # Part of a combined option was dropped: the name must stop
+            # naming the dropped drug (OPTION_DRUG_UNBOUND would rightly
+            # block "Docetaxel ± ramucirumab" bound only to docetaxel).
+            name = " / ".join(regimen_lib.get(rid).name for rid in kept
+                              if regimen_lib.get(rid)) or name
+        plan["options"].append({"name": name, "regimen_ids": kept,
+                                "rationale": rationale})
+        for rid in kept:
             if rid not in plan["regimen_ids"]:
                 plan["regimen_ids"].append(rid)
 
@@ -394,7 +601,7 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
 
     if stage_group == "0":
         opt("Sublobar resection", [],
-            "AIS/MIA: complete (often sublobar) resection is typically curative")
+            "AIS (Tis, stage 0): complete (often sublobar) resection is typically curative — MIA is T1mi → IA1 and never reaches this branch")
         opt("Active surveillance", [],
             "Pure GGN, stable: surveillance per MDT is legitimate")
         plan["summary"] = "Stage 0: resection extent vs surveillance; no systemic therapy."
@@ -408,9 +615,15 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         else:
             opt("Anatomic resection + nodal evaluation", [],
                 "Operable stage I: surgery is the definitive modality")
-        if stage_group == "IB" and egfr:
+        if stage_group == "IB" and egfr and egfr_classical(facts):
             opt("Adjuvant osimertinib after resection", ["osimertinib_adjuvant"],
                 "ADAURA covers resected IB EGFR ex19del/L858R")
+        elif stage_group == "IB" and egfr:
+            plan["mdt_referral"] = True
+            plan["uncertainties"].append(
+                f"Resected IB with EGFR "
+                f"{'/'.join(sorted(egfr_classes(facts)))}: outside the "
+                f"ADAURA population — adjuvant TKI not standard; MDT.")
         plan["summary"] = "Stage I: operability decides surgery vs SBRT."
         return plan
 
@@ -420,17 +633,23 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         if unresectable:
             opt("Definitive concurrent chemoradiation", ["ccrt_60gy"],
                 "Unresectable locally advanced disease")
-            if egfr:
-                opt("Consolidation osimertinib", ["osimertinib_consolidation"],
-                    "EGFR-mutated unresectable III → LAURA, not durvalumab")
-            else:
-                opt("Consolidation durvalumab", ["durva_consolidation"],
-                    "PACIFIC consolidation after cCRT without progression")
+            _consolidation_by_driver(plan, opt, facts, egfr)
             plan["summary"] = f"Stage {stage_group} unresectable: cCRT + consolidation by driver."
             return plan
-        if egfr:
+        if egfr and egfr_classical(facts):
             opt("Surgery → adjuvant osimertinib (± chemo)", ["osimertinib_adjuvant"],
-                "EGFR+ resectable: targeted adjuvant standard; no perioperative IO")
+                "EGFR ex19del/L858R resectable: targeted adjuvant standard "
+                "(ADAURA); no perioperative IO")
+        elif egfr:
+            # Non-classical EGFR (exon20ins/uncommon/unclassified): ADAURA
+            # does not apply, and the perioperative-IO trials excluded
+            # EGFR+ disease — adjuvant chemo + MDT, not a guessed TKI.
+            opt("Surgery → adjuvant chemotherapy; targeted adjuvant "
+                "individualized", ["adjuvant_platinum_doublet"],
+                f"EGFR {'/'.join(sorted(egfr_classes(facts)))}: outside the "
+                f"ADAURA population — adjuvant TKI is not standard; "
+                f"chemo per LACE, molecular tumor board for the rest")
+            plan["mdt_referral"] = True
         elif alk:
             opt("Surgery → adjuvant alectinib", ["alectinib_adjuvant"],
                 "ALK+ resectable: ALINA")
@@ -460,17 +679,56 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
             stage_group == "IIIB" and resect == "RESECTABLE" and n_cat != "N3"
         )
         if surgical_candidate:
+            if egfr and not egfr_classical(facts):
+                opt("Surgery → adjuvant chemotherapy; targeted adjuvant "
+                    "individualized", ["adjuvant_platinum_doublet"],
+                    f"EGFR {'/'.join(sorted(egfr_classes(facts)))}: outside "
+                    f"the ADAURA population and periop-IO trials excluded "
+                    f"EGFR+ — chemo per LACE, molecular tumor board")
+                plan["mdt_referral"] = True
+                plan["summary"] = f"Resectable {stage_group}: non-classical " \
+                                  f"EGFR — chemo + MDT pathway."
+                return plan
             if egfr or alk:
                 rid = "osimertinib_adjuvant" if egfr else "alectinib_adjuvant"
                 trial = "ADAURA" if egfr else "ALINA"
-                opt(f"Surgery → adjuvant {'osimertinib' if egfr else 'alectinib'}",
-                    [rid], f"Driver-positive resectable IIIB — {trial} extrapolated beyond IIIA")
-                plan["extrapolations"].append({
-                    "trial_id": trial,
-                    "justification": f"{trial} enrolled up to IIIA; resectable "
-                                     f"IIIB use is a documented extrapolation "
-                                     f"per MDT decision",
-                })
+                # Edition-aware: many "IIIB" cases are 8th-edition IIIA that
+                # the 9th edition renamed (T2N2b etc.) — those are inside
+                # the trial's enrollment, not an extrapolation.
+                from ..knowledge.trials import TRIALS_BY_ID
+                from ..staging.legacy8 import eighth_edition_group
+
+                tnm = facts.get("tnm") or {}
+                legacy = eighth_edition_group(tnm.get("t"), tnm.get("n"),
+                                              tnm.get("m"))
+                entry = TRIALS_BY_ID.get(trial)
+                migrated = bool(legacy and entry
+                                and legacy in entry.stage_groups)
+                if migrated:
+                    opt(f"Surgery → adjuvant "
+                        f"{'osimertinib' if egfr else 'alectinib'}",
+                        [rid],
+                        f"Driver-positive resectable IIIB — 8th-edition "
+                        f"{legacy} under {trial}'s enrollment (TNM edition "
+                        f"migration, not an extrapolation)")
+                    plan["uncertainties"].append(
+                        f"{trial}: case is 9th-edition {stage_group} but "
+                        f"maps to {legacy} under the trial's 8th-edition "
+                        f"enrollment — edition migration noted.")
+                else:
+                    # Declare BEFORE opt(): the predicate gate honors a
+                    # declared extrapolation; an undeclared one is dropped.
+                    plan["extrapolations"].append({
+                        "trial_id": trial,
+                        "justification": f"{trial} enrolled up to IIIA; "
+                                         f"resectable IIIB use is a "
+                                         f"documented extrapolation per MDT "
+                                         f"decision",
+                    })
+                    opt(f"Surgery → adjuvant "
+                        f"{'osimertinib' if egfr else 'alectinib'}",
+                        [rid], f"Driver-positive resectable IIIB — {trial} "
+                               f"extrapolated beyond IIIA")
             else:
                 opt("Perioperative pembrolizumab + chemotherapy",
                     ["pembro_perioperative"],
@@ -481,23 +739,107 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         opt("Definitive concurrent chemoradiation", ["ccrt_60gy"],
             "N3 / unresectable locally advanced disease: cCRT is the "
             "curative-intent pathway")
-        if egfr:
-            opt("Consolidation osimertinib", ["osimertinib_consolidation"],
-                "EGFR+ unresectable III → LAURA, not durvalumab")
-        else:
-            opt("Consolidation durvalumab", ["durva_consolidation"],
-                "PACIFIC; start ≤42 days post-CRT; never concurrent")
+        _consolidation_by_driver(plan, opt, facts, egfr)
         plan["summary"] = f"Stage {stage_group}: definitive cCRT + consolidation by driver."
         return plan
 
     if stage_group in ("IVA", "IVB"):
         plan["intent"] = "palliative"
-        if egfr:
-            opt("First-line osimertinib", ["osimertinib_first_line"],
-                "EGFR ex19del/L858R: FLAURA")
-        elif alk:
+        # Driver-directed first: the actionable-driver plane is
+        # variant-aware — "EGFR positive" is not a treatment decision
+        # (red-team confirmed exon20ins was being released onto FLAURA).
+        drivers = first_line_actionable_drivers(facts)
+        lead = drivers[0] if drivers else None
+        from ..knowledge.sequencing import sequencing_context
+
+        seq = sequencing_context(stage_group, facts)
+        if seq and seq.get("defer_to_first_line"):
+            # Progression on chemo/IO but the driver's targeted agent was
+            # never given: the first-line driver table below IS the next
+            # line. Record why, then fall through to it.
+            plan["uncertainties"].extend(seq["cautions"])
+            seq = None
+        if seq:
+            # Documented progression: the first-line table below does not
+            # apply — the sequencing corpus proposes the next line (or
+            # routes to the molecular tumor board when it has nothing).
+            for option in seq["options"]:
+                opt(option["name"], option["regimen_ids"],
+                    option["rationale"],
+                    allow_progressed=bool(option.get("continuation")))
+            plan["workup_needed"].extend(seq["workup"])
+            plan["uncertainties"].extend(seq["cautions"])
+            plan["sequencing"] = {"line": seq["line"],
+                                  "honest_notes": seq["honest_notes"]}
+            if not seq["options"]:
+                plan["mdt_referral"] = True
+        elif lead and lead["gene"] == "EGFR":
+            classes = set(lead["classes"])
+            if "exon20ins" in classes:
+                opt("Amivantamab + carboplatin-pemetrexed",
+                    ["amivantamab_chemo_first_line"],
+                    "EGFR exon 20 insertion: PAPILLON — osimertinib is NOT "
+                    "standard for this variant class")
+            elif egfr_classical(facts):
+                opt("First-line osimertinib", ["osimertinib_first_line"],
+                    "EGFR ex19del/L858R: FLAURA")
+                opt("Osimertinib + platinum-pemetrexed",
+                    ["osimertinib_chemo_first_line"],
+                    "FLAURA2 option — weigh for high disease burden / CNS "
+                    "disease against added chemo toxicity")
+                opt("Amivantamab + lazertinib", ["amivantamab_lazertinib"],
+                    "MARIPOSA option — PFS/OS benefit vs osimertinib at "
+                    "higher toxicity (VTE, infusion reactions); MDT/patient "
+                    "preference")
+            elif classes & EGFR_UNCOMMON_SENSITIZING \
+                    and not (classes & {"c797s"}):
+                opt("Afatinib (uncommon-sensitizing EGFR)",
+                    ["afatinib_uncommon_first_line"],
+                    "G719X/L861Q/S768I: LUX-Lung pooled data — a different "
+                    "population from FLAURA; osimertinib is a reasonable "
+                    "alternative on separate evidence")
+            elif classes == {"t790m"}:
+                opt("First-line osimertinib (de novo T790M)",
+                    ["osimertinib_first_line"],
+                    "De novo T790M: osimertinib retains activity; confirm "
+                    "no co-occurring resistance alteration")
+            else:
+                # Unclassified / resistance-pattern EGFR: fail toward the
+                # molecular tumor board, never toward a guessed TKI or ICI.
+                plan["mdt_referral"] = True
+                plan["workup_needed"].append(
+                    "EGFR variant classification (exact alteration + "
+                    "sensitizing status) — molecular tumor board review")
+                plan["uncertainties"].append(
+                    f"EGFR positive but variant class "
+                    f"{'/'.join(sorted(classes)) or 'unreported'} does not "
+                    f"map to a first-line indication — no systemic regimen "
+                    f"is proposed until the variant is classified.")
+        elif lead and lead["gene"] == "ALK":
             opt("First-line lorlatinib", ["lorlatinib_first_line"],
                 "ALK+: CROWN")
+        elif lead and lead["gene"] == "ROS1":
+            opt("First-line ROS1 TKI (repotrectinib)",
+                ["repotrectinib_first_line"],
+                "ROS1 fusion: TRIDENT-1; entrectinib/crizotinib/"
+                "taletrectinib are alternatives — ICI monotherapy is not a "
+                "substitute regardless of PD-L1")
+        elif lead and lead["gene"] == "RET":
+            opt("First-line selpercatinib", ["selpercatinib_first_line"],
+                "RET fusion: LIBRETTO-431 beat chemo±pembrolizumab "
+                "head-to-head — PD-L1 level does not redirect to ICI")
+        elif lead and lead["gene"] == "MET":
+            opt("First-line capmatinib", ["capmatinib_first_line"],
+                "MET exon 14 skipping: GEOMETRY (tepotinib per VISION is "
+                "the alternative)")
+        elif lead and lead["gene"] == "BRAF":
+            opt("First-line dabrafenib + trametinib",
+                ["dabrafenib_trametinib_first_line"],
+                "BRAF V600E: BRF113928")
+        elif lead and lead["gene"] == "NTRK":
+            opt("First-line larotrectinib", ["larotrectinib_first_line"],
+                "NTRK fusion: tumor-agnostic evidence (entrectinib is the "
+                "CNS-active alternative)")
         elif isinstance(tps, (int, float)) and tps >= 50:
             opt("Pembrolizumab monotherapy", ["pembro_monotherapy"],
                 "PD-L1 TPS≥50% driver-negative: KEYNOTE-024")
@@ -508,6 +850,27 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         else:
             opt("Pembrolizumab + carboplatin-taxane", ["pembro_carbo_taxane"],
                 "Driver-negative squamous: KEYNOTE-407")
+        if seq is None:
+            # First-line only: in a sequencing plan the later-line drivers
+            # are live options, not footnotes.
+            for later in later_line_actionable_drivers(facts):
+                plan["uncertainties"].append(
+                    f"{later['gene']} on record: {later['note']}.")
+        # Panel completeness per current guidelines: EGFR/ALK alone is no
+        # longer an adequate driver assessment for stage IV non-squamous.
+        if _nonsquamous(facts) and not drivers and not facts.get("ngs_done"):
+            extended = [g.upper() for g in ("ros1", "ret", "met", "braf",
+                                            "ntrk", "erbb2", "kras")
+                        if _driver_unknown(facts, g)]
+            if extended:
+                plan["workup_needed"].append(
+                    "Broad multigene panel (tissue/plasma NGS) covering "
+                    + "/".join(extended)
+                    + " — EGFR/ALK alone is not a complete driver assessment")
+                plan["uncertainties"].append(
+                    "Systemic options are provisional: the extended driver "
+                    "panel (" + "/".join(extended) + ") is not on record and "
+                    "a positive result would change first-line therapy.")
         if stage_group == "IVA" and str(
             facts.get("disease_extent") or ""
         ).upper() == "OLIGOMETASTATIC":
@@ -517,6 +880,22 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         plan["options"].append({
             "name": "Early palliative-care integration", "regimen_ids": [],
             "rationale": "Improves outcomes alongside systemic therapy"})
+        from ..knowledge.cns import cns_strategy
+
+        strategy = cns_strategy(stage_group, facts,
+                                lead["gene"] if lead else None)
+        if strategy:
+            reading = strategy["reading"]
+            # Symptomatic untreated CNS disease leads the option list —
+            # systemic-only sequencing is exactly what must not happen.
+            if reading["symptomatic"] and not reading["treated"]:
+                plan["options"] = strategy["options"] + plan["options"]
+            else:
+                plan["options"].extend(strategy["options"])
+            plan["uncertainties"].extend(strategy["cautions"])
+            plan["workup_needed"].extend(strategy["workup"])
+            plan["cns"] = {"reading": reading,
+                           "honest_notes": strategy["honest_notes"]}
         ecog = facts.get("ecog_ps")
         if isinstance(ecog, int) and ecog >= 3 and not (egfr or alk):
             plan["uncertainties"].append(
@@ -594,6 +973,8 @@ class TreatmentAgent:
             state.outputs["treatment_plan"] = plan
             self._attach_kg_context(state, tools, broker, plan, stage_group)
             self._attach_prognosis(state, tools, broker, stage_group)
+            self._attach_indications(state, stage_group)
+            self._attach_organ_gates(state)
             self._claim_options(state)
             state.trace(
                 "TreatmentAgent", "plan_reused",
@@ -641,6 +1022,8 @@ class TreatmentAgent:
         self._attach_kg_context(state, tools, broker,
                                 state.outputs["treatment_plan"], stage_group)
         self._attach_prognosis(state, tools, broker, stage_group)
+        self._attach_indications(state, stage_group)
+        self._attach_organ_gates(state)
         self._claim_options(state)
         state.trace(
             "TreatmentAgent", "plan",
@@ -677,14 +1060,14 @@ class TreatmentAgent:
         """
         if not stage_group:
             return  # unstaged runs are workup-mode; broad hits are noise
-        from ..knowledge.biomarkers import driver_status
+        from ..knowledge.biomarkers import _normalized_drivers, driver_status
 
         from ..state import EvidenceLevel as EL
 
         genes = sorted(
             str(g).upper()
-            for g, v in (state.facts.get("driver_mutations") or {}).items()
-            if driver_status(str(v)) == "positive"
+            for g, v in _normalized_drivers(state.facts).items()
+            if driver_status(v) == "positive"
         )
         histology = str(state.facts.get("histologic_category") or "") or None
         context: dict[str, Any] = {}
@@ -770,8 +1153,10 @@ class TreatmentAgent:
             for key in ("supporting", "cautions")
             if context.get(key)
         }
-        plan.setdefault("citations", [])
-        plan["citations"] = list(plan["citations"]) + evidence_ids
+        # System-attached context is NOT the plan author's citation: it
+        # lives in its own list so it can never make an uncited (model)
+        # plan look supported to the citation guard (v0.7.1 audit).
+        plan["guideline_citations"] = evidence_ids
         state.trace(
             "TreatmentAgent", "kg_context",
             output_summary=f"{len(context.get('supporting') or [])} supporting"
@@ -779,6 +1164,57 @@ class TreatmentAgent:
                            f"KG rec(s) attached (kg_llm_extracted)",
             evidence_ids=evidence_ids,
         )
+
+    @staticmethod
+    def _attach_indications(state: CaseRunState, stage_group: str) -> None:
+        """Per-regimen indication verdicts for the plan on record.
+
+        The same declarations the planner gated on and the critic will
+        audit against, evaluated once more over the FINAL plan (which may
+        be model-authored) and published for the oncologist view — the
+        clinician sees why each regimen is in population, provisional, or
+        (for a model plan the critic is about to block) out of it.
+        """
+        from ..knowledge.indications import evaluate_indication
+
+        plan = state.outputs.get("treatment_plan") or {}
+        rids = [str(r) for r in plan.get("regimen_ids") or []]
+        if not rids:
+            return
+        state.outputs["indication_report"] = {
+            "regimens": [evaluate_indication(rid, stage_group, state.facts)
+                         for rid in rids],
+            "note": "声明式适应证判定（eligible/ineligible/unknown）——"
+                    "unknown 表示病例缺少判定所需事实，已列入补检建议",
+        }
+
+    @staticmethod
+    def _attach_organ_gates(state: CaseRunState) -> None:
+        """Organ-gate ledger for the plan on record: which body-fit
+        checks FAILED (the critic blocks those) and which are PENDING —
+        the numbers the dose channel will demand. Pending gates do NOT
+        gate the recommendation (recommending is not dosing), so they
+        live here as a named list, never in workup_needed where they
+        would flip the release status of every plan without lab values.
+        """
+        from ..knowledge.organ_gates import failed_gates, unknown_gates
+
+        plan = state.outputs.get("treatment_plan") or {}
+        rids = [str(r) for r in plan.get("regimen_ids") or []]
+        if not rids:
+            return
+        failed: list[dict[str, str]] = []
+        pending: list[str] = []
+        for rid in rids:
+            failed.extend(failed_gates(rid, state.facts))
+            pending.extend(unknown_gates(rid, state.facts))
+        plan["organ_gates"] = {
+            "failed": failed,
+            "pending": pending,
+            "note": "pending 项是剂量通道开启前必须补齐的器官功能/合并症"
+                    "事实——推荐层不因缺化验而扣住方案，剂量层因缺化验而"
+                    "拒绝开药",
+        }
 
     @staticmethod
     def _attach_prognosis(
@@ -835,7 +1271,10 @@ class TreatmentAgent:
             if context["five_year_os_percent_approx"] is not None else
             f"Stage {stage_group}: no per-group cohort survival figure "
             f"published; not padded",
-            evidence_ids, origin="rule")
+            evidence_ids, origin="rule",
+            subject={"population_stage": stage_group,
+                     "classification_basis": context["classification_basis"]},
+            support_relation="population_statistic")
         state.trace(
             "TreatmentAgent", "prognosis_context",
             output_summary=f"cohort figure + {len(context['modifiers'])} "
@@ -868,13 +1307,77 @@ class TreatmentAgent:
 
     @staticmethod
     def _claim_options(state: CaseRunState) -> None:
+        """One claim per treatment option, bound to ITS evidence.
+
+        Claim-level, not plan-level (red-team review §11): the cCRT claim
+        must not carry the LAURA row and the osimertinib claim must not
+        carry the RTOG-0617 row just because both landed in one citation
+        pool. Each option's claim cites only the trial-anchor rows whose
+        trial covers one of the option's own regimens; a regimen-free
+        option (surgery, surveillance, palliative-care integration) is
+        ``protocol_grounded`` — its authority is the routed protocol
+        module, and it does not borrow trial rows it is not entitled to.
+        """
+        from ..knowledge.biomarkers import population_signature
+
         plan = state.outputs.get("treatment_plan") or {}
+        stage_group = str(state.staging.get("stage_group") or "")
+        tnm = state.facts.get("tnm") or {}
+        # The population the claims are ABOUT, captured as facts so the
+        # critic can verify each cited trial semantically (stage within
+        # enrollment, edition-aware; driver class; histology) — not just
+        # structurally by regimen id.
+        population = {
+            "population_stage": stage_group,
+            "population_tnm": {k: tnm[k] for k in ("t", "n", "m")
+                               if tnm.get(k)},
+            "population_histology": state.facts.get("histologic_category"),
+            "population_drivers": population_signature(state.facts),
+        }
+
+        # evidence_id → the trial its row certifies (registry lookups only).
+        # In a parallel wave this agent's own rows still sit in the wave
+        # buffer under temp ids — scan both; the merge remaps temp ids in
+        # claim evidence lists and subjects alike.
+        trial_rows: dict[str, dict[str, Any]] = {}
+        for eid, evidence in state.evidence.items():
+            if evidence.source != "trial_lookup":
+                continue
+            trial = (evidence.payload or {}).get("trial") or {}
+            if trial.get("trial_id"):
+                trial_rows[eid] = trial
+        scope = getattr(state, "_scope", None)
+        for temp_id, record in getattr(scope, "evidence", None) or []:
+            if record.get("source") != "trial_lookup":
+                continue
+            trial = (record.get("payload") or {}).get("trial") or {}
+            if trial.get("trial_id"):
+                trial_rows[temp_id] = trial
+
         for option in plan.get("options") or []:
+            regimen_ids = [str(r) for r in option.get("regimen_ids") or []]
+            trial_ids = {
+                tid for rid in regimen_ids
+                for tid in (regimen_lib.get(rid).trial_ids
+                            if regimen_lib.get(rid) else ())
+            }
+            entailed = [
+                eid for eid, trial in trial_rows.items()
+                if set(trial.get("regimen_ids") or []) & set(regimen_ids)
+                or trial.get("trial_id") in trial_ids
+            ]
             state.add_claim(
                 "treatment_option",
                 str(option.get("name") or "")[:200],
-                plan.get("citations") or [],
+                entailed,
                 origin=plan.get("origin", "rule"),
+                subject={
+                    "intervention_regimen_ids": regimen_ids,
+                    **population,
+                    "intent": plan.get("intent"),
+                },
+                support_relation="trial_anchor" if regimen_ids
+                else "protocol_grounded",
             )
 
     @staticmethod
