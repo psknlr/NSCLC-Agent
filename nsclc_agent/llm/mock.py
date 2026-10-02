@@ -110,12 +110,15 @@ class MockLLMClient:
                 "citations": evidence_ids,
             }, ensure_ascii=False))
         if '"intent"' in system_text:
+            # A placeholder, not a plan: no intent is claimed (a "curative"
+            # skeleton was once released for a stage IVB case), and it says
+            # where the deterministic plan is.
             return self._reply(json.dumps({
-                "intent": "curative",
-                "summary": "Deterministic mock skeleton: the rule-mode plan in "
-                           "this run is the substantive output; configure a "
-                           "real backend for model-driven reasoning.",
-                "options": [{"name": "See rule-mode plan",
+                "intent": "undetermined",
+                "summary": "Offline mock model: no clinical plan is drafted. "
+                           "Disconnect the model to see the deterministic "
+                           "rule-mode plan, or connect a real model.",
+                "options": [{"name": "Mock placeholder — no regimen proposed",
                              "regimen_ids": [],
                              "rationale": "mock model adds no clinical content"}],
                 "regimen_ids": [],

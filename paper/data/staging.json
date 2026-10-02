@@ -101,24 +101,24 @@
    "IIIB",
    "IIIB",
    "IIIC",
+   "IIIB",
+   null
+  ],
+  [
+   null,
+   "IIA",
+   "IIB",
+   "IIIA",
+   "IIIB",
    null,
    null
   ],
   [
    null,
-   null,
-   null,
-   null,
-   null,
-   null,
-   null
-  ],
-  [
-   null,
-   null,
-   null,
-   null,
-   null,
+   "IIB",
+   "IIIA",
+   "IIIB",
+   "IIIB",
    null,
    null
   ],
@@ -155,8 +155,7 @@
   },
   {
    "m": "M1c",
-   "stage": null,
-   "refusal": "Ambiguous 'M1c': specify M1c1 (multiple metastases, single organ system) or M1c2 (multiple organ systems) — the 9th edition splits M1c"
+   "stage": "IVB"
   },
   {
    "m": "M1",
@@ -170,7 +169,7 @@
   }
  ],
  "cells": 84,
- "staged": 42,
+ "staged": 51,
  "refusal_examples": {
   "Tis/N1": "No 9th-edition stage row for Tis N1 M0",
   "Tis/N2a": "No 9th-edition stage row for Tis N2a M0",
@@ -192,20 +191,11 @@
   "T2b/NX": "N category is NX (indeterminate): establish nodal status (invasive mediastinal staging where it changes treatment intent)",
   "T3/N2": "Ambiguous 'N2': specify N2a (single mediastinal station) or N2b (multi-station) — the 9th edition splits N2 and they stage differently (EBUS-TBNA station mapping resolves this)",
   "T3/NX": "N category is NX (indeterminate): establish nodal status (invasive mediastinal staging where it changes treatment intent)",
-  "T4/N2": "Ambiguous 'N2': specify N2a (single mediastinal station) or N2b (multi-station) — the 9th edition splits N2 and they stage differently (EBUS-TBNA station mapping resolves this)",
   "T4/NX": "N category is NX (indeterminate): establish nodal status (invasive mediastinal staging where it changes treatment intent)",
   "T1/N0": "Ambiguous 'T1': specify T1a (≤1 cm) / T1b (>1–2 cm) / T1c (>2–3 cm) — they determine IA1 vs IA2 vs IA3; measure the lesion on thin-slice CT",
-  "T1/N1": "Ambiguous 'T1': specify T1a (≤1 cm) / T1b (>1–2 cm) / T1c (>2–3 cm) — they determine IA1 vs IA2 vs IA3; measure the lesion on thin-slice CT",
-  "T1/N2a": "Ambiguous 'T1': specify T1a (≤1 cm) / T1b (>1–2 cm) / T1c (>2–3 cm) — they determine IA1 vs IA2 vs IA3; measure the lesion on thin-slice CT",
-  "T1/N2b": "Ambiguous 'T1': specify T1a (≤1 cm) / T1b (>1–2 cm) / T1c (>2–3 cm) — they determine IA1 vs IA2 vs IA3; measure the lesion on thin-slice CT",
-  "T1/N3": "Ambiguous 'T1': specify T1a (≤1 cm) / T1b (>1–2 cm) / T1c (>2–3 cm) — they determine IA1 vs IA2 vs IA3; measure the lesion on thin-slice CT",
   "T1/N2": "Ambiguous 'T1': specify T1a (≤1 cm) / T1b (>1–2 cm) / T1c (>2–3 cm) — they determine IA1 vs IA2 vs IA3; measure the lesion on thin-slice CT",
   "T1/NX": "Ambiguous 'T1': specify T1a (≤1 cm) / T1b (>1–2 cm) / T1c (>2–3 cm) — they determine IA1 vs IA2 vs IA3; measure the lesion on thin-slice CT",
   "T2/N0": "Ambiguous 'T2': specify T2a (>3–4 cm) or T2b (>4–5 cm) — they stage differently in the 9th edition",
-  "T2/N1": "Ambiguous 'T2': specify T2a (>3–4 cm) or T2b (>4–5 cm) — they stage differently in the 9th edition",
-  "T2/N2a": "Ambiguous 'T2': specify T2a (>3–4 cm) or T2b (>4–5 cm) — they stage differently in the 9th edition",
-  "T2/N2b": "Ambiguous 'T2': specify T2a (>3–4 cm) or T2b (>4–5 cm) — they stage differently in the 9th edition",
-  "T2/N3": "Ambiguous 'T2': specify T2a (>3–4 cm) or T2b (>4–5 cm) — they stage differently in the 9th edition",
   "T2/N2": "Ambiguous 'T2': specify T2a (>3–4 cm) or T2b (>4–5 cm) — they stage differently in the 9th edition",
   "T2/NX": "Ambiguous 'T2': specify T2a (>3–4 cm) or T2b (>4–5 cm) — they stage differently in the 9th edition",
   "TX/N1": "TX with node-positive disease cannot be staged: localize and characterize the primary first",

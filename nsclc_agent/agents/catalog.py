@@ -901,7 +901,12 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
             plan["uncertainties"].append(
                 "ECOG ≥3 driver-negative: best supportive care is a legitimate "
                 "primary recommendation; goals-of-care discussion required.")
-        plan["summary"] = f"Stage {stage_group}: biomarker-directed systemic therapy."
+        if plan.get("sequencing"):
+            plan["summary"] = (f"Stage {stage_group}, line {plan['sequencing']['line']} "
+                               f"after documented progression: next-line systemic "
+                               f"therapy.")
+        else:
+            plan["summary"] = f"Stage {stage_group}: biomarker-directed systemic therapy."
         return plan
 
     # Occult / unknown → workup.

@@ -16,7 +16,7 @@ python paper/qc.py            # Nature display-item QC → paper/QC.md
 | Item | Message | Data |
 |---|---|---|
 | **Fig. 1** | What the system is: a model-led agent runtime on a deterministic clinical kernel | Full framework: interfaces, agent runtime (lead, specialists, tools, hooks, session, providers), kernel, evaluation; counts read from the code |
-| **Fig. 2** | Stage is computed, never generated; ambiguity is refused | AJCC/UICC 9th-edition T×N×M matrix; gold-standard accuracy with exact 95% CIs (70 cases) |
+| **Fig. 2** | Stage is computed, never generated; ambiguity is refused unless it cannot change the stage | AJCC/UICC 9th-edition T×N×M matrix; gold-standard accuracy with exact 95% CIs (70 cases) |
 | **Fig. 3** | Advisory hooks cover the defect space of agent consults | Perturbation study: 35 released plans × 7 injected defect classes; clean baseline 2/35 |
 | **Fig. 4** | The runtime scales and stays bounded | Wall clock vs number of specialists (serial vs concurrent); prompt size with and without compaction |
 | **Fig. 5** | A worked consult: the hooks catch real errors and the model revises | Unresectable IIIB EGFR L858R: timed MDT trace, draft → 3 findings → revision with none; all 40 library regimens checked against the case |

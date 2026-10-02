@@ -1436,10 +1436,16 @@ const Workspace = {
         h("div", { class: "turn-body" }, h("div", { class: "thinking" }, h("span", { class: "dots" }, h("i"), h("i"), h("i")),
           h("span", { class: "shimmer" }, llmOn() ? "模型辅助推理中 · 分期与安全规则由确定性内核裁决…" : "正在会诊 · 急症筛查 → 分期 → 方案 → 安全终审…")))));
       const needsModel = c.mode === "agent" && !llmOn();
+      /* A governed case with a model connected: say plainly who decides,
+         and offer the model-led consult the clinician probably expected. */
+      const governedWithModel = c.mode !== "agent" && llmOn() && !this.busy;
       col.appendChild(h("div", { class: "dock" }, h("div", { class: "dock-inner" },
         needsModel ? h("div", { class: "callout warn", style: { marginBottom: "10px" } }, icon("key"), h("div", { style: { flex: 1 } },
           "这是模型主导的会诊，当前未接入模型（为安全起见，密钥默认只保存在当前页面内存中，刷新后需重新接入）。"),
           h("button", { class: "btn sm", type: "button", onclick: () => { location.hash = "#/settings"; } }, "接入模型")) : null,
+        governedWithModel ? h("div", { class: "callout governed-note", style: { marginBottom: "10px" } }, icon("info"), h("div", { style: { flex: 1 } },
+          "这是「受治理」会诊：分期、安全规则与放行由确定性内核裁决，已接入的模型只做事实抽取与措辞润色，不做临床决策。"),
+          h("button", { class: "btn sm", type: "button", onclick: () => this.rerunAsAgent(c) }, "改用模型主导重新会诊")) : null,
         composer,
         h("div", { class: "disclaimer" }, "NSCLC-Agent 由 IMPF-AI 研发 · 仅供教学与研究，不构成医疗建议，治疗决定须由主治团队确认"))));
     }
@@ -1731,6 +1737,19 @@ const Workspace = {
       toast("已停止本轮 · 运行时已重新就绪");
     } catch (err) { toast(`重启运行时失败：${err.message}`, true); }
     finally { this.stopping = false; render(); }
+  },
+
+  /* Start a new model-led consult carrying this case's first description
+     (the clinician reviews it and sends; nothing runs on its own). */
+  rerunAsAgent(c) {
+    if (!llmOn()) { toast("模型主导需要先接入模型"); location.hash = "#/settings"; return; }
+    const first = c.messages.find((m) => m.role === "user" && m.text && m.text !== "（附件）");
+    LS.set("nsclc.pref.mode", "agent");
+    this.reset();
+    Cases.newDraft();
+    this.text = first ? first.text : "";
+    if (currentRoute().tool || currentRoute().caseId) location.hash = "#/"; else render();
+    toast("已新建模型主导会诊：原病例描述已填入输入框，确认后发送");
   },
 
   setMode(mode) {

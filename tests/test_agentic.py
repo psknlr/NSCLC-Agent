@@ -72,17 +72,29 @@ def test_every_declared_tool_has_an_implementation():
         assert name in box._impl, name
 
 
-def test_record_case_facts_validates_and_refuses_bare_n2():
+def test_record_case_facts_validates_and_engine_refuses_ambiguous_n2():
     box = AgentToolbox()
     out = box.record_case_facts({"tnm": {"t": "T2b", "n": "N2", "m": "M0"},
                                  "ecog_ps": 9, "release_status": "x",
                                  "histologic_category": "adenocarcinoma"})
     notes = " ".join(out["data"]["notes"])
-    assert "CHAT_FACT_REFUSED[N]" in notes and "ecog_ps" in notes
-    assert "release_status" in notes
-    assert "tnm" not in box.facts and box.facts["histologic_category"] == "adenocarcinoma"
+    assert "ecog_ps" in notes and "release_status" in notes
+    assert box.facts["histologic_category"] == "adenocarcinoma"
+    # Bare N2 is recorded as documented; T2bN2a (IIIA) and T2bN2b (IIIB)
+    # differ, so the engine refuses and names the test that resolves it.
+    assert box.facts["tnm"]["n"] == "N2"
+    engine = out["data"]["engine_stage"]
+    assert engine["staged"] is False and "N2a" in engine["refusal"]
     box.record_case_facts({"tnm": {"t": "T2b", "n": "N2b", "m": "M0"}})
     assert box.engine_stage()["stage_group"] == "IIIB"
+
+
+def test_record_case_facts_stages_bare_m1c():
+    box = AgentToolbox()
+    box.record_case_facts({"tnm": {"t": "T4", "n": "N3", "m": "M1c", "prefix": "c"}})
+    engine = box.engine_stage()
+    assert engine["stage_group"] == "IVB" and engine["tnm"] == "cT4N3M1c"
+    assert "M1c not subclassified" in engine["descriptor_notes"][0]
 
 
 def test_tools_read_case_notes_and_overrides_do_not_persist():

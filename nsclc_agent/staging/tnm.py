@@ -18,6 +18,10 @@ Changes over NSCLC-Agent v0.1, closing the defects found in review:
   the workup that resolves it.
 * **Bare ``T1`` is refused**, matching how ``T2``/``N2``/``M1c`` were already
   refused: silently mapping T1 → T1a fabricated IA1 precision out of thin air.
+  A bare family is staged only when *every* subcategory gives the same stage
+  group (bare ``M1c`` is IVB whether M1c1 or M1c2; T4 N2 is IIIB whether N2a
+  or N2b): the stage is then determined, the descriptor stays as documented,
+  and a note asks for the subcategory. Otherwise the refusal stands.
 * **Edition gate.** The engine implements the 9th edition only; a case labeled
   AJCC7/8 is rejected with a restaging instruction instead of being computed on
   the wrong table and stamped "9th edition".
@@ -419,6 +423,78 @@ def stage(tnm: TNM, *, edition: str = SUPPORTED_EDITION) -> StageResult:
                        descriptor_notes=notes)
 
 
+#: Under-specified descriptor families and their 9th-edition subcategories
+#: (keys are the cleaned, upper-cased input).
+_COMPLETIONS: dict[str, dict[str, tuple[str, tuple[str, ...]]]] = {
+    "t": {"T1": ("T1", ("T1a", "T1b", "T1c")), "T2": ("T2", ("T2a", "T2b"))},
+    "n": {"N2": ("N2", ("N2a", "N2b"))},
+    "m": {"M1C": ("M1c", ("M1c1", "M1c2")), "M1": ("M1", ("M1a", "M1b", "M1c1", "M1c2"))},
+}
+
+
+def normalize_descriptor(kind: str, raw: str) -> str:
+    """Canonical spelling of one documented descriptor, for the case record.
+
+    Accepts every 9th-edition category plus the bare families a clinician
+    may document (T1, T2, N2, M1, M1c) — recording what was written is not
+    staging it; :func:`stage_from_strings` decides whether a bare family
+    determines the stage group. Raises :class:`StagingError` for anything
+    unrecognizable.
+    """
+    family = _COMPLETIONS[kind].get(_clean(raw).upper())
+    if family:
+        return family[0]
+    return {"t": _normalize_t, "n": _normalize_n, "m": _normalize_m}[kind](raw)
+
+
+def _stage_by_completion(t: str, n: str, m: str, prefix: str,
+                         edition: str) -> StageResult | None:
+    """Stage an under-specified triple when every completion agrees.
+
+    Returns None — the caller keeps the original refusal — unless at least
+    one descriptor is a bare family, every combination of subcategories
+    stages without error, and all of them give the same stage group.
+    """
+    import itertools
+
+    axes, labels, open_axes = [], [], []
+    for axis, raw in (("t", t), ("n", n), ("m", m)):
+        family = _COMPLETIONS[axis].get(_clean(raw).upper())
+        if family:
+            labels.append(family[0])
+            axes.append(family[1])
+            open_axes.append(family[0])
+        else:
+            labels.append(None)
+            axes.append((raw,))
+    if not open_axes:
+        return None
+    results = []
+    for combo in itertools.product(*axes):
+        try:
+            results.append(stage(TNM.parse(*combo, prefix=prefix), edition=edition))
+        except StagingError:
+            return None
+    groups = {r.stage_group for r in results}
+    if len(groups) != 1:
+        return None
+    group = groups.pop()
+    first = results[0].tnm
+    tnm = TNM(labels[0] or first.t, labels[1] or first.n, labels[2] or first.m,
+              first.prefix)
+
+    def common(attr: str) -> list[str]:
+        return [x for x in getattr(results[0], attr)
+                if all(x in getattr(r, attr) for r in results[1:])]
+
+    subcats = " / ".join("/".join(a) for a, lab in zip(axes, labels) if lab)
+    note = (f"{', '.join(open_axes)} not subclassified ({subcats}): every "
+            f"subcategory gives stage {group}, so the stage group is determined. "
+            "Document the subcategory for prognosis and trial eligibility.")
+    return StageResult(tnm, group, migration_notes=common("migration_notes"),
+                       descriptor_notes=[note] + common("descriptor_notes"))
+
+
 def stage_from_strings(
     t: str, n: str, m: str, *, prefix: str = "c", edition: str = SUPPORTED_EDITION
 ) -> StageResult:
@@ -426,5 +502,13 @@ def stage_from_strings(
 
     Unlike v0.1, ``m`` has no default — the caller must state the metastatic
     status (or pass ``"MX"`` and accept that no curative stage group results).
+    A bare family (T1, T2, N2, M1, M1c) is staged only when all of its
+    subcategories give the same group; otherwise its refusal is raised.
     """
-    return stage(TNM.parse(t, n, m, prefix=prefix), edition=edition)
+    try:
+        return stage(TNM.parse(t, n, m, prefix=prefix), edition=edition)
+    except StagingError:
+        resolved = _stage_by_completion(t, n, m, prefix, edition)
+        if resolved is None:
+            raise
+        return resolved

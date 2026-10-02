@@ -1019,7 +1019,10 @@
 "；": "; ",
 "；分期版本迁移，跨版本队列可比性受限": "; the stage group migrated between editions, so cross-edition cohort comparability is limited",
 "；本例方向性预后因素 ": "; directional prognostic factors in this case: ",
-"？": "?"
+"？": "?",
+"这是「受治理」会诊：分期、安全规则与放行由确定性内核裁决，已接入的模型只做事实抽取与措辞润色，不做临床决策。": "This is a governed consult: staging, safety rules and release are decided by the deterministic kernel. The connected model only extracts facts and polishes wording; it makes no clinical decisions.",
+"改用模型主导重新会诊": "Re-run with the model leading",
+"已新建模型主导会诊：原病例描述已填入输入框，确认后发送": "New model-led consult: the original case description is in the composer — review it and send"
 },
 "rules": [
 [

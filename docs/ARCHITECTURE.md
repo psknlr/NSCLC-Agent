@@ -111,9 +111,13 @@ matches third-party and hypothetical cues on word boundaries.
 
 1. **The stage is never the model's.** Only `StagingAgent` writes
    `state.staging`, and it only ever writes what the symbolic engine
-   computed. The engine refuses ambiguity (bare T1/T2/N2/M1c, missing M,
-   NX/MX, non-AJCC9 editions) with messages that name the resolving test —
-   a refusal is the seed of the workup plan, not a dead end.
+   computed. The engine refuses ambiguity (missing M, NX/MX, non-AJCC9
+   editions, and a bare T1/T2/N2/M1/M1c whose subcategories would stage
+   differently) with messages that name the resolving test — a refusal is
+   the seed of the workup plan, not a dead end. A bare family whose
+   subcategories all give the same group is staged with a note (bare M1c
+   is IVB whether M1c1 or M1c2), and the record keeps the descriptor as
+   documented.
 2. **The critic is terminal and unconditional.** `NSCLCRunner.run` invokes
    `CriticAgent` in a `finally`; it observes failed-closed runs and runs
    where every clinical task was skipped.

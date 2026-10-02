@@ -166,15 +166,17 @@ def test_signoff_cannot_be_conjured_from_chat():
 def test_sanitize_validates_values():
     cleaned, notes = sanitize_fact_payload({
         "ecog_ps": 9, "unknown_key": 1, "_secret": 2,
-        "tnm": {"n": "N2"},
+        "tnm": {"t": "T9", "n": "N2", "m": "m1c"},
     })
-    assert cleaned == {}
     assert any("ecog_ps 9 out of range" in n for n in notes)
     assert any("CHAT_FACT_IGNORED: unknown key 'unknown_key'" in n
                for n in notes)
     assert any(n.startswith("CHAT_FACT_BLOCKED") for n in notes)
-    # Bare N2 is refused by the same engine rule as everywhere else.
-    assert any("CHAT_FACT_REFUSED[N]" in n for n in notes)
+    # An unrecognizable descriptor is refused on its own; bare families are
+    # recorded as documented (the staging engine decides whether they fix
+    # the stage group) and a bad T no longer takes N and M down with it.
+    assert any("CHAT_FACT_REFUSED[T]" in n for n in notes)
+    assert cleaned == {"tnm": {"n": "N2", "m": "M1c"}}
 
 
 def test_merge_facts_confirms_identical_restatement():
