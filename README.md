@@ -7,7 +7,7 @@
 > 内容寻址的记录/重放日志，以及模型驱动的规划、ReAct 工具循环、主动问诊与
 > 多学科会诊。
 
-**两种会诊模式（v1.2.0 · 中文 / English）**
+**两种会诊模式（v1.3.0 · 中文 / English）**
 
 * **模型主导（agent，接入模型后的默认）**：一个按主流智能体架构（Claude Code / Grok CLI /
   Codex / OpenAI Agents SDK）构建的**智能体运行时**——主诊智能体自主思考、用 `update_plan`
@@ -765,6 +765,18 @@ tools: prognosis, check_organ_function, interaction_check
 图表规格：183 mm 双栏，文字 5–7 pt，Okabe–Ito 色盲安全配色，矢量 PDF 保留可编辑文字。
 当前环境没有 Arial，图中字体用的是度量完全一致的 Liberation Sans；在装有 Arial 的机器上重跑 `make_figures.py` 即会自动换成 Arial。
 
+### 模型自主决策（v1.3.0）
+
+模型主导模式默认改为**模型完全自主**：分期（cTNM / 分期组）、治疗意图与方案全部由模型判断，确定性内核不再替模型作决定。
+
+- **不提供确定性决策工具**：分期引擎、驱动基因解析、适应证与器官功能核对、脑转移分层、后线序贯、规则复核、受治理参考、急症筛查工具。主诊与专科子智能体都拿不到这些工具；提示词明确告诉模型由它自己依据 AJCC/UICC 第 9 版判断分期，并给出治疗意图与方案。
+- **保留信息类工具**：试验注册表、方案库与参考剂量、指南知识库、临床路径、PubMed、引用核验、人群预后、药物相互作用、读片。
+- **治疗意图由模型决策**：`submit_consult` 要求给出 `intent`（根治性 / 姑息性 / 支持治疗 / 急症处置 / 待定）和 `intent_rationale`，以及分期依据 `stage_rationale`。没有给出时记为“待定”，系统不会替模型推断。会诊卡片和病例档案展示“模型判断依据”，包括分期与治疗意图。
+- **Hooks**：对照内核的病例笔记预填、分期一致性、规则引擎复核默认关闭。急症提醒、引用溯源、剂量溯源仍保留，只作提醒，可在设置中关闭。卡片上只列出实际运行过的 Hooks。
+- **可切换**：「智能体」设置页新增「决策方式」，可在“模型完全自主”与“内核辅助”之间切换；命令行用 `--autonomy full|assisted`。“内核辅助”即 v1.2 的行为，确定性工具和对照类 Hooks 恢复，但仍只作参考。
+- 接入模型后，新会诊默认由模型主导。旧版本保存的“受治理”偏好不再沿用，仍可手动选择受治理模式。
+- 论文中智能体运行时相关的图表描述的是“内核辅助”模式，`paper/analysis.py` 已固定该模式，以保证数据可复现。
+
 ### 真实病例调试：分期与后线（v1.2.0）
 
 来自一例临床反馈：IVB 期、KRAS G12C 阳性，先后在化疗-免疫与 KRAS G12C 抑制剂治疗后进展。
@@ -933,7 +945,7 @@ paper/       论文图表：analysis.py → make_figures.py / make_tables.py / q
 
 ```bash
 pip install pytest
-python -m pytest -q            # 694 passed，全离线
+python -m pytest -q            # 700 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 47/47
 python -m nsclc_agent eval     # 金标准 70/70：分期40/40 路由11/11 方案35/35
                                # 安全42/42 · unsafe_release_rate 0/35 · 分类学全零

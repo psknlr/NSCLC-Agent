@@ -37,13 +37,13 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Callable
 
 from ..llm.base import LLMError
-from .hooks import HookRunner, builtin_hooks
+from .hooks import KERNEL_HOOKS, HookRunner, builtin_hooks
 from .loop import Cancelled, LoopResult, repair_history, run_loop
 from .memory import MemoryNotes, estimate_tokens, summarize
 from .planning import Plan
 from .prompts import ROLE_TEXT, lead_prompt
 from .subagents import BUILTIN_AGENTS, AgentDefinition, SubAgentRunner
-from .toolbox import SUBMIT_SPEC, SUBMIT_TOOL, AgentToolbox
+from .toolbox import KERNEL_TOOLS, SUBMIT_SPEC, SUBMIT_TOOL, AgentToolbox
 from .tools import Tool, Toolset
 
 SESSION_FORMAT = "nsclc-agent-session/2"
@@ -55,6 +55,11 @@ _NUDGE = {"zh": "请调用 submit_consult 提交本轮结论（reply 可直接�
           "en": "Please call submit_consult to submit this turn's conclusion (the reply can "
                 "reuse the answer you just gave)."}
 LANGUAGES = ("zh", "en")
+#: "full": the model decides stage, intent and plan; kernel decision tools
+#: and kernel-comparison hooks are off. "assisted": the deterministic kernel
+#: is offered as tools and advisory hooks (the v1.x behaviour).
+AUTONOMY = ("full", "assisted")
+INTENTS = ("curative", "palliative", "supportive", "emergency", "undetermined")
 
 
 def _t(lang: str, zh: str, en: str) -> str:
@@ -86,6 +91,8 @@ class AgentConfig:
     parallel: bool | None = None
     #: Language the clinician reads: "zh" or "en" (prompts, hooks, commands).
     language: str = "zh"
+    #: Who decides: "full" (the model) or "assisted" (kernel tools + hooks).
+    autonomy: str = "full"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "AgentConfig":
@@ -118,6 +125,7 @@ class AgentConfig:
                          if isinstance(s, dict) and s.get("url")][:8],
             parallel=None if parallel is None else bool(parallel),
             language=data.get("language") if data.get("language") in LANGUAGES else "zh",
+            autonomy=data.get("autonomy") if data.get("autonomy") in AUTONOMY else "full",
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -226,7 +234,9 @@ class AgentSession:
         self.lang = cfg.language
         if hasattr(self, "plan"):
             self.plan.language = self.memory.language = cfg.language
-        self.hooks = HookRunner(builtin_hooks(), cfg.hooks)
+        self.autonomous = cfg.autonomy == "full"
+        self.toolbox.autonomous = self.autonomous
+        self.hooks = HookRunner(builtin_hooks(), hook_defaults(cfg))
         disabled = set(cfg.disabled_agents)
         definitions = {d.name: d for d in BUILTIN_AGENTS if d.name not in disabled}
         for raw in cfg.custom_agents:
@@ -281,17 +291,20 @@ class AgentSession:
 
     def _toolset(self) -> tuple[Toolset, SubAgentRunner | None]:
         mcp = self._mcp()
-        groups: list[list[Tool]] = [self.toolbox.as_tools(lang=self.lang), [self.plan.tool()]]
+        exclude = KERNEL_TOOLS if self.autonomous else frozenset()
+        groups: list[list[Tool]] = [self.toolbox.as_tools(lang=self.lang, exclude=exclude),
+                                    [self.plan.tool()]]
         runner = None
         if self.config.subagents and self.definitions:
             runner = SubAgentRunner(
-                self.llm, Toolset.of(self.toolbox.as_tools(read_only=True, lang=self.lang), mcp),
+                self.llm, Toolset.of(self.toolbox.as_tools(read_only=True, lang=self.lang,
+                                                           exclude=exclude), mcp),
                 definitions=self.definitions, case_notes=lambda: self.facts,
                 emit=self._emit, cancelled=lambda: self._cancel,
                 parallel=self.parallel, temperature=self.config.temperature,
                 max_tokens=min(4000, self.config.max_tokens),
                 instructions=self.config.instructions, post_tool=self._post_tool,
-                language=self.lang)
+                language=self.lang, autonomous=self.autonomous)
             groups.append([runner.tool()])
         groups += [[self.memory.tool()], mcp, [self._submit_tool()]]
         return Toolset.of(*groups), runner
@@ -302,7 +315,8 @@ class AgentSession:
                 "content": lead_prompt(self.role, roster=roster,
                                        mcp_tools=[t.name for t in self._mcp()],
                                        instructions=self.config.instructions,
-                                       language=self.lang)}
+                                       language=self.lang,
+                                       autonomy=self.config.autonomy)}
 
     def _refresh_system(self) -> None:
         if self.messages and self.messages[0].get("role") == "system":
@@ -386,7 +400,10 @@ class AgentSession:
         review = {"findings": state.findings, "responses": responses,
                   "unanswered": [f for f in state.findings
                                  if f["rule_id"] not in answered],
-                  "rounds": state.review_rounds}
+                  "rounds": state.review_rounds,
+                  # the stop hooks that actually ran (they differ by autonomy)
+                  "checked": [h.name for h in self.hooks.hooks
+                              if h.event == "stop" and self.hooks.enabled.get(h.name)]}
 
         sub = runner.usage if runner else {"calls": 0, "prompt": 0, "completion": 0}
         self.usage["turns"] += 1
@@ -403,7 +420,7 @@ class AgentSession:
             reply=reply, consult=consult, steps=loop.steps, review=review,
             emergency=self.state.get("emergency"),
             facts=json.loads(json.dumps(self.facts, default=str)),
-            engine_stage=self.toolbox.engine_stage(),
+            engine_stage=None if self.autonomous else self.toolbox.engine_stage(),
             llm_calls=loop.calls + sub["calls"],
             tokens={"prompt": loop.prompt_tokens + sub["prompt"],
                     "completion": loop.completion_tokens + sub["completion"]},
@@ -446,6 +463,10 @@ class AgentSession:
     def _on_submit(self, arguments: dict[str, Any], state: _TurnState,
                    loop: LoopResult) -> tuple[dict[str, Any], bool]:
         consult = dict(arguments) if isinstance(arguments, dict) else {}
+        # Treatment intent is always the model's stated decision; a missing
+        # or unknown value is recorded as undetermined, never inferred.
+        if consult.get("intent") not in INTENTS:
+            consult["intent"] = "undetermined"
         if not str(consult.get("reply") or "").strip():
             return {"status": "invalid",
                     "error": "submit_consult needs a non-empty reply"}, False
@@ -817,6 +838,14 @@ def _clean_checkpoints(raw: Any, session: AgentSession) -> list[dict[str, Any]]:
     return out
 
 
+def hook_defaults(cfg: AgentConfig) -> dict[str, bool]:
+    """Enabled map for :class:`HookRunner`: in full autonomy the hooks that
+    compare the model with the kernel default to off; explicit settings
+    always win."""
+    base = {name: False for name in KERNEL_HOOKS} if cfg.autonomy == "full" else {}
+    return {**base, **cfg.hooks}
+
+
 def runtime_catalog(config: AgentConfig | dict[str, Any] | None = None) -> dict[str, Any]:
     """What a consult would run with — tools, specialists, hooks, commands —
     without a model or a session (settings panels, ``/help`` before the
@@ -835,7 +864,8 @@ def runtime_catalog(config: AgentConfig | dict[str, Any] | None = None) -> dict[
         if custom.name not in disabled:
             agents[custom.name] = custom
     lang = cfg.language
-    tools = Toolset.of(toolbox.as_tools(lang=lang),
+    exclude = KERNEL_TOOLS if cfg.autonomy == "full" else frozenset()
+    tools = Toolset.of(toolbox.as_tools(lang=lang, exclude=exclude),
                        [Plan(language=lang).tool(), MemoryNotes(language=lang).tool()]).describe()
     if cfg.subagents and agents:
         tools.append({"name": "delegate", "category": "delegation",
@@ -848,7 +878,7 @@ def runtime_catalog(config: AgentConfig | dict[str, Any] | None = None) -> dict[
             "agents": [d.to_dict(lang) for d in agents.values()],
             "builtin_agents": [d.to_dict(lang) for d in BUILTIN_AGENTS],
             "subagents": cfg.subagents,
-            "hooks": HookRunner(builtin_hooks(), cfg.hooks).describe(lang),
+            "hooks": HookRunner(builtin_hooks(), hook_defaults(cfg)).describe(lang),
             "mcp": [], "plan": [], "usage": {}, "context": {},
             "checkpoints": [], "instructions": cfg.instructions,
             "commands": listing(lang)}

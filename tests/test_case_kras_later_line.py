@@ -76,7 +76,7 @@ def test_governed_pipeline_stages_and_sequences_the_case():
 
 
 def test_agent_mode_notes_and_tools_agree():
-    session = AgentSession(MockLLMClient())
+    session = AgentSession(MockLLMClient(), config={"autonomy": "assisted"})
     turn = session.turn(CASE)
     assert turn.engine_stage["stage_group"] == "IVB"
     box: AgentToolbox = session.toolbox

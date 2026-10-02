@@ -16,6 +16,12 @@ from typing import Any
 from .base import LLMResponse, ToolCall, ToolSpec
 
 
+def _intent(value: Any) -> str:
+    """A governed plan's intent as a consult intent ("workup" is not one)."""
+    value = str(value or "")
+    return value if value in ("curative", "palliative", "supportive") else "undetermined"
+
+
 class MockLLMClient:
     name = "mock"
     model = "mock-agentic"
@@ -261,14 +267,20 @@ class MockLLMClient:
             "delegate" in user or re.search(r"请\s*(召集)?\s*(MDT|多学科)", user) is not None
             or re.search(r"\b(please\s+(convene\s+)?(an?\s+)?MDT|convene)\b", user, re.I) is not None)
         planning = "update_plan" in tool_names
+        # Full autonomy offers no governed_reference: the mock then records
+        # its notes and fills the decisions itself (labelled as a demo).
+        autonomous = "governed_reference" not in tool_names
+        source = "record_case_facts" if autonomous else "governed_reference"
         if en:
             steps = ["Understand the case and check the stage",
-                     "Consult the governed-pipeline reference"]
+                     "Decide the stage, treatment intent and plan" if autonomous
+                     else "Consult the governed-pipeline reference"]
             if mdt:
                 steps.append("MDT: radiology and medical oncology")
             steps.append("Integrate and submit the conclusion")
         else:
-            steps = ["理解病例并核对分期", "参考受治理流水线意见"]
+            steps = ["理解病例并核对分期",
+                     "判断分期、治疗意图与方案" if autonomous else "参考受治理流水线意见"]
             if mdt:
                 steps.append("多学科会诊：影像科、肿瘤内科")
             steps.append("综合并提交结论")
@@ -289,8 +301,15 @@ class MockLLMClient:
                     calls.append(("remember", {"note": note, "scope": "preference"}))
             return self._calls("Planning the consult first." if en else "先制定会诊计划。",
                                *calls)
-        if "governed_reference" not in seen:
-            calls = [("governed_reference", {})]
+        if source not in seen:
+            if autonomous:
+                from ..conversation import extract_facts_deterministic
+
+                calls = [("record_case_facts", {
+                    "facts": extract_facts_deterministic(user),
+                    "note": "offline mock: notes read from the message"})]
+            else:
+                calls = [("governed_reference", {})]
             if mdt:
                 calls += [("delegate", {"agent": "radiology", "task":
                                         "Check the staging descriptors and the imaging still "
@@ -302,8 +321,15 @@ class MockLLMClient:
                                                           "parallel." if mdt else "."))
                     if en else "并行调取参考意见" + ("并邀请专科会诊。" if mdt else "。"))
             return self._calls(text, *calls)
-        reference = (seen["governed_reference"] or {}).get("data") or {}
-        consult = self._mock_consult(reference, en=en)
+        if autonomous:
+            from ..agentic.toolbox import AgentToolbox
+
+            notes = ((seen["record_case_facts"] or {}).get("data") or {}).get("case_notes") or {}
+            reference = AgentToolbox(facts=notes, narrative=lambda: user) \
+                .governed_reference().get("data") or {}
+        else:
+            reference = (seen["governed_reference"] or {}).get("data") or {}
+        consult = self._mock_consult(reference, en=en, autonomous=autonomous)
         if mdt:
             consult["reply"] += ("\n\n**Specialists**: radiology and medical oncology "
                                  "sub-agents were consulted (offline mock opinions; see the "
@@ -358,7 +384,32 @@ class MockLLMClient:
             **report, "key_points": [summary] if summary else [], "confidence": "low"}))
 
     @staticmethod
-    def _mock_consult(reference: dict[str, Any], en: bool = False) -> dict[str, Any]:
+    def _mock_consult(reference: dict[str, Any], en: bool = False,
+                      autonomous: bool = False) -> dict[str, Any]:
+        consult = MockLLMClient._mock_consult_text(reference, en)
+        stage = consult.get("stage_group")
+        if autonomous:
+            banner = (("> Offline mock agent: no real model reasoning took place. To "
+                       "demonstrate the interface, the stage, treatment intent and plan "
+                       "below were filled in by the built-in deterministic pipeline; with a "
+                       "real model connected, the model decides all of them itself.")
+                      if en else
+                      ("> 离线 Mock 智能体：没有进行真实的模型推理。为演示界面，以下分期、"
+                       "治疗意图与方案由内置确定性流水线代填；接入真实模型后，这些都由"
+                       "模型自主判断。"))
+            consult["reply"] = banner + "\n" + consult["reply"].split("\n", 1)[1]
+        consult["stage_rationale"] = (
+            ("Offline mock: read from the AJCC/UICC 9th-edition table for the recorded TNM"
+             if en else "离线 Mock：按记录的 TNM 查 AJCC/UICC 第 9 版分期表")
+            if stage else ("Offline mock: the TNM on record does not determine a stage"
+                           if en else "离线 Mock：现有 TNM 不足以确定分期"))
+        consult["intent_rationale"] = (
+            "Offline mock: follows the stage and any emergency signal; not a clinical "
+            "judgement" if en else "离线 Mock：随分期与急症信号而定，不是临床判断")
+        return consult
+
+    @staticmethod
+    def _mock_consult_text(reference: dict[str, Any], en: bool = False) -> dict[str, Any]:
         if en:
             from ..i18n import localize
 
@@ -391,7 +442,7 @@ class MockLLMClient:
             "reply": "\n".join(lines),
             "assessment": str(plan.get("summary") or ""),
             "stage_group": stage, "tnm": staging.get("tnm"),
-            "intent": "emergency" if emergency else (plan.get("intent") or "undetermined"),
+            "intent": "emergency" if emergency else _intent(plan.get("intent")),
             "options": options,
             "workup": list(plan.get("workup_needed") or []),
             "questions": questions,
@@ -432,7 +483,7 @@ class MockLLMClient:
             "reply": "\n".join(lines),
             "assessment": str(plan.get("summary") or ""),
             "stage_group": stage, "tnm": staging.get("tnm"),
-            "intent": "emergency" if emergency else (plan.get("intent") or "undetermined"),
+            "intent": "emergency" if emergency else _intent(plan.get("intent")),
             "options": options,
             "workup": list(plan.get("workup_needed") or []),
             "questions": questions,

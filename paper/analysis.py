@@ -6,6 +6,11 @@ Outputs go to ``paper/data/*.json``; ``make_figures.py`` and
 
     python paper/analysis.py            # ~1 min natively
 
+The agent-runtime experiments run in the kernel-assisted decision mode
+(``autonomy="assisted"``: kernel tools and kernel hooks on), the
+configuration the figures describe; the product default since v1.3.0 is
+full autonomy, in which the model decides stage, intent and plan.
+
 Experiments
 -----------
 * gold-standard evaluation (70 cases: 42 pipeline + 28 audit probes);
@@ -409,7 +414,8 @@ def runtime(latency: float = 0.25, repeats: int = 5) -> None:
             times = []
             for _ in range(repeats):
                 session = AgentSession(_LatencyLLM(k, latency),
-                                       config={"parallel": parallel, "hooks": {}})
+                                       config={"parallel": parallel, "hooks": {},
+                                               "autonomy": "assisted"})
                 session.toolbox.facts.update(json.loads(json.dumps(facts)))
                 t0 = time.perf_counter()
                 turn = session.turn("MDT please")
@@ -434,7 +440,7 @@ def context(turns: int = 24) -> None:
     series = {}
     for label, cfg in (("Without compaction", {"context_window": 2_000_000, "compact_at": 0.95}),
                        ("With compaction", {"context_window": 16_000, "compact_at": 0.6})):
-        session = AgentSession(MockLLMClient(), config=cfg)
+        session = AgentSession(MockLLMClient(), config={**cfg, "autonomy": "assisted"})
         points = []
         for i in range(turns):
             out = session.turn(messages[i % len(messages)])
@@ -624,7 +630,7 @@ def case_study() -> None:
     facts = {k: v for k, v in box.facts.items()}
     session = AgentSession(_CaseScript(CASE_LATENCY), on_event=record,
                            config={"language": "en", "parallel": True,
-                                   "max_review_rounds": 1})
+                                   "max_review_rounds": 1, "autonomy": "assisted"})
     t0 = time.perf_counter()
     turn = session.turn(f"{english['presentation']} {english['question']}", facts=facts)
     total = time.perf_counter() - t0

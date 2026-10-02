@@ -1022,7 +1022,22 @@
 "？": "?",
 "这是「受治理」会诊：分期、安全规则与放行由确定性内核裁决，已接入的模型只做事实抽取与措辞润色，不做临床决策。": "This is a governed consult: staging, safety rules and release are decided by the deterministic kernel. The connected model only extracts facts and polishes wording; it makes no clinical decisions.",
 "改用模型主导重新会诊": "Re-run with the model leading",
-"已新建模型主导会诊：原病例描述已填入输入框，确认后发送": "New model-led consult: the original case description is in the composer — review it and send"
+"已新建模型主导会诊：原病例描述已填入输入框，确认后发送": "New model-led consult: the original case description is in the composer — review it and send",
+"模型判断依据": "The model's reasoning",
+"治疗意图（": "Treatment intent (",
+"治疗意图 · 模型判断": "Treatment intent · model's decision",
+"模型主导 · 分期、治疗意图与方案由模型判断": "Agent-led · stage, treatment intent and plan decided by the model",
+"分期、治疗意图与方案全部由模型自主判断；可检索试验库、方案库、指南知识库与文献，并可并行邀请 7 位专科子智能体（MDT）。输入 / 查看命令。": "the model decides the stage, treatment intent and plan itself; it can search the trial registry, regimen library, guideline knowledge base and literature, and convene 7 specialist sub-agents in parallel (MDT). Type / for commands.",
+"决策方式": "Decision mode",
+"谁来判断分期、治疗意图与方案": "Who decides the stage, treatment intent and plan",
+"模型完全自主": "Model decides",
+"内核辅助": "Kernel-assisted",
+"当前：模型完全自主（默认）。分期、治疗意图与方案全部由模型判断；不提供分期引擎、适应证与器官功能核对、后线序贯、规则复核、受治理参考等确定性决策工具；Hooks 只保留急症提醒与引用、剂量溯源。": "Current: model decides (default). The model decides the stage, treatment intent and plan. Deterministic decision tools (staging engine, indication and organ-function checks, later-line sequencing, rule review, governed reference) are not offered; the hooks keep only the emergency alert and citation and dose provenance.",
+"当前：内核辅助。模型仍主导会诊，但可以调用确定性内核工具（分期引擎、适应证与器官功能核对、后线序贯、规则复核、受治理参考），Hooks 也会对照分期与安全规则提出参考意见。": "Current: kernel-assisted. The model still leads, but can call the deterministic kernel tools (staging engine, indication and organ-function checks, later-line sequencing, rule review, governed reference), and the hooks compare its stage and plan with the kernel (advisory).",
+"已切换为模型完全自主：分期、治疗意图与方案由模型判断；Hooks 已恢复该模式的默认设置": "Switched to model decides: the stage, treatment intent and plan are the model's decisions; hooks reset to this mode's defaults",
+"已切换为内核辅助：提供确定性工具与规则复核（仍只作参考）；Hooks 已恢复该模式的默认设置": "Switched to kernel-assisted: deterministic tools and rule review are offered (still advisory); hooks reset to this mode's defaults",
+"未启用提交时的 Hooks": "no submit-time hooks enabled",
+"已核对": " checked"
 },
 "rules": [
 [
@@ -1240,6 +1255,10 @@
 [
 "(\\d+) 字",
 "$1 chars"
+],
+[
+"^分期 ([0-9A-Za-z]+)：$",
+"Stage $1: "
 ]
 ]
 }

@@ -6,244 +6,244 @@
   "Without compaction": [
    {
     "turn": 1,
-    "tokens": 2705,
+    "tokens": 2776,
     "compacted": false
    },
    {
     "turn": 2,
-    "tokens": 4403,
+    "tokens": 4541,
     "compacted": false
    },
    {
     "turn": 3,
-    "tokens": 6096,
+    "tokens": 6299,
     "compacted": false
    },
    {
     "turn": 4,
-    "tokens": 7789,
+    "tokens": 8057,
     "compacted": false
    },
    {
     "turn": 5,
-    "tokens": 9490,
+    "tokens": 9824,
     "compacted": false
    },
    {
     "turn": 6,
-    "tokens": 11191,
+    "tokens": 11590,
     "compacted": false
    },
    {
     "turn": 7,
-    "tokens": 12904,
+    "tokens": 13369,
     "compacted": false
    },
    {
     "turn": 8,
-    "tokens": 14605,
+    "tokens": 15135,
     "compacted": false
    },
    {
     "turn": 9,
-    "tokens": 16299,
+    "tokens": 16895,
     "compacted": false
    },
    {
     "turn": 10,
-    "tokens": 17992,
+    "tokens": 18653,
     "compacted": false
    },
    {
     "turn": 11,
-    "tokens": 19693,
+    "tokens": 20420,
     "compacted": false
    },
    {
     "turn": 12,
-    "tokens": 21394,
+    "tokens": 22186,
     "compacted": false
    },
    {
     "turn": 13,
-    "tokens": 23107,
+    "tokens": 23965,
     "compacted": false
    },
    {
     "turn": 14,
-    "tokens": 24808,
+    "tokens": 25731,
     "compacted": false
    },
    {
     "turn": 15,
-    "tokens": 26502,
+    "tokens": 27491,
     "compacted": false
    },
    {
     "turn": 16,
-    "tokens": 28195,
+    "tokens": 29249,
     "compacted": false
    },
    {
     "turn": 17,
-    "tokens": 29896,
+    "tokens": 31016,
     "compacted": false
    },
    {
     "turn": 18,
-    "tokens": 31597,
+    "tokens": 32782,
     "compacted": false
    },
    {
     "turn": 19,
-    "tokens": 33310,
+    "tokens": 34561,
     "compacted": false
    },
    {
     "turn": 20,
-    "tokens": 35011,
+    "tokens": 36327,
     "compacted": false
    },
    {
     "turn": 21,
-    "tokens": 36706,
+    "tokens": 38087,
     "compacted": false
    },
    {
     "turn": 22,
-    "tokens": 38398,
+    "tokens": 39846,
     "compacted": false
    },
    {
     "turn": 23,
-    "tokens": 40100,
+    "tokens": 41612,
     "compacted": false
    },
    {
     "turn": 24,
-    "tokens": 41800,
+    "tokens": 43379,
     "compacted": false
    }
   ],
   "With compaction": [
    {
     "turn": 1,
-    "tokens": 2705,
+    "tokens": 2776,
     "compacted": false
    },
    {
     "turn": 2,
-    "tokens": 4403,
+    "tokens": 4541,
     "compacted": false
    },
    {
     "turn": 3,
-    "tokens": 6096,
+    "tokens": 6299,
     "compacted": false
    },
    {
     "turn": 4,
-    "tokens": 7789,
+    "tokens": 8057,
     "compacted": false
    },
    {
     "turn": 5,
-    "tokens": 9490,
+    "tokens": 9824,
     "compacted": false
    },
    {
     "turn": 6,
-    "tokens": 11191,
-    "compacted": false
-   },
-   {
-    "turn": 7,
-    "tokens": 5279,
+    "tokens": 5402,
     "compacted": true
    },
    {
+    "turn": 7,
+    "tokens": 7181,
+    "compacted": false
+   },
+   {
     "turn": 8,
-    "tokens": 6980,
+    "tokens": 8947,
     "compacted": false
    },
    {
     "turn": 9,
-    "tokens": 8674,
+    "tokens": 10707,
     "compacted": false
    },
    {
     "turn": 10,
-    "tokens": 10367,
-    "compacted": false
-   },
-   {
-    "turn": 11,
-    "tokens": 5261,
+    "tokens": 5381,
     "compacted": true
    },
    {
+    "turn": 11,
+    "tokens": 7148,
+    "compacted": false
+   },
+   {
     "turn": 12,
-    "tokens": 6961,
+    "tokens": 8914,
     "compacted": false
    },
    {
     "turn": 13,
-    "tokens": 8675,
+    "tokens": 10693,
     "compacted": false
    },
    {
     "turn": 14,
-    "tokens": 10375,
-    "compacted": false
-   },
-   {
-    "turn": 15,
-    "tokens": 5256,
+    "tokens": 5414,
     "compacted": true
    },
    {
+    "turn": 15,
+    "tokens": 7174,
+    "compacted": false
+   },
+   {
     "turn": 16,
-    "tokens": 6949,
+    "tokens": 8932,
     "compacted": false
    },
    {
     "turn": 17,
-    "tokens": 8650,
+    "tokens": 10699,
     "compacted": false
    },
    {
     "turn": 18,
-    "tokens": 10351,
-    "compacted": false
-   },
-   {
-    "turn": 19,
-    "tokens": 5278,
+    "tokens": 5400,
     "compacted": true
    },
    {
+    "turn": 19,
+    "tokens": 7179,
+    "compacted": false
+   },
+   {
     "turn": 20,
-    "tokens": 6979,
+    "tokens": 8945,
     "compacted": false
    },
    {
     "turn": 21,
-    "tokens": 8673,
+    "tokens": 10705,
     "compacted": false
    },
    {
     "turn": 22,
-    "tokens": 10366,
-    "compacted": false
-   },
-   {
-    "turn": 23,
-    "tokens": 5261,
+    "tokens": 5379,
     "compacted": true
    },
    {
+    "turn": 23,
+    "tokens": 7146,
+    "compacted": false
+   },
+   {
     "turn": 24,
-    "tokens": 6961,
+    "tokens": 8912,
     "compacted": false
    }
   ]

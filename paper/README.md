@@ -11,6 +11,13 @@ python paper/make_tables.py   # → paper/tables/*.docx|tex|md    (three-line, e
 python paper/qc.py            # Nature display-item QC → paper/QC.md
 ```
 
+**Decision mode.** The agent-runtime figures (Fig. 1, 3, 4, 5, Extended Data
+Fig. 1) describe the kernel-assisted mode (`autonomy: "assisted"`), in which the
+deterministic kernel is offered as tools and advisory hooks. Since v1.3.0 the
+product default is full autonomy: the model decides the stage, the treatment
+intent and the plan, and the kernel's decision tools and kernel-comparison
+hooks are off. `analysis.py` pins the assisted mode so the numbers reproduce.
+
 ## Argument, one message per figure
 
 | Item | Message | Data |

@@ -264,7 +264,7 @@ const STATUS = {
   blocked: ["bad", "安全拦截", "终审发现阻断级违规，方案不得交付", "x"],
   failed_closed: ["bad", "故障关闭", "运行异常，按安全默认关闭", "x"],
   emergency_action_plan: ["emergency", "肿瘤急症", "急症短路：固定安全处置脚本，永不经模型改写", "siren"],
-  agent_done: ["accent", "模型结论", "模型主导会诊 · 规则引擎复核仅供参考", "sparkle"],
+  agent_done: ["accent", "模型结论", "模型主导 · 分期、治疗意图与方案由模型判断", "sparkle"],
   agent_emergency: ["emergency", "急症提示", "急症筛查命中 · 模型已优先处理", "siren"],
   agent_error: ["bad", "运行失败", "模型调用失败，可重试", "x"],
 };
@@ -445,7 +445,7 @@ function lastResult(c) {
 }
 const caseFacts = (c) => { const m = lastResult(c); return (m && (m.payload.session_facts || m.payload.facts)) || {}; };
 const isAgent = (p) => !!(p && p.mode === "agent");
-function defaultMode() { return llmOn() && LS.get("nsclc.pref.mode", "agent") !== "governed" ? "agent" : "governed"; }
+function defaultMode() { return llmOn() && LS.get("nsclc.pref.mode.v2", "agent") !== "governed" ? "agent" : "governed"; }
 
 /* ============================================================ fact display */
 
@@ -1063,7 +1063,12 @@ function traceBlock(steps, live) {
 const DECISION = { accepted: ["ok", "已采纳"], overridden: ["warn", "保留方案 · 已说明理由"] };
 function reviewPanel(review) {
   const findings = (review && review.findings) || [];
-  if (!findings.length) return h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "Hooks 复核"), h("div", { class: "metrics" }, h("span", { class: "metric ok" }, icon("lab"), "无复核意见 · 规则引擎、分期一致性、引用与剂量溯源已核对")));
+  if (!findings.length) {
+    /* Name only the stop hooks that ran (older sessions carry no list). */
+    const ran = (review && review.checked) || null;
+    const what = ran ? (ran.length ? `${ran.map((x) => HOOK_TITLE[x] || x).join("、")}已核对` : "未启用提交时的 Hooks") : "规则引擎、分期一致性、引用与剂量溯源已核对";
+    return h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "Hooks 复核"), h("div", { class: "metrics" }, h("span", { class: "metric ok" }, icon("lab"), `无复核意见 · ${what}`)));
+  }
   const answers = Object.fromEntries((review.responses || []).filter((r) => r && r.rule_id).map((r) => [r.rule_id, r]));
   return h("div", { class: "rx-sec" },
     h("div", { class: "lbl" }, "Hooks 复核", h("span", { class: "chip" }, "参考意见 · 非硬约束")),
@@ -1076,6 +1081,15 @@ function reviewPanel(review) {
         h("div", { class: "msg" }, f.message),
         a && a.reason ? h("div", { class: "why" }, h("b", null, "模型理由："), raw(a.reason)) : null);
     }));
+}
+const INTENT_LABEL = { curative: "根治性", palliative: "姑息性", supportive: "支持治疗", emergency: "急症处置", undetermined: "待定" };
+/* The model's own reasoning for its stage and treatment intent. */
+function judgementSec(k) {
+  if (!k.stage_rationale && !k.intent_rationale) return null;
+  return h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "模型判断依据"),
+    h("div", { class: "stack", style: { gap: "6px" } },
+      k.stage_rationale ? h("div", null, h("b", null, `分期${k.stage_group ? ` ${k.stage_group}` : ""}：`), raw(k.stage_rationale)) : null,
+      k.intent_rationale ? h("div", null, h("b", null, `治疗意图（${INTENT_LABEL[k.intent] || k.intent || "待定"}）：`), raw(k.intent_rationale)) : null));
 }
 function agentCard(p, m) {
   const k = p.consult || {};
@@ -1094,12 +1108,14 @@ function agentCard(p, m) {
         ? h("div", { class: "chip warn", style: { marginTop: "6px" } }, `引擎：${engine.stage_group}`) : null),
     h("div", { class: `rx-status tone-${meta[0]}` },
       h("div", { class: "st" }, h("span", { class: "g" }, icon(meta[3])), meta[1],
-        k.intent ? h("span", { class: "chip" }, { curative: "根治性", palliative: "姑息性", supportive: "支持治疗", emergency: "急症处置", undetermined: "待定" }[k.intent] || k.intent) : null,
+        k.intent ? h("span", { class: "chip", title: "治疗意图 · 模型判断" }, INTENT_LABEL[k.intent] || k.intent) : null,
         conf ? h("span", { class: `chip ${conf[0]}` }, conf[1]) : null),
       k.assessment ? h("div", { class: "d" }, raw(k.assessment)) : h("div", { class: "d" }, meta[2]),
       h("div", { class: "metrics" }, h("span", { class: "metric" }, icon("sparkle"), `${p.model || "模型"} · ${p.llm_calls} 次推理`),
         h("span", { class: "metric" }, `${tools} 次工具调用`), m.ms ? h("span", { class: "metric" }, `${(m.ms / 1000).toFixed(1)} s`) : null,
         ctx.ratio !== undefined ? h("span", { class: "metric", title: `约 ${ctx.tokens} / ${ctx.window} tokens` }, `上下文 ${Math.max(1, Math.round(ctx.ratio * 100))}%`) : null))));
+  const judged = judgementSec(k);
+  if (judged) rx.appendChild(judged);
   if (p.emergency) {
     rx.appendChild(h("div", { class: "rx-sec emergency" }, h("div", { class: "lbl" }, "急症筛查（标准处置路径，供参考）"),
       fmtList((p.emergency.pathway || {}).immediate_actions || p.emergency.signals)));
@@ -1498,7 +1514,9 @@ const Workspace = {
       h("div", { class: "welcome" }, logoMark(),
         h("h1", null, "今天会诊哪位患者？"),
         h("p", null, agent
-          ? `由 ${model} 主导会诊：自主规划，调用分期引擎、试验库、方案库、指南知识库等 20 个临床工具，并可并行邀请 7 位专科子智能体（MDT）；Hooks 的安全复核只作参考，由模型逐条判断。输入 / 查看命令。`
+          ? (AgentCfg.cfg.autonomy === "assisted"
+            ? `由 ${model} 主导会诊：自主规划，调用分期引擎、试验库、方案库、指南知识库等 20 个临床工具，并可并行邀请 7 位专科子智能体（MDT）；Hooks 的安全复核只作参考，由模型逐条判断。输入 / 查看命令。`
+            : `由 ${model} 主导会诊：分期、治疗意图与方案全部由模型自主判断；可检索试验库、方案库、指南知识库与文献，并可并行邀请 7 位专科子智能体（MDT）。输入 / 查看命令。`)
           : "描述病例、补充检查结果或上传报告。NSCLC-Agent 完成确定性分期、循证方案与安全终审 —— 未通过终审的方案不会放行。"),
         h("div", { class: "trust" },
           agent ? h("span", null, icon("sparkle"), `模型主导 · ${Store.llm.llm.model}`) : h("span", null, icon("cpu"), "浏览器内运行"),
@@ -1744,7 +1762,7 @@ const Workspace = {
   rerunAsAgent(c) {
     if (!llmOn()) { toast("模型主导需要先接入模型"); location.hash = "#/settings"; return; }
     const first = c.messages.find((m) => m.role === "user" && m.text && m.text !== "（附件）");
-    LS.set("nsclc.pref.mode", "agent");
+    LS.set("nsclc.pref.mode.v2", "agent");
     this.reset();
     Cases.newDraft();
     this.text = first ? first.text : "";
@@ -1754,7 +1772,7 @@ const Workspace = {
 
   setMode(mode) {
     if (mode === "agent" && !llmOn()) { toast("模型主导需要先接入模型"); location.hash = "#/settings"; return; }
-    LS.set("nsclc.pref.mode", mode);
+    LS.set("nsclc.pref.mode.v2", mode);
     toast(mode === "agent" ? "新会诊将由模型主导：自主推理与调用工具，规则仅作参考" : "新会诊使用受治理流水线：确定性内核裁决");
     render();
   },
@@ -1890,6 +1908,9 @@ const Workspace = {
     const stage = k.stage_group || engine.stage_group;
     if (stage || f.tnm) inner.appendChild(h("div", { class: "stage-tile" }, h("div", { class: "muted small" }, `分期 · 模型判断${engine.staged ? `（引擎：${engine.stage_group}）` : ""}`),
       h("div", { class: "big" }, stage || "—"), h("div", { class: "tnm" }, k.tnm || engine.tnm || tnmText(f.tnm))));
+    if (k.intent) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "治疗意图 · 模型判断"),
+      h("div", { class: "row", style: { gap: "8px", alignItems: "baseline" } }, h("span", { class: "chip" }, INTENT_LABEL[k.intent] || k.intent),
+        k.intent_rationale ? h("span", { class: "muted small" }, raw(k.intent_rationale)) : null)));
     if ((p.plan || []).length) inner.appendChild(h("div", { class: "dsec" }, planList(p.plan, true)));
     const rows = factRows(f);
     if (rows.length) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "病例笔记（模型维护）"), h("div", { class: "facts" }, rows.map(([a, b]) => [h("div", { class: "k" }, a), h("div", { class: "v" }, b)]))));
@@ -2249,6 +2270,19 @@ VIEWS.agent = () => {
       metric(`${hooks.filter((x) => x.enabled).length}/${hooks.length} 个 Hooks`), metric(`${(cfg.mcp_servers || []).length} 个 MCP 服务器`),
       metric(`记忆 ${(cfg.instructions || "").length} 字`), metric(`最多 ${cfg.max_steps || 24} 步`))));
 
+  /* --- who decides */
+  const full = cfg.autonomy !== "assisted";
+  const setAutonomy = (value) => save({ autonomy: value, hooks: {} },
+    value === "full" ? "已切换为模型完全自主：分期、治疗意图与方案由模型判断；Hooks 已恢复该模式的默认设置" : "已切换为内核辅助：提供确定性工具与规则复核（仍只作参考）；Hooks 已恢复该模式的默认设置");
+  root.appendChild(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("h3", null, "决策方式"), h("span", { class: "sub" }, "谁来判断分期、治疗意图与方案"),
+      h("div", { class: "right" }, h("div", { class: "seg", role: "group", "aria-label": "决策方式" },
+        h("button", { type: "button", class: full ? "on" : "", onclick: () => setAutonomy("full") }, "模型完全自主"),
+        h("button", { type: "button", class: full ? "" : "on", onclick: () => setAutonomy("assisted") }, "内核辅助")))),
+    h("p", { class: "muted", style: { margin: 0 } }, full
+      ? "当前：模型完全自主（默认）。分期、治疗意图与方案全部由模型判断；不提供分期引擎、适应证与器官功能核对、后线序贯、规则复核、受治理参考等确定性决策工具；Hooks 只保留急症提醒与引用、剂量溯源。"
+      : "当前：内核辅助。模型仍主导会诊，但可以调用确定性内核工具（分期引擎、适应证与器官功能核对、后线序贯、规则复核、受治理参考），Hooks 也会对照分期与安全规则提出参考意见。")));
+
   /* --- specialists */
   const disabled = new Set(cfg.disabled_agents || []);
   const custom = cfg.custom_agents || [];
@@ -2381,8 +2415,8 @@ VIEWS.settings = () => {
     out.appendChild(h("div", { class: "card flat" }, h("div", { class: "card-head" }, h("h3", null, "当前状态")),
       h("div", { class: "kv" }, h("div", { class: "k" }, "新会诊模式"), h("div", null,
           llmOn() ? h("div", { class: "seg" },
-            h("button", { type: "button", class: defaultMode() === "agent" ? "on" : "", onclick: () => { LS.set("nsclc.pref.mode", "agent"); render(); } }, "模型主导"),
-            h("button", { type: "button", class: defaultMode() !== "agent" ? "on" : "", onclick: () => { LS.set("nsclc.pref.mode", "governed"); render(); } }, "受治理"))
+            h("button", { type: "button", class: defaultMode() === "agent" ? "on" : "", onclick: () => { LS.set("nsclc.pref.mode.v2", "agent"); render(); } }, "模型主导"),
+            h("button", { type: "button", class: defaultMode() !== "agent" ? "on" : "", onclick: () => { LS.set("nsclc.pref.mode.v2", "governed"); render(); } }, "受治理"))
             : "确定性（未接入模型）",
           h("div", { class: "muted small", style: { marginTop: "6px" } }, llmOn()
             ? (defaultMode() === "agent" ? "模型自主规划、调用 20 个临床工具、邀请专科子智能体；Hooks 复核意见交回模型逐条判断，不作硬约束。专科、Hooks、记忆与 MCP 在「智能体」页配置。" : "模型只能提议，分期、规则与放行由确定性内核裁决。")
