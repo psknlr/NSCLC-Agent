@@ -80,11 +80,26 @@ def _key(ax, x, y, edge, fill, text, *, dashed=False, w=3.2, h=2.2):
     _label(ax, x + w + 1.2, y + h / 2, text, ha="left", size=SIZE_SMALL)
 
 
+def _note(ax, x, y, w, h, lines, *, size=5.0, dashed=True, edge=GREY, fill="white"):
+    """A small box with its lines centred vertically (no title)."""
+    ax.add_patch(mpatches.FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0,rounding_size=0.8",
+                                         linewidth=0.6, edgecolor=edge, facecolor=fill,
+                                         linestyle=(0, (3, 2)) if dashed else "solid"))
+    step = 2.6
+    top = y + h / 2 + (len(lines) - 1) * step / 2
+    for i, line in enumerate(lines):
+        ax.text(x + 2, top - i * step, line, fontsize=size, va="center", ha="left")
+
+
 def fig1(report: list) -> None:
     kn = load("knowledge")
     gs = load("gold_standard")
     pt = load("perturbation")
     a = kn["assets"]
+    rt = kn["runtime"]
+    full = rt["full"]
+    n_info = len(full["information_tools"])
+    n_kernel = len(rt["kernel_tools"])
     H = 168
     fig = figure("double", H)
     ax = axes_mm(fig, 0, 0, 183, H)
@@ -103,8 +118,6 @@ def fig1(report: list) -> None:
     _box(ax, 146, 149, 34, 12, "Two languages",
          ["One shared dictionary", "English-output directive"])
     _arrow(ax, 30, 155, 36, 155, both=True)
-
-    # interfaces <-> runtime
     _arrow(ax, 66, 149, 66, 136)
     _arrow(ax, 76, 136, 76, 149)
     _label(ax, 64.8, 143.6, "message · facts · attachments", ha="right")
@@ -112,23 +125,23 @@ def fig1(report: list) -> None:
     _arrow(ax, 106, 149, 106, 136, both=True)
 
     # ------------------------------------------------------------- runtime
-    _band(ax, 50, 141.5, "Agent runtime (agent mode)", "#EDF4FA")
+    _band(ax, 50, 141.5, "Agent runtime: full model autonomy (default)", "#EDF4FA")
     _key(ax, 110, 137.6, BLUE, BLUE_TINT, "Language model")
     _key(ax, 133, 137.6, GREY, "white", "Deterministic")
-    _key(ax, 154, 137.6, GREY, "white", "Optional or external", dashed=True)
+    _key(ax, 154, 137.6, GREY, "white", "Other mode or optional", dashed=True)
 
-    # hooks (left column)
-    _box(ax, 4, 118, 40, 18, "Hooks: each message",
-         ["Emergency screen (bilingual)", "Case-note seeding",
-          "→ context for the model; alerts"], fill=GREY_TINT)
+    # hooks (left column): what stays in the loop
+    _box(ax, 4, 118, 40, 18, "Hook: each message",
+         ["Emergency screen (bilingual)", "→ alert; context for the model"], fill=GREY_TINT)
+    _note(ax, 6, 119.6, 36, 4.6, ["Case-note seeding (kernel-assisted mode)"])
     _box(ax, 4, 100, 40, 13, "Hook: after each tool",
          ["Evidence ledger: references and", "dose look-ups tools returned"],
          fill=GREY_TINT)
     _box(ax, 4, 56, 40, 39, "Hooks: on submit (advisory)",
-         [f"Rule engine ({a['Safety rules']} rules)", "Stage consistency",
-          "Citation provenance", "Dose provenance", "Emergency first", "",
+         ["Citation provenance", "Dose provenance", "Emergency first", "",
           "Findings return to the model:", "revise, or justify an override",
-          f"({a['Hooks']} hooks; none blocks or rewrites)"], fill=GREY_TINT)
+          f"({len(full['hooks_on'])} of {a['Hooks']} hooks on; none blocks)"], fill=GREY_TINT)
+    _note(ax, 6, 58, 36, 7.4, ["Rule engine · stage consistency", "(kernel-assisted mode)"])
     _arrow(ax, 44, 127, 54, 127)
     _label(ax, 49, 128.6, "context")
     _arrow(ax, 54, 106.5, 44, 106.5)
@@ -138,13 +151,15 @@ def fig1(report: list) -> None:
     _arrow(ax, 44, 82, 54, 82)
     _label(ax, 49, 83.6, "findings")
 
-    # lead agent and its session (centre column)
-    _box(ax, 54, 76, 62, 60, "Lead agent (language model)",
-         ["Reason → call tools → observe, until it submits",
-          "Plans the work-up (update_plan)", "Keeps structured case notes",
-          "Runs read-only tool calls concurrently",
-          "Delegates to specialists, integrates them",
-          "Submits the consult; answers each finding"],
+    # lead agent: the decision-maker
+    _box(ax, 54, 76, 62, 60, "Lead agent (language model) decides",
+         ["Stage: cTNM and group (AJCC/UICC 9th ed.)",
+          "Biomarker category (NSCL-21 to NSCL-39)",
+          "Treatment intent · plan · work-up",
+          "each with its rationale; plans, keeps notes,",
+          "delegates and integrates the specialists", "",
+          "No kernel decision enters the loop:",
+          "tools inform, hooks check provenance"],
          edge=BLUE, fill=BLUE_TINT, lw=1.0)
     _box(ax, 57, 79, 56, 26, "Session state",
          ["Plan (live checklist) · case notes",
@@ -158,61 +173,62 @@ def fig1(report: list) -> None:
           "Offline mock for tests and demonstrations"], edge=BLUE)
     _arrow(ax, 85, 70, 85, 76, both=True)
 
-    # right column: external tools, specialists, clinical tools
+    # right column: specialists and information tools
     _box(ax, 126, 125, 54, 11, "External tools (MCP, opt-in)",
          ["Streamable-HTTP servers; namespaced tools"], dashed=True)
-    _box(ax, 126, 97, 54, 24, f"Specialist sub-agents ({a['Specialist sub-agents']})",
+    _box(ax, 126, 99, 54, 22, f"Specialist sub-agents ({a['Specialist sub-agents']})",
          ["Radiologist · molecular pathologist", "Thoracic surgeon · radiation oncologist",
-          "Medical oncologist · clinical pharmacist", "Evidence researcher",
-          "Own context, read-only tools; concurrent"],
+          "Medical oncologist · pharmacist · evidence", "Decide within their remit; concurrent"],
          edge=BLUE, fill=BLUE_TINT)
-    _box(ax, 126, 56, 54, 36, f"Clinical tools ({a['Clinical tools']}, deterministic)",
-         ["Staging · biomarkers · emergency screen", "Trial search · regimens · library dosing",
-          "Indication check · organ gates · CNS", "Later lines · prognosis · interactions",
-          "Guidelines · PubMed · citation check", "Rule review · governed reference", "",
-          "Each returns structured data and a", "one-line summary shown in the trace"])
+    _box(ax, 126, 70, 54, 25, f"Information tools ({n_info})",
+         ["Trial registry · regimen library", "Library reference doses · pathways",
+          "Guideline KB · PubMed · citation check", "Prognosis cohorts · interactions",
+          "Reading images and reports"])
+    _note(ax, 126, 56, 54, 11, [f"Decision tools ({n_kernel}), kernel-assisted mode only:",
+                                "staging · biomarkers · indications · organ gates",
+                                "CNS · later lines · rule review · governed reference"])
     _arrow(ax, 116, 130.5, 126, 130.5, both=True)
-    _arrow(ax, 116, 109, 126, 109, both=True)
-    _label(ax, 121, 111.2, "delegate")
+    _arrow(ax, 116, 110, 126, 110, both=True)
+    _label(ax, 121, 112.2, "delegate")
     _arrow(ax, 116, 84, 126, 84, both=True)
     _label(ax, 121, 86.2, "call")
-    _arrow(ax, 153, 97, 153, 92)
-    _label(ax, 154.5, 94.5, "read-only allow-list", ha="left")
+    _arrow(ax, 153, 99, 153, 95)
+    _label(ax, 154.5, 97, "read-only allow-list", ha="left")
 
-    # runtime -> kernel
-    for x in (24, 137, 167):
-        _arrow(ax, x, 56, x, 44.5)
-    _label(ax, 80, 47.2, "Stage, indications, rules and doses come from the kernel, "
-                         "never from the model", size=SIZE_SMALL)
+    # runtime -> kernel: after the consult only
+    _arrow(ax, 85, 56, 85, 44.5, color=VERMILLION, lw=0.9)
+    _label(ax, 87, 49.8, "Submitted consult → independent audit afterwards",
+           ha="left", size=SIZE_SMALL)
+    _label(ax, 87, 46.9, "(for the clinician and for evaluation; never returned to the model)",
+           ha="left", size=5)
 
     # -------------------------------------------------------------- kernel
-    _band(ax, 14, 44.5, "Deterministic clinical kernel (shared by both modes)", band)
-    _box(ax, 4, 16, 32, 23, "Staging engine",
-         ["AJCC/UICC 9th edition", "T, N, M → stage group", "Refuses ambiguous input",
+    _band(ax, 14, 44.5, "Deterministic clinical kernel: outside the decision loop", band)
+    _box(ax, 4, 16, 30, 23, "Staging engine",
+         ["AJCC/UICC 9th edition", "Reference stage group", "Refuses ambiguous input",
           "Edition-migration notes"])
-    _box(ax, 40, 16, 40, 23, "Knowledge",
+    _box(ax, 37, 16, 36, 23, "Knowledge",
          [f"Trial registry ({a['Trials (registry)']} trials)",
           f"Regimen library ({a['Regimens (library)']})",
           f"Indication predicates ({a['Indication predicates']})",
-          f"Guideline KB ({kn['kg_total']:,} items)",
-          f"Interview axes ({a['Interview axes']})"])
-    _box(ax, 84, 16, 37, 23, "Clinical modules",
-         ["Biomarkers, driver classes", "CNS strategy · later lines", "Organ-function gates",
-          "Prognosis · interactions"])
-    _box(ax, 125, 16, 26, 23, "Safety",
+          f"Guideline KB ({kn['kg_total']:,} items)"])
+    _box(ax, 76, 16, 35, 23, "Clinical modules",
+         ["Biomarker categories", "Metastatic sites → M", "Organ-function gates",
+          "CNS · later lines · prognosis"])
+    _box(ax, 114, 16, 29, 23, "Safety",
          ["Emergency screen", f"Rule engine ({a['Safety rules']})", "Claim and citation",
-          "checks · release gates"])
-    _box(ax, 155, 16, 25, 23, "Governed mode",
-         ["Fixed task graph;", "the kernel decides", "stage, release state", "and doses"],
-         dashed=True)
+          "checks"])
+    _box(ax, 146, 27.5, 34, 11.5, "Independent audit",
+         ["/audit · evaluation harness"], edge=VERMILLION)
+    _box(ax, 146, 16, 34, 9.5, "Other modes", ["Governed · kernel-assisted"], dashed=True)
 
     # ---------------------------------------------------------- evaluation
     _band(ax, 1.5, 12, "Evaluation", band)
     kinds = gs["kinds"]
-    ax.text(25, 9.6, f"Gold standard: {a['Gold-standard cases']} cases "
-                     f"({kinds.get('pipeline', 0)} end-to-end, {kinds.get('audit', 0)} "
-                     f"audit probes) · perturbation study: {len(pt['detection'])} injected "
-                     f"defect classes", fontsize=SIZE_SMALL, va="top")
+    ax.text(25, 9.6, f"Reference standard: {a['Gold-standard cases']} gold-standard cases "
+                     f"({kinds.get('pipeline', 0)} end-to-end, {kinds.get('audit', 0)} audit "
+                     f"probes) · defect injection: {len(pt['detection'])} defect classes read "
+                     f"by {len(pt['configs'])} configurations", fontsize=SIZE_SMALL, va="top")
     ax.text(25, 6.2, f"{kn['tests']} automated tests · in-browser (WebAssembly) smoke "
                      f"test · browser end-to-end tests of both interfaces and both languages",
             fontsize=SIZE_SMALL, va="top")
@@ -330,67 +346,90 @@ FINDING_LABEL = {
 }
 
 
+DEFECT_ORDER = ["Fabricated citation", "Dose without library lookup", "Dose addressed to a patient",
+                "Emergency not addressed", "Stage differs from engine", "Wrong biomarker category",
+                "Regimen outside its declared population",
+                "Immunotherapy despite actionable driver"]
+CONFIG_SHORT = {"full": "Full autonomy:\nin-loop hooks", "audit": "Independent\naudit (after)",
+                "assisted": "Kernel-assisted:\nin-loop hooks"}
+
+
 def fig3(report: list) -> None:
     pt = load("perturbation")
-    fig = figure("double", 86)
-    det = list(pt["detection"].items())
-    rows = [(k, v, BLUE) for k, v in det] + [("Clean consult (no defect)", pt["clean"], GREY)]
+    det = pt["detection"]
+    kinds = [k for k in DEFECT_ORDER if k in det]
+    configs = pt["configs"]
+    fig = figure("double", 82)
+    rows = kinds + ["Clean consult (any finding)"]
     y = np.arange(len(rows))[::-1].astype(float)
     y[-1] -= 0.6
-    ylim = (y[-1] - 0.7, y[0] + 0.6)
+    ylim = (y[-1] - 0.7, y[0] + 0.7)
 
-    # ---- a: detection (rows shared with b)
-    ax = axes_mm(fig, 54, 26, 26, 54)
+    # ---- a: detection by configuration (heatmap with k/n)
+    ax = axes_mm(fig, 58, 13, 54, 58)
     panel_label(fig, 1.5, 1.5, "a")
-    for yi, (name, v, colour) in zip(y, rows):
-        ax.plot([v["lo"], v["hi"]], [yi, yi], color=colour, lw=0.9, solid_capstyle="butt")
-        ax.plot([v["p"]], [yi], "o", ms=3.5, color=colour, mec="none", clip_on=False)
-        ax.text(1.1, yi, f"{v['k']}/{v['n']}", va="center", fontsize=SIZE_SMALL,
-                transform=ax.get_yaxis_transform())
-    ax.set_yticks(y, [r[0] for r in rows])
-    ax.axhline(y[-1] + 0.8, color=GREY, lw=0.4, ls=(0, (2, 2)))
-    ax.set_xlim(-0.02, 1.02)
-    ax.set_xticks([0, 0.5, 1], ["0", "0.5", "1"])
+    for j, c in enumerate(configs):
+        for yi, k in zip(y, rows):
+            if k in det:
+                v = det[k][c]
+                fill = SEQ(v["p"]) if v["p"] else "white"
+                text_colour = "white" if v["p"] > 0.55 else BLACK
+            else:
+                v = pt["clean"][c]
+                fill = "#EEEEEE" if v["k"] else "white"
+                text_colour = BLACK
+            ax.add_patch(mpatches.Rectangle((j, yi - 0.42), 1, 0.84, facecolor=fill,
+                                            edgecolor="#E6E6E6", linewidth=0.4))
+            ax.text(j + 0.5, yi, f"{v['k']}/{v['n']}", ha="center", va="center", fontsize=5.5,
+                    color=text_colour)
+    ax.axhline(y[-1] + 0.8, color=GREY, lw=0.4, ls=(0, (2, 2)), xmin=0, xmax=1)
+    ax.set_xlim(0, len(configs))
     ax.set_ylim(*ylim)
-    ax.tick_params(axis="y", length=0)
-    ax.set_xlabel("Consults with the expected\nfinding (proportion, 95% CI)")
-
-    # ---- b: every finding raised, same rows
-    mx = pt["matrix"]
-    baseline = Counter(f for r in pt["clean"]["rows"] for f in r["findings"])
-    findings = [f for f in FINDING_LABEL if f in mx["findings"] or f in baseline]
-    props = np.zeros((len(rows), len(findings)))
-    for i, k in enumerate(mx["perturbations"]):
-        for j, f in enumerate(findings):
-            if f in mx["findings"]:
-                props[i, j] = mx["counts"][i][mx["findings"].index(f)] / mx["n"][i]
-    for j, f in enumerate(findings):
-        props[-1, j] = baseline.get(f, 0) / pt["clean"]["n"]
-    ax = axes_mm(fig, 100, 26, 62, 54)
-    panel_label(fig, 92, 1.5, "b")
-    for i, yi in enumerate(y):
-        for j in range(len(findings)):
-            v = props[i, j]
-            ax.add_patch(mpatches.Rectangle((j, yi - 0.42), 1, 0.84, facecolor=SEQ(v) if v else
-                                            "white", edgecolor="#E6E6E6", linewidth=0.4))
-            if v:
-                ax.text(j + 0.5, yi, "1" if v == 1 else f"{v:.2f}", ha="center",
-                        va="center", fontsize=5, color="white" if v > 0.55 else BLACK)
-    ax.set_xlim(0, len(findings))
-    ax.set_ylim(*ylim)
-    ax.set_yticks([])
-    ax.set_xticks(np.arange(len(findings)) + 0.5, [FINDING_LABEL[f] for f in findings],
-                  rotation=55, ha="right", rotation_mode="anchor")
-    ax.tick_params(length=0)
+    ax.set_yticks(y, rows)
+    ax.set_xticks(np.arange(len(configs)) + 0.5, [CONFIG_SHORT[c] for c in configs])
+    ax.xaxis.tick_top()
+    ax.tick_params(length=0, pad=2)
     for side in ("left", "bottom", "top", "right"):
         ax.spines[side].set_visible(False)
-    ax.set_title("Findings raised (proportion of consults)", fontsize=SIZE_TEXT, pad=4)
-    cax = axes_mm(fig, 167, 50, 2, 26)
+    ax.set_xlabel("Consults raising the expected finding (k/n)")
+    cax = axes_mm(fig, 114, 30, 2, 24)
     sm = matplotlib.cm.ScalarMappable(cmap=SEQ, norm=matplotlib.colors.Normalize(0, 1))
     cb = fig.colorbar(sm, cax=cax)
     cb.outline.set_linewidth(0.4)
     cb.ax.tick_params(width=0.4, length=2)
     cb.set_ticks([0, 0.5, 1], labels=["0", "0.5", "1"])
+    cb.set_label("Proportion", fontsize=SIZE_SMALL, labelpad=2)
+
+    # ---- b: where each defect is caught in full autonomy
+    ax = axes_mm(fig, 134, 13, 44, 58)
+    panel_label(fig, 124, 1.5, "b")
+    for yi, k in zip(y, rows):
+        if k not in det:
+            continue
+        sp = det[k]["split"]
+        left = 0.0
+        for part, colour in (("in_loop", BLUE), ("audit_only", VERMILLION), ("neither", LIGHT_GREY)):
+            w = sp[part] / sp["n"]
+            if w:
+                ax.barh(yi, w, left=left, height=0.62, color=colour, edgecolor="white",
+                        linewidth=0.4)
+            left += w
+    ax.set_xlim(0, 1)
+    ax.set_ylim(*ylim)
+    ax.set_yticks([])
+    ax.set_xticks([0, 0.5, 1], ["0", "0.5", "1"])
+    ax.spines["left"].set_visible(False)
+    ax.set_xlabel("Proportion of consults")
+    key = axes_mm(fig, 134, 71.5, 44, 9.5)
+    key.set_axis_off()
+    key.set_xlim(0, 44)
+    key.set_ylim(0, 9.5)
+    for i, (colour, label) in enumerate(((BLUE, "Full autonomy: caught in the loop"),
+                                         (VERMILLION, "Caught only by the audit"),
+                                         (LIGHT_GREY, "Caught by neither"))):
+        key.add_patch(mpatches.Rectangle((0, 7.0 - i * 3.0), 2.4, 1.9, facecolor=colour,
+                                         edgecolor="none"))
+        key.text(3.4, 7.95 - i * 3.0, label, fontsize=SIZE_SMALL, va="center")
     report.append(save(fig, "Fig3", OUT))
 
 
@@ -497,88 +536,86 @@ def _lines(ax, x, y, lines, *, size=SIZE_SMALL, step=3.0, **kw):
 def fig5(report: list) -> None:
     import textwrap
 
-    from nsclc_agent.knowledge import regimens as regimen_lib
-
     cs = load("case_study")
-    H = 166
+    H = 168
     fig = figure("double", H)
     ax = axes_mm(fig, 0, 0, 183, H)
     ax.set_xlim(0, 183)
     ax.set_ylim(0, H)
     ax.set_axis_off()
+    notes = cs["notes"]
+    gov = cs["governed"]
+    revised, draft = cs["revised"], cs["draft"]
+    audit_ref = cs["audit"]["revised"]["reference"]
 
-    # ---- a: the case
+    # ---- a: the case (the clinician's report, summarised)
     panel_label(fig, 1.5, 1.5, "a")
-    eng = cs["engine_stage"]
-    facts = cs["case"]["facts"]
-    drivers = facts["driver_mutations"]
-    _box(ax, 4, 112, 52, 50, "Case",
-         ["Multistation N2b; judged unresectable", "by the multidisciplinary team",
-          "PET-CT and brain MRI: no metastasis",
-          f"{facts['histologic_category'].capitalize()} · EGFR {drivers['egfr']} · "
-          f"ALK {drivers['alk']}",
-          f"ECOG performance status {facts['ecog_ps']}",
-          "No hemoptysis, leg weakness or fever", "",
-          "Question: definitive treatment and", "consolidation?"])
-    ax.text(6, 124.6, "Staging engine", fontsize=SIZE_SMALL, fontweight="bold", va="top")
-    _lines(ax, 6, 121.3, [f"{eng['tnm']} → stage {eng['stage_group']} (9th edition)",
-                          "IIIA under the 8th edition (T2 N2b",
-                          "is upstaged in the 9th)"])
+    _box(ax, 4, 109, 70, 54, "Case: stage IVB, third line",
+         [f"{notes['age']}-year-old man, 40 pack-years, ECOG {notes['ecog_ps']}",
+          "Right upper lobe mass invading the mediastinal pleura;",
+          "multistation mediastinal nodes; left adrenal, multiple",
+          "bone and a single brain metastasis; adenocarcinoma",
+          "KRAS G12C; EGFR, ALK, ROS1, RET, MET exon 14 and",
+          f"BRAF V600E negative; PD-L1 TPS {notes['pd_l1']['tps']}%",
+          "Line 1 pembrolizumab–pemetrexed–carboplatin: mixed",
+          "response, new liver metastases; brain lesion after SRS",
+          "Re-biopsy PD-L1 10%; ctDNA: KRAS G12C up, MET amplified",
+          "Line 2 KRAS G12C inhibitor: primary and pleura progress,",
+          "malignant pleural effusion",
+          "Question: which next step?"])
 
     # ---- b: timed trace
-    panel_label(fig, 60, 1.5, "b")
-    rows = {"lead": 2, "radiology": 1, "medical_oncology": 0}
-    tx = axes_mm(fig, 84, 121, 94, 37)
+    panel_label(fig, 78, 1.5, "b")
+    rows = {"lead": 3, "radiology": 2, "medical_oncology": 1, "evidence": 0}
+    tx = axes_mm(fig, 104, 117, 74, 37)
     spans = cs["spans"]
-    for s in spans:
-        y = rows.get(s["agent"])
+    for sp in spans:
+        y = rows.get(sp["agent"])
         if y is None:
             continue
-        if s["kind"] == "model":
-            tx.add_patch(mpatches.Rectangle((s["start"], y - 0.2), s["end"] - s["start"], 0.4,
+        if sp["kind"] == "model":
+            tx.add_patch(mpatches.Rectangle((sp["start"], y - 0.2), sp["end"] - sp["start"], 0.4,
                                             facecolor=BLUE, edgecolor="white", linewidth=0.4))
-        elif s["name"] == "delegate":
-            continue
-        else:
-            tx.plot([s["end"]] * 2, [y - 0.3, y + 0.3], color=BLACK, lw=0.6)
-    delegates = [s for s in spans if s.get("name") == "delegate"]
-    d0, d1 = min(s["start"] for s in delegates), max(s["end"] for s in delegates)
-    tx.add_patch(mpatches.Rectangle((d0, 1.88), d1 - d0, 0.24, facecolor=GREY,
-                                    edgecolor="none"))
-    tx.text((d0 + d1) / 2, 2.8, f"delegate × {len(delegates)} (concurrent)",
-            fontsize=5.5, ha="center", va="bottom")
+        elif sp["name"] != "delegate":
+            tx.plot([sp["end"]] * 2, [y - 0.3, y + 0.3], color=BLACK, lw=0.6)
+    delegates = [sp for sp in spans if sp.get("name") == "delegate"]
+    d0, d1 = min(sp["start"] for sp in delegates), max(sp["end"] for sp in delegates)
+    tx.add_patch(mpatches.Rectangle((d0, 2.88), d1 - d0, 0.24, facecolor=GREY, edgecolor="none"))
+    tx.text((d0 + d1) / 2, 3.75, f"delegate × {len(delegates)} (concurrent)", fontsize=5.5,
+            ha="center", va="bottom")
+    model_ends = sorted(sp["end"] for sp in spans if sp["agent"] == "lead" and sp["kind"] == "model")
 
-    def tool_label(t0, t1, text, y=2.42):
-        batch = [s for s in spans if s["agent"] == "lead" and s["kind"] == "tool"
-                 and t0 <= s["end"] <= t1]
+    def tool_label(t0, text):
+        batch = [sp for sp in spans if sp["agent"] == "lead" and sp["kind"] == "tool"
+                 and sp["name"] != "update_plan" and t0 <= sp["end"] <= t0 + 0.05]
         if batch:
-            tx.text(max(s["end"] for s in batch), y, text, fontsize=5.5, ha="center",
+            tx.text(max(sp["end"] for sp in batch), 3.42, text, fontsize=5.5, ha="center",
                     va="bottom")
 
-    model_ends = sorted(s["end"] for s in spans if s["agent"] == "lead" and s["kind"] == "model")
-    tool_label(model_ends[0], model_ends[0] + 0.05, "stage · biomarkers · plan")
-    tool_label(model_ends[3], model_ends[3] + 0.05, "indication check · trial search")
-    for s, name in ((next(s for s in spans if s["agent"] == "radiology" and s["kind"] == "tool"),
-                     "stage"),
-                    (next(s for s in spans if s["agent"] == "medical_oncology"
-                          and s["kind"] == "tool"), "regimen search")):
-        tx.text(s["end"], rows[s["agent"]] + 0.36, name, fontsize=5.5, ha="center", va="bottom")
+    tool_label(model_ends[0], "notes · prognosis")
+    tool_label(model_ends[3], "dose look-up · citation check")
+    names = {"radiology": "guideline search", "medical_oncology": "regimen search",
+             "evidence": "trial search"}
+    for agent, label in names.items():
+        sp = next((x for x in spans if x["agent"] == agent and x["kind"] == "tool"), None)
+        if sp:
+            tx.text(sp["end"], rows[agent] - 0.36, label, fontsize=5.5, ha="center", va="top")
     for r in cs["reviews"]:
-        tx.plot([r["t"]], [2], marker="D", ms=3.2, color=VERMILLION, mec="white", mew=0.4,
+        tx.plot([r["t"]], [3], marker="D", ms=3.2, color=VERMILLION, mec="white", mew=0.4,
                 zorder=5, clip_on=False)
         n = len(r["findings"])
-        text = (f"hooks: {n} finding{'s' if n != 1 else ''}" if n else
-                "hooks: none, accepted")
-        tx.text(r["t"], 1.62, text, fontsize=5.5, ha="right", va="top")
-    tx.set_yticks([2, 1, 0], ["Lead agent", "Radiologist", "Medical oncologist"])
+        tx.text(r["t"], 2.7, f"hooks: {n} finding{'s' if n != 1 else ''}" if n else
+                "hooks: none", fontsize=5.5, ha="right", va="top")
+    tx.set_yticks([3, 2, 1, 0], ["Lead agent", "Radiologist", "Medical oncologist",
+                                 "Evidence researcher"])
     tx.tick_params(axis="y", length=0)
     tx.spines["left"].set_visible(False)
     tx.set_xlim(0, cs["total_s"] + 0.3)
-    tx.set_ylim(-0.5, 3.2)
+    tx.set_ylim(-1.0, 4.2)
     tx.spines["bottom"].set_bounds(0, int(cs["total_s"]))
     tx.set_xticks(range(0, int(cs["total_s"]) + 1))
     tx.set_xlabel("Time from the clinician's message (s)")
-    key = axes_mm(fig, 84, 158.5, 94, 4)
+    key = axes_mm(fig, 84, 157.5, 94, 4)
     key.set_axis_off()
     key.set_xlim(0, 94)
     key.set_ylim(0, 4)
@@ -592,23 +629,27 @@ def fig5(report: list) -> None:
     key.plot([77.5], [2], marker="D", ms=3.2, color=VERMILLION, mec="white", mew=0.4)
     key.text(79.5, 2, "Stop hooks", fontsize=SIZE_SMALL, va="center")
 
-    # ---- c: the review loop
-    panel_label(fig, 1.5, 57, "c")
-    draft, revised = cs["draft"], cs["revised"]
+    # ---- c: the review loop (provenance hooks in the loop)
+    panel_label(fig, 1.5, 61, "c")
     first, second = cs["reviews"][0], cs["reviews"][-1]
 
-    def options(consult):
-        return [f"{i + 1}. {o['name']} ({', '.join(o.get('evidence') or [])})"
-                for i, o in enumerate(consult["options"])]
+    def decisions(consult):
+        return [f"Stage {consult['stage_group']} · {', '.join(consult['biomarker_category'])} · "
+                f"{consult['intent']}"]
 
-    _box(ax, 4, 58, 48, 46, "Draft consult (round 1)",
-         [f"Stage {draft['stage_group']}", *[l for o in options(draft)
-                                             for l in textwrap.wrap(o, 34)],
-          "", "Model decisions scripted to", "reproduce a common error"],
-         edge=VERMILLION)
-    fy = 97.2
-    _box(ax, 62, 58, 64, 46, f"Stop-hook findings ({len(first['findings'])})", [],
+    def opts(consult):
+        out = []
+        for i, o in enumerate(consult["options"]):
+            ev = ", ".join(o.get("evidence") or [])
+            out += textwrap.wrap(f"{i + 1}. {o['name']}" + (f" ({ev})" if ev else ""), 36)
+        return out
+
+    _box(ax, 4, 58, 50, 45, "Draft consult (round 1)",
+         decisions(draft) + opts(draft) + ["", "Doses quoted from memory;",
+                                           "a trial that does not exist"], edge=VERMILLION)
+    _box(ax, 62, 58, 64, 45, f"In-loop hook findings ({len(first['findings'])})", [],
          fill=GREY_TINT)
+    fy = 96.4
     for f in first["findings"]:
         colour = VERMILLION if f["severity"] == "block" else ORANGE
         ax.add_patch(mpatches.Rectangle((64, fy - 2.2), 2.2, 2.2, facecolor=colour,
@@ -618,36 +659,92 @@ def fig5(report: list) -> None:
                 fontsize=SIZE_SMALL, fontweight="bold", va="top")
         wrapped = textwrap.wrap(f["message"], 58)
         _lines(ax, 67.4, fy - 3.0, wrapped, size=5.5, step=2.6)
-        fy -= 3.0 + 2.6 * len(wrapped) + 1.6
-    _box(ax, 134, 58, 46, 46, "Revised consult (round 2)",
-         [f"Stage {revised['stage_group']}", *[l for o in options(revised)
-                                               for l in textwrap.wrap(o, 32)],
-          "", f"Responses: {len(revised.get('rule_responses') or [])} findings accepted",
-          "Hooks on resubmission: "
-          + (f"{len(second['findings'])} findings" if second["findings"] else "none"),
-          "Same regimens as the governed reference"
-          if {r for o in revised["options"] for r in o.get("regimen_ids") or []}
-          == set(cs["governed"]["regimen_ids"]) else "Differs from the governed reference"],
+        fy -= 3.0 + 2.6 * len(wrapped) + 1.8
+    _box(ax, 134, 58, 46, 45, "Revised consult (round 2)",
+         decisions(revised) + opts(revised)
+         + ["", "Doses deferred to the library and", "the local protocol",
+            f"Responses: {len(revised.get('rule_responses') or [])} findings accepted",
+            "Hooks on resubmission: "
+            + (f"{len(second['findings'])} findings" if second["findings"] else "none")],
          edge=BLUE)
-    _arrow(ax, 52, 81, 62, 81)
-    _label(ax, 57, 82.6, "submit")
+    _arrow(ax, 54, 81, 62, 81)
+    _label(ax, 58, 82.6, "submit")
     _arrow(ax, 126, 81, 134, 81)
     _label(ax, 130, 82.6, "revise")
-    ax.add_patch(mpatches.Rectangle((64, 60), 2.2, 2.2, facecolor=VERMILLION, edgecolor="none"))
-    ax.text(67, 61.1, "Rule severity: block", fontsize=SIZE_SMALL, va="center")
-    ax.add_patch(mpatches.Rectangle((92, 60), 2.2, 2.2, facecolor=ORANGE, edgecolor="none"))
-    ax.text(95, 61.1, "warn", fontsize=SIZE_SMALL, va="center")
 
-    # ---- d: every library regimen checked against the case
-    panel_label(fig, 1.5, 111, "d")
+    # ---- d: the model's decisions next to the independent audit
+    panel_label(fig, 1.5, 113, "d")
+    eligible = [r["regimen_id"] for r in cs["indications"] if r["verdict"] == "eligible"]
+    picked = [r for o in revised["options"] for r in o.get("regimen_ids") or []]
+    stage_ref = audit_ref["stage"] or {}
+    m_ref = audit_ref.get("suggested_m") or {}
+    cat_ref = audit_ref.get("biomarker_category") or {}
+    gate_names = (("bleeding", "bleeding-risk screen"), ("blood count", "blood count"),
+                  ("hepatic", "liver function"), ("renal", "renal function"), ("LVEF", "LVEF"))
+    gates = [next((name for key, name in gate_names if key in g), g.split(" — ")[0])
+             for g in cs["organ_gates_pending"]]
+    audit_draft = [f["rule_id"] for f in cs["audit"]["draft"]["findings"]]
+    audit_final = [f["rule_id"] for f in cs["audit"]["revised"]["findings"]]
+    table = [
+        ("Stage group", f"{revised['stage_group']} ({revised['tnm']})",
+         f"Staging engine: {stage_ref.get('stage_group')} ({stage_ref.get('tnm')})",
+         "Agrees" if stage_ref.get("stage_group") == revised["stage_group"] else "Differs"),
+        ("M category", "M1c; M1c2 by sites (rationale)",
+         f"Sites on record: {m_ref.get('m')} ({len(gov['metastatic_sites']['sites'])} sites, "
+         f"incl. brain)", "Agrees (M1c family)"),
+        ("Biomarker category", ", ".join(revised["biomarker_category"]),
+         f"Classifier: {', '.join(cat_ref.get('codes') or [])}; untested: "
+         f"{', '.join(m.split(' ')[0] for m in cat_ref.get('missing') or [])}",
+         "Agrees" if set(cat_ref.get("codes") or []) == set(revised["biomarker_category"])
+         else "Differs"),
+        ("Treatment intent", revised["intent"].capitalize(),
+         f"Governed pipeline: {gov['intent']}", "Agrees" if gov["intent"] == revised["intent"]
+         else "Differs"),
+        ("Regimens", "Docetaxel–ramucirumab; docetaxel",
+         f"Governed: same; {len(eligible)} of {len(cs['indications'])} library regimens eligible",
+         "Agrees" if set(picked) == set(gov["regimen_ids"]) and set(picked) <= set(eligible)
+         else "Differs"),
+        ("Before dosing", "Blood count, liver function, bleeding",
+         "Organ gates still open: " + ", ".join(gates), "For the clinician"),
+        ("Audit findings", "—",
+         f"Draft: {', '.join(audit_draft) or 'none'}; revision: {', '.join(audit_final) or 'none'}",
+         "Clean"),
+    ]
+    cols = [(4, "Decision"), (30, "Model (revised consult)"),
+            (76, "Kernel's independent reading (after the consult)"), (158, "")]
+    top = 50.5
+    ax.plot([4, 180], [top + 1.6] * 2, color=BLACK, lw=0.6)
+    for x, head in cols:
+        ax.text(x, top, head, fontsize=SIZE_SMALL, fontweight="bold", va="center")
+    ax.plot([4, 180], [top - 1.8] * 2, color=BLACK, lw=0.4)
+    for i, (name, model, kernel, verdict) in enumerate(table):
+        yy = top - 5.2 - i * 6.0
+        ax.text(4, yy, name, fontsize=SIZE_SMALL, va="center")
+        ax.text(30, yy, model, fontsize=SIZE_SMALL, va="center")
+        for k, line in enumerate(textwrap.wrap(kernel, 62)[:2]):
+            ax.text(76, yy + (1.4 if len(textwrap.wrap(kernel, 62)) > 1 else 0) - 2.8 * k, line,
+                    fontsize=SIZE_SMALL, va="center")
+        colour = BLUE if verdict.startswith(("Agrees", "Clean")) else GREY
+        ax.add_patch(mpatches.Circle((159.2, yy), 0.9, facecolor=colour, edgecolor="none"))
+        ax.text(161.2, yy, verdict, fontsize=SIZE_SMALL, va="center")
+    ax.plot([4, 180], [top - 5.2 - (len(table) - 1) * 6.0 - 3.6] * 2, color=BLACK, lw=0.6)
+    report.append(save(fig, "Fig5", OUT))
+
+
+# ===================================================== Extended Data Fig. 4
+def ed_fig4(report: list) -> None:
+    from nsclc_agent.knowledge import regimens as regimen_lib
+
+    cs = load("case_study")
+    revised, draft = cs["revised"], cs["draft"]
+    fig = figure("double", 72)
     by_id = {r["regimen_id"]: r for r in cs["indications"]}
     groups = ["Perioperative", "Definitive", "First line (stage IV)", "Later lines"]
     order = sorted(by_id, key=lambda rid: (groups.index(SETTING_GROUP[
         regimen_lib.get(rid).setting]), list(by_id).index(rid)))
-    mx = axes_mm(fig, 36, 26, 124, 25)
+    mx = axes_mm(fig, 36, 26, 124, 28)
     n_rows = len(CONDITION_ROWS) + 1
     rank = {"not_met": 3, "unknown": 2, "met": 1}
-    fails = []
     for i, (label, keys) in enumerate(CONDITION_ROWS):
         y = n_rows - 2 - i
         count = 0
@@ -660,7 +757,6 @@ def fig5(report: list) -> None:
             mx.add_patch(mpatches.Rectangle((j, y), 1, 1, facecolor=fill,
                                             edgecolor="white" if state else "#E6E6E6",
                                             linewidth=0.5))
-        fails.append(count)
         mx.text(len(order) + 0.8, y + 0.5, str(count), fontsize=SIZE_SMALL, va="center")
     for j, rid in enumerate(order):
         eligible = by_id[rid]["verdict"] == "eligible"
@@ -668,14 +764,11 @@ def fig5(report: list) -> None:
                                         facecolor=BLUE if eligible else "white",
                                         edgecolor=BLUE if eligible else "#BBBBBB",
                                         linewidth=0.5))
-    proposed_draft = {r for o in draft["options"] for r in o.get("regimen_ids") or []}
-    proposed_final = {r for o in revised["options"] for r in o.get("regimen_ids") or []}
+    proposed = {r for c in (draft, revised) for o in c["options"] for r in o.get("regimen_ids") or []}
     for j, rid in enumerate(order):
-        if rid in proposed_draft or rid in proposed_final:
+        if rid in proposed:
             mx.add_patch(mpatches.Rectangle((j, -0.05), 1, n_rows + 0.1, facecolor="none",
-                                            edgecolor=BLACK, linewidth=0.8, clip_on=False,
-                                            linestyle="solid" if rid in proposed_final
-                                            else (0, (2, 1.2))))
+                                            edgecolor=BLACK, linewidth=0.8, clip_on=False))
     mx.text(len(order) + 0.8, n_rows + 0.3, "Not met (n)", fontsize=SIZE_SMALL, va="bottom")
     mx.set_xlim(0, len(order))
     mx.set_ylim(0, n_rows)
@@ -694,54 +787,72 @@ def fig5(report: list) -> None:
         mx.text(start + n / 2, n_rows + 0.8, f"{g} ({n})", fontsize=SIZE_SMALL, ha="center",
                 va="bottom")
         start += n
-    k = axes_mm(fig, 4, 3, 30, 22)
-    k.set_axis_off()
-    k.set_xlim(0, 30)
-    k.set_ylim(0, 22)
-    for i, (fill, edge, text) in enumerate(((BLUE, "none", "Met"), (VERMILLION, "none", "Not met"),
-                                            (LIGHT_GREY, "none", "Not on record"),
-                                            ("white", "#BBBBBB", "Not a condition"))):
-        k.add_patch(mpatches.Rectangle((0, 19 - i * 3.6), 2.6, 2.6, facecolor=fill,
-                                       edgecolor=edge, linewidth=0.5))
-        k.text(3.6, 20.3 - i * 3.6, text, fontsize=SIZE_SMALL, va="center")
-    k.add_patch(mpatches.Rectangle((0, 4.6), 2.6, 2.6, facecolor="none", edgecolor=BLACK,
-                                   linewidth=0.8))
-    k.text(3.6, 5.9, "In the revision", fontsize=SIZE_SMALL, va="center")
-    k.add_patch(mpatches.Rectangle((0, 1.0), 2.6, 2.6, facecolor="none", edgecolor=BLACK,
-                                   linewidth=0.8, linestyle=(0, (2, 1.2))))
-    k.text(3.6, 2.3, "In the draft only", fontsize=SIZE_SMALL, va="center")
-    report.append(save(fig, "Fig5", OUT))
+    key = axes_mm(fig, 36, 66.5, 140, 4)
+    key.set_axis_off()
+    key.set_xlim(0, 140)
+    key.set_ylim(0, 4)
+    x = 0.0
+    for fill, edge, text, lw, width in ((BLUE, "none", "Met", 0.5, 12),
+                                        (VERMILLION, "none", "Not met", 0.5, 16),
+                                        (LIGHT_GREY, "none", "Not on record", 0.5, 24),
+                                        ("white", "#BBBBBB", "Not a condition", 0.5, 26),
+                                        ("none", BLACK, "Proposed by the model", 0.8, 34)):
+        key.add_patch(mpatches.Rectangle((x, 0.7), 2.6, 2.6, facecolor=fill, edgecolor=edge,
+                                         linewidth=lw))
+        key.text(x + 3.6, 2.0, text, fontsize=SIZE_SMALL, va="center")
+        x += width
+    report.append(save(fig, "ExtendedDataFig4", OUT))
 
 
 # ===================================================== Extended Data Fig. 1
 def ed_fig1(report: list) -> None:
     ac = load("access")
-    fig = figure("double", 70)
+    fig = figure("double", 72)
     ax = axes_mm(fig, 36, 29, 140, 33)
     rows = ["Lead agent"] + ac["agents"]
+    kernel = np.array(ac["kernel"], dtype=bool)
     mat = np.vstack([np.ones(len(ac["tools"]))] + [np.array(r) for r in ac["matrix"]])
     for i in range(mat.shape[0]):
         for j in range(mat.shape[1]):
-            colour = (GREY if i == 0 else BLUE) if mat[i, j] else "white"
-            ax.add_patch(mpatches.Rectangle((j, mat.shape[0] - 1 - i), 1, 1, facecolor=colour,
-                                            edgecolor="white" if mat[i, j] else "#DDDDDD",
-                                            linewidth=0.6))
+            colour = GREY if i == 0 else BLUE
+            y = mat.shape[0] - 1 - i
+            if not mat[i, j]:
+                ax.add_patch(mpatches.Rectangle((j, y), 1, 1, facecolor="white",
+                                                edgecolor="#DDDDDD", linewidth=0.6))
+            elif kernel[j]:
+                # offered only in kernel-assisted mode: outlined, not filled
+                ax.add_patch(mpatches.Rectangle((j + 0.08, y + 0.08), 0.84, 0.84,
+                                                facecolor="white", edgecolor=colour,
+                                                linewidth=0.8))
+            else:
+                ax.add_patch(mpatches.Rectangle((j, y), 1, 1, facecolor=colour,
+                                                edgecolor="white", linewidth=0.6))
     ax.set_xlim(0, mat.shape[1])
     ax.set_ylim(0, mat.shape[0])
     ax.set_yticks(np.arange(mat.shape[0]) + 0.5, list(reversed(rows)))
     ax.set_xticks(np.arange(mat.shape[1]) + 0.5, ac["tool_labels"], rotation=55, ha="right",
                   rotation_mode="anchor")
+    for label, is_kernel in zip(ax.get_xticklabels(), kernel):
+        if is_kernel:
+            label.set_color(GREY)
     ax.tick_params(length=0)
     for side in ("left", "bottom", "top", "right"):
         ax.spines[side].set_visible(False)
-    key = axes_mm(fig, 36, 64.5, 140, 4)
+    key = axes_mm(fig, 36, 64, 140, 7)
     key.set_axis_off()
     key.set_xlim(0, 140)
-    key.set_ylim(0, 4)
-    for x, colour, label in ((0, GREY, "Lead agent (also writes case notes, plans, delegates, submits)"),
-                             (86, BLUE, "Specialist read-only allow-list")):
-        key.add_patch(mpatches.Rectangle((x, 0.5), 3, 3, facecolor=colour, edgecolor="none"))
-        key.text(x + 4.2, 2, label, fontsize=SIZE_SMALL, va="center")
+    key.set_ylim(0, 7)
+    entries = ((0, 4.0, GREY, True, "Lead agent (also writes notes, plans, delegates, submits)"),
+               (86, 4.0, BLUE, True, "Specialist read-only allow-list"),
+               (0, 0.4, GREY, False, "Kernel tool: offered only in kernel-assisted mode "
+                                      "(grey label); not in full autonomy"))
+    for x, y, colour, filled, label in entries:
+        if filled:
+            key.add_patch(mpatches.Rectangle((x, y), 3, 2.6, facecolor=colour, edgecolor="none"))
+        else:
+            key.add_patch(mpatches.Rectangle((x + 0.2, y + 0.2), 2.6, 2.2, facecolor="white",
+                                             edgecolor=colour, linewidth=0.8))
+        key.text(x + 4.2, y + 1.3, label, fontsize=SIZE_SMALL, va="center")
     report.append(save(fig, "ExtendedDataFig1", OUT))
 
 
@@ -941,7 +1052,7 @@ if __name__ == "__main__":
     font = apply_style()
     print(f"font: {font}")
     out: list = []
-    for build in (fig1, fig2, fig3, fig4, fig5, ed_fig1, ed_fig2, ed_fig3):
+    for build in (fig1, fig2, fig3, fig4, fig5, ed_fig1, ed_fig2, ed_fig3, ed_fig4):
         build(out)
     for r in out:
         print(f"{r['name']}: {r['width_mm']} x {r['height_mm']} mm  font={r['font']}  "

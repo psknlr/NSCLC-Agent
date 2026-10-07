@@ -104,11 +104,20 @@ The harness runs in one of two modes.
 | Safety and provenance hooks (`emergency_screen`, `evidence_ledger`, `citation_provenance`, `dose_provenance`, `emergency_addressed`) | on | on |
 | Engine stage in the case notes / turn result | never | shown next to the model's stage |
 | Tools' default stage | the `stage_group` the model recorded | the engine's staging of the notes |
+| Independent audit (`agentic/audit.py`, `/audit`) | after the consult, for the clinician and evaluation; never returned to the model | same |
 
 `submit_consult` carries the model's `stage_group`, `tnm`, `stage_rationale`,
-`intent` (curative / palliative / supportive / emergency / undetermined) and
-`intent_rationale`; a missing or unknown intent is recorded as
-`undetermined`, never inferred. Explicit hook settings always win over the
+`intent` (curative / palliative / supportive / emergency / undetermined),
+`intent_rationale`, `biomarker_category` (NSCL-21 … NSCL-39 codes, v1.4) and
+`biomarker_rationale`; a missing or unknown intent is recorded as
+`undetermined`, never inferred.
+
+The independent audit (v1.4.1) re-reads the case with the kernel after the
+consult — the model's notes, gaps filled from the narrative without
+overwriting them — and compares stage (engine), M (metastatic sites),
+biomarker category (marker-level classifier), the 20 safety rules and
+emergency-first. It is shown to the clinician (`/audit`) and used by
+`paper/analysis.py`; it never returns to the model. Explicit hook settings always win over the
 autonomy defaults. Surfaces: web settings 「决策方式」, CLI `--autonomy`.
 
 ### 2.2 Languages (v1.1)

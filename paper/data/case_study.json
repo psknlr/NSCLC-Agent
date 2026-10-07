@@ -1,54 +1,133 @@
 {
- "id": "iiib_egfr",
- "case": {
-  "t": "T2b",
-  "n": "N2b",
-  "m": "M0",
-  "presentation": "多站N2b，MDT判定不可切除。PET-CT+脑MRI确认M0。EGFR L858R。No hemoptysis, no leg weakness, no fever.",
-  "question": "根治性方案与巩固治疗？",
-  "facts": {
-   "driver_mutations": {
-    "egfr": "L858R",
-    "alk": "negative"
+ "case_text": "62岁男性，重度吸烟史 40 pack-years，因持续咳嗽、胸痛及体重下降 2个月就诊。胸部增强CT示：右上肺约5.8 cm肿块，侵犯纵隔胸膜，纵隔多站淋巴结肿大，并伴左肾上腺及多发骨转移。脑MRI发现右额叶单发约1.6 cm转移灶，无明显神经症状。ECOG PS 1。\n支气管镜活检提示：肺腺癌，TTF-1(+)、Napsin A(+)。初始分期考虑 cT4N3M1c，IVB期。\n分子检测：\n- EGFR、ALK、ROS1、RET、MET exon14、BRAF V600E：阴性\n- KRAS G12C：阳性\n- STK11失活突变 + KEAP1突变\n- TP53突变\n- PD-L1 TPS：80%\n- TMB：约11 mut/Mb\n患者接受帕博利珠单抗 + 培美曲塞 + 卡铂一线治疗。4周期后肺原发灶缩小约35%，但左肾上腺病灶增大，并新出现2个肝转移灶，呈现明显异质性/混合反应。脑转移经SRS控制稳定。\n肝转移灶再次活检仍为腺癌，但PD-L1降至约10%，ctDNA显示KRAS G12C丰度升高，并出现MET扩增。随后给予KRAS G12C抑制剂治疗，约3个月后肝转移部分缩小，但肺原发灶及胸膜病灶再次进展，并出现恶性胸腔积液。\n\n下一步究竟采用KRAS G12C靶向联合策略、MET相关治疗、再次系统化疗、局部治疗寡进展灶，还是重新活检/液体活检后按照耐药机制重新分层？",
+ "question": "Next step: KRAS G12C combination, MET-directed therapy, further chemotherapy, local therapy for oligoprogression, or re-biopsy and stratify by resistance mechanism?",
+ "notes": {
+  "age": 62,
+  "sex": "male",
+  "smoking_history": "current (40 pack-years)",
+  "tnm": {
+   "t": "T4",
+   "n": "N3",
+   "m": "M1c",
+   "prefix": "c"
+  },
+  "stage_group": "IVB",
+  "histologic_category": "adenocarcinoma",
+  "ecog_ps": 1,
+  "driver_mutations": {
+   "kras": "KRAS G12C positive",
+   "egfr": "negative",
+   "alk": "negative",
+   "ros1": "negative",
+   "ret": "negative",
+   "met": "MET exon 14 skipping negative",
+   "braf": "BRAF V600E negative"
+  },
+  "pd_l1": {
+   "tps": 80
+  },
+  "metastatic_sites": {
+   "adrenal": "single",
+   "bone": "multiple",
+   "liver": "multiple",
+   "pleura": "present",
+   "pleural_effusion": "present"
+  },
+  "cns_metastases": {
+   "status": "present",
+   "symptomatic": false,
+   "treated": true,
+   "burden": "limited"
+  },
+  "treatment_history": [
+   {
+    "line": 1,
+    "agents": [
+     "pembrolizumab",
+     "pemetrexed",
+     "carboplatin"
+    ],
+    "status": "progression"
    },
-   "histologic_category": "adenocarcinoma",
-   "resectability_category": "UNRESECTABLE",
-   "ecog_ps": 1
+   {
+    "line": 2,
+    "agents": [
+     "KRAS G12C inhibitor"
+    ],
+    "status": "progression"
+   }
+  ],
+  "progression_ngs_done": true,
+  "progression_findings": {
+   "met_amplification": true
   }
  },
- "english": {
-  "title": "IIIB unresectable · EGFR L858R",
-  "subtitle": "cCRT + osimertinib consolidation (LAURA), not durvalumab",
-  "presentation": "Multistation N2b; the MDT judged it unresectable. PET-CT and brain MRI confirm M0. EGFR L858R. No hemoptysis, no leg weakness, no fever.",
-  "question": "Definitive treatment and consolidation?"
- },
- "engine_stage": {
-  "staged": true,
-  "prefix": "c",
-  "t_category": "T2b",
-  "n_category": "N2b",
-  "m_category": "M0",
-  "tnm": "cT2bN2bM0",
-  "stage_group": "IIIB",
-  "edition": "AJCC/UICC 9th edition",
-  "migration_notes": [
-   "T2N2b upstaged from 8th-edition IIIA to 9th-edition IIIB."
-  ],
-  "descriptor_notes": [
-   "N2 subcategory is decision-relevant in the 9th edition (N2a single-station vs N2b multi-station)."
-  ]
- },
+ "offered_tools": [
+  "citation_verify",
+  "delegate",
+  "guideline_search",
+  "interaction_check",
+  "prognosis",
+  "protocol_sections",
+  "pubmed_search",
+  "read_attachment",
+  "record_case_facts",
+  "regimen_dosing",
+  "remember",
+  "search_regimens",
+  "search_trials",
+  "submit_consult",
+  "update_plan"
+ ],
  "governed": {
-  "release_status": "treatment_recommendation",
+  "release_status": "needs_more_information",
+  "stage_group": "IVB",
+  "intent": "palliative",
+  "summary": "Stage IVB, line 3 after documented progression: next-line systemic therapy.",
   "options": [
-   "Definitive concurrent chemoradiation",
-   "Consolidation osimertinib"
+   "Docetaxel + ramucirumab",
+   "Docetaxel monotherapy",
+   "Early palliative-care integration"
   ],
   "regimen_ids": [
-   "ccrt_60gy",
-   "osimertinib_consolidation"
-  ]
+   "docetaxel_ramucirumab_second_line",
+   "docetaxel_second_line"
+  ],
+  "biomarker_category": {
+   "status": "targetable",
+   "codes": [
+    "NSCL-26"
+   ],
+   "missing": [
+    "NTRK1/2/3 fusion",
+    "ERBB2 (HER2) mutation",
+    "NRG1 fusion"
+   ],
+   "summary_zh": "NSCL-26（KRAS G12C 突变阳性）",
+   "summary_en": "NSCL-26 (KRAS G12C mutation positive)"
+  },
+  "metastatic_sites": {
+   "sites": {
+    "adrenal": "single",
+    "bone": "multiple",
+    "liver": "multiple",
+    "pleura": "present",
+    "pleural_effusion": "present",
+    "brain": "single"
+   },
+   "suggested_m": "M1c2",
+   "candidates": [
+    "M1c2"
+   ],
+   "basis": "extrathoracic metastases in 4 organ systems (adrenal, bone, liver, brain)",
+   "basis_zh": "胸腔外 4 个器官系统转移（肾上腺、骨、肝、脑）"
+  }
  },
+ "organ_gates_pending": [
+  "bleeding-risk screen not on record (hemoptysis history, cavitation, vessel invasion) — required before ramucirumab",
+  "no blood count on record — ANC ≥ 1.5 and platelets ≥ 100 ×10⁹/L needed before cytotoxic or ADC therapy",
+  "no hepatic function on record — bilirubin and transaminases needed before a taxane is dosed"
+ ],
  "indications": [
   {
    "regimen_id": "osimertinib_adjuvant",
@@ -58,8 +137,8 @@
     {
      "condition": "stage",
      "requirement": "IB/IIA/IIB/IIIA",
-     "verdict": "met",
-     "why": "9th-edition IIIB maps to IIIA under the trial's 8th-edition enrollment (edition migration)"
+     "verdict": "not_met",
+     "why": "stage IVB outside IB/IIA/IIB/IIIA"
     },
     {
      "condition": "histology",
@@ -70,21 +149,16 @@
     {
      "condition": "driver",
      "requirement": "egfr_classical",
-     "verdict": "met",
-     "why": "l858r"
-    },
-    {
-     "condition": "resectability",
-     "requirement": "not unresectable",
      "verdict": "not_met",
-     "why": "unresectable"
+     "why": "EGFR negative"
     }
    ],
    "unknown_conditions": [],
    "failed_conditions": [
-    "resectability: unresectable (requires not unresectable)"
+    "stage: stage IVB outside IB/IIA/IIB/IIIA (requires IB/IIA/IIB/IIIA)",
+    "driver: EGFR negative (requires egfr_classical)"
    ],
-   "edition_migration": true,
+   "edition_migration": false,
    "note": "ADAURA: resected IB–IIIA, EGFR ex19del/L858R"
   },
   {
@@ -95,28 +169,22 @@
     {
      "condition": "stage",
      "requirement": "IIA/IIB/IIIA",
-     "verdict": "met",
-     "why": "9th-edition IIIB maps to IIIA under the trial's 8th-edition enrollment (edition migration)"
+     "verdict": "not_met",
+     "why": "stage IVB outside IIA/IIB/IIIA"
     },
     {
      "condition": "driver",
      "requirement": "alk positive",
      "verdict": "not_met",
      "why": "ALK negative"
-    },
-    {
-     "condition": "resectability",
-     "requirement": "not unresectable",
-     "verdict": "not_met",
-     "why": "unresectable"
     }
    ],
    "unknown_conditions": [],
    "failed_conditions": [
-    "driver: ALK negative (requires alk positive)",
-    "resectability: unresectable (requires not unresectable)"
+    "stage: stage IVB outside IIA/IIB/IIIA (requires IIA/IIB/IIIA)",
+    "driver: ALK negative (requires alk positive)"
    ],
-   "edition_migration": true,
+   "edition_migration": false,
    "note": "ALINA: resected IB(≥4cm, AJCC7)–IIIA = 8th/9th IIA–IIIA, ALK+"
   },
   {
@@ -127,28 +195,29 @@
     {
      "condition": "stage",
      "requirement": "IIA/IIB/IIIA",
-     "verdict": "met",
-     "why": "9th-edition IIIB maps to IIIA under the trial's 8th-edition enrollment (edition migration)"
+     "verdict": "not_met",
+     "why": "stage IVB outside IIA/IIB/IIIA"
     },
     {
      "condition": "no_actionable_driver",
      "requirement": "no first-line actionable driver",
-     "verdict": "not_met",
-     "why": "actionable driver on record: EGFR"
+     "verdict": "met",
+     "why": "no actionable driver on record"
     },
     {
      "condition": "resectability",
      "requirement": "RESECTABLE",
-     "verdict": "not_met",
-     "why": "unresectable"
+     "verdict": "unknown",
+     "why": "resectability not on record"
     }
    ],
-   "unknown_conditions": [],
-   "failed_conditions": [
-    "no_actionable_driver: actionable driver on record: EGFR (requires no first-line actionable driver)",
-    "resectability: unresectable (requires RESECTABLE)"
+   "unknown_conditions": [
+    "resectability: resectability not on record"
    ],
-   "edition_migration": true,
+   "failed_conditions": [
+    "stage: stage IVB outside IIA/IIB/IIIA (requires IIA/IIB/IIIA)"
+   ],
+   "edition_migration": false,
    "note": "CheckMate 816: resectable, EGFR/ALK excluded"
   },
   {
@@ -159,26 +228,27 @@
     {
      "condition": "stage",
      "requirement": "IIA/IIB/IIIA/IIIB",
-     "verdict": "met",
-     "why": "stage IIIB"
+     "verdict": "not_met",
+     "why": "stage IVB outside IIA/IIB/IIIA/IIIB"
     },
     {
      "condition": "no_actionable_driver",
      "requirement": "no first-line actionable driver",
-     "verdict": "not_met",
-     "why": "actionable driver on record: EGFR"
+     "verdict": "met",
+     "why": "no actionable driver on record"
     },
     {
      "condition": "resectability",
      "requirement": "RESECTABLE",
-     "verdict": "not_met",
-     "why": "unresectable"
+     "verdict": "unknown",
+     "why": "resectability not on record"
     }
    ],
-   "unknown_conditions": [],
+   "unknown_conditions": [
+    "resectability: resectability not on record"
+   ],
    "failed_conditions": [
-    "no_actionable_driver: actionable driver on record: EGFR (requires no first-line actionable driver)",
-    "resectability: unresectable (requires RESECTABLE)"
+    "stage: stage IVB outside IIA/IIB/IIIA/IIIB (requires IIA/IIB/IIIA/IIIB)"
    ],
    "edition_migration": false,
    "note": "KEYNOTE-671: resectable II–IIIB(N2)"
@@ -191,26 +261,27 @@
     {
      "condition": "stage",
      "requirement": "IIA/IIB/IIIA/IIIB",
-     "verdict": "met",
-     "why": "stage IIIB"
+     "verdict": "not_met",
+     "why": "stage IVB outside IIA/IIB/IIIA/IIIB"
     },
     {
      "condition": "no_actionable_driver",
      "requirement": "no first-line actionable driver",
-     "verdict": "not_met",
-     "why": "actionable driver on record: EGFR"
+     "verdict": "met",
+     "why": "no actionable driver on record"
     },
     {
      "condition": "resectability",
      "requirement": "RESECTABLE",
-     "verdict": "not_met",
-     "why": "unresectable"
+     "verdict": "unknown",
+     "why": "resectability not on record"
     }
    ],
-   "unknown_conditions": [],
+   "unknown_conditions": [
+    "resectability: resectability not on record"
+   ],
    "failed_conditions": [
-    "no_actionable_driver: actionable driver on record: EGFR (requires no first-line actionable driver)",
-    "resectability: unresectable (requires RESECTABLE)"
+    "stage: stage IVB outside IIA/IIB/IIIA/IIIB (requires IIA/IIB/IIIA/IIIB)"
    ],
    "edition_migration": false,
    "note": "AEGEAN"
@@ -223,26 +294,27 @@
     {
      "condition": "stage",
      "requirement": "IIA/IIB/IIIA/IIIB",
-     "verdict": "met",
-     "why": "stage IIIB"
+     "verdict": "not_met",
+     "why": "stage IVB outside IIA/IIB/IIIA/IIIB"
     },
     {
      "condition": "no_actionable_driver",
      "requirement": "no first-line actionable driver",
-     "verdict": "not_met",
-     "why": "actionable driver on record: EGFR"
+     "verdict": "met",
+     "why": "no actionable driver on record"
     },
     {
      "condition": "resectability",
      "requirement": "RESECTABLE",
-     "verdict": "not_met",
-     "why": "unresectable"
+     "verdict": "unknown",
+     "why": "resectability not on record"
     }
    ],
-   "unknown_conditions": [],
+   "unknown_conditions": [
+    "resectability: resectability not on record"
+   ],
    "failed_conditions": [
-    "no_actionable_driver: actionable driver on record: EGFR (requires no first-line actionable driver)",
-    "resectability: unresectable (requires RESECTABLE)"
+    "stage: stage IVB outside IIA/IIB/IIIA/IIIB (requires IIA/IIB/IIIA/IIIB)"
    ],
    "edition_migration": false,
    "note": "CheckMate 77T"
@@ -255,19 +327,13 @@
     {
      "condition": "stage",
      "requirement": "IB/IIA/IIB/IIIA/IIIB",
-     "verdict": "met",
-     "why": "stage IIIB"
-    },
-    {
-     "condition": "resectability",
-     "requirement": "not unresectable",
      "verdict": "not_met",
-     "why": "unresectable"
+     "why": "stage IVB outside IB/IIA/IIB/IIIA/IIIB"
     }
    ],
    "unknown_conditions": [],
    "failed_conditions": [
-    "resectability: unresectable (requires not unresectable)"
+    "stage: stage IVB outside IB/IIA/IIB/IIIA/IIIB (requires IB/IIA/IIB/IIIA/IIIB)"
    ],
    "edition_migration": false,
    "note": "LACE: resected node-positive / high-risk"
@@ -280,36 +346,27 @@
     {
      "condition": "stage",
      "requirement": "IIA/IIB/IIIA",
-     "verdict": "met",
-     "why": "9th-edition IIIB maps to IIIA under the trial's 8th-edition enrollment (edition migration)"
+     "verdict": "not_met",
+     "why": "stage IVB outside IIA/IIB/IIIA"
     },
     {
      "condition": "no_actionable_driver",
      "requirement": "no first-line actionable driver",
-     "verdict": "not_met",
-     "why": "actionable driver on record: EGFR"
+     "verdict": "met",
+     "why": "no actionable driver on record"
     },
     {
      "condition": "pd_l1_tc",
      "requirement": "TC ≥ 1%",
-     "verdict": "unknown",
-     "why": "PD-L1 TC not on record"
-    },
-    {
-     "condition": "resectability",
-     "requirement": "not unresectable",
-     "verdict": "not_met",
-     "why": "unresectable"
+     "verdict": "met",
+     "why": "TC 80%"
     }
    ],
-   "unknown_conditions": [
-    "pd_l1_tc: PD-L1 TC not on record"
-   ],
+   "unknown_conditions": [],
    "failed_conditions": [
-    "no_actionable_driver: actionable driver on record: EGFR (requires no first-line actionable driver)",
-    "resectability: unresectable (requires not unresectable)"
+    "stage: stage IVB outside IIA/IIB/IIIA (requires IIA/IIB/IIIA)"
    ],
-   "edition_migration": true,
+   "edition_migration": false,
    "note": "IMpower010: adjuvant atezolizumab after chemo, TC≥1%"
   },
   {
@@ -320,44 +377,39 @@
     {
      "condition": "stage",
      "requirement": "IIA/IIB/IIIA",
-     "verdict": "met",
-     "why": "9th-edition IIIB maps to IIIA under the trial's 8th-edition enrollment (edition migration)"
+     "verdict": "not_met",
+     "why": "stage IVB outside IIA/IIB/IIIA"
     },
     {
      "condition": "no_actionable_driver",
      "requirement": "no first-line actionable driver",
-     "verdict": "not_met",
-     "why": "actionable driver on record: EGFR"
-    },
-    {
-     "condition": "resectability",
-     "requirement": "not unresectable",
-     "verdict": "not_met",
-     "why": "unresectable"
+     "verdict": "met",
+     "why": "no actionable driver on record"
     }
    ],
    "unknown_conditions": [],
    "failed_conditions": [
-    "no_actionable_driver: actionable driver on record: EGFR (requires no first-line actionable driver)",
-    "resectability: unresectable (requires not unresectable)"
+    "stage: stage IVB outside IIA/IIB/IIIA (requires IIA/IIB/IIIA)"
    ],
-   "edition_migration": true,
+   "edition_migration": false,
    "note": "KEYNOTE-091 (PEARLS)"
   },
   {
    "regimen_id": "ccrt_60gy",
    "declared": true,
-   "verdict": "eligible",
+   "verdict": "ineligible",
    "conditions": [
     {
      "condition": "stage",
      "requirement": "IIA/IIB/IIIA/IIIB/IIIC",
-     "verdict": "met",
-     "why": "stage IIIB"
+     "verdict": "not_met",
+     "why": "stage IVB outside IIA/IIB/IIIA/IIIB/IIIC"
     }
    ],
    "unknown_conditions": [],
-   "failed_conditions": [],
+   "failed_conditions": [
+    "stage: stage IVB outside IIA/IIB/IIIA/IIIB/IIIC (requires IIA/IIB/IIIA/IIIB/IIIC)"
+   ],
    "edition_migration": false,
    "note": "Definitive concurrent chemoradiation, locally advanced"
   },
@@ -369,19 +421,19 @@
     {
      "condition": "stage",
      "requirement": "IIIA/IIIB/IIIC",
-     "verdict": "met",
-     "why": "stage IIIB"
+     "verdict": "not_met",
+     "why": "stage IVB outside IIIA/IIIB/IIIC"
     },
     {
      "condition": "no_actionable_driver",
      "requirement": "no first-line actionable driver",
-     "verdict": "not_met",
-     "why": "actionable driver on record: EGFR"
+     "verdict": "met",
+     "why": "no actionable driver on record"
     }
    ],
    "unknown_conditions": [],
    "failed_conditions": [
-    "no_actionable_driver: actionable driver on record: EGFR (requires no first-line actionable driver)"
+    "stage: stage IVB outside IIIA/IIIB/IIIC (requires IIIA/IIIB/IIIC)"
    ],
    "edition_migration": false,
    "note": "PACIFIC: after cCRT without progression; driver-positive disease has no established benefit"
@@ -389,13 +441,13 @@
   {
    "regimen_id": "osimertinib_consolidation",
    "declared": true,
-   "verdict": "eligible",
+   "verdict": "ineligible",
    "conditions": [
     {
      "condition": "stage",
      "requirement": "IIIA/IIIB/IIIC",
-     "verdict": "met",
-     "why": "stage IIIB"
+     "verdict": "not_met",
+     "why": "stage IVB outside IIIA/IIIB/IIIC"
     },
     {
      "condition": "histology",
@@ -406,18 +458,23 @@
     {
      "condition": "driver",
      "requirement": "egfr_classical",
-     "verdict": "met",
-     "why": "l858r"
+     "verdict": "not_met",
+     "why": "EGFR negative"
     },
     {
      "condition": "resectability",
      "requirement": "UNRESECTABLE",
-     "verdict": "met",
-     "why": "unresectable"
+     "verdict": "unknown",
+     "why": "resectability not on record"
     }
    ],
-   "unknown_conditions": [],
-   "failed_conditions": [],
+   "unknown_conditions": [
+    "resectability: resectability not on record"
+   ],
+   "failed_conditions": [
+    "stage: stage IVB outside IIIA/IIIB/IIIC (requires IIIA/IIIB/IIIC)",
+    "driver: EGFR negative (requires egfr_classical)"
+   ],
    "edition_migration": false,
    "note": "LAURA: unresectable III, EGFR ex19del/L858R, post-cCRT"
   },
@@ -429,19 +486,19 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
      "requirement": "egfr_classical",
-     "verdict": "met",
-     "why": "l858r"
+     "verdict": "not_met",
+     "why": "EGFR negative"
     }
    ],
    "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
+    "driver: EGFR negative (requires egfr_classical)"
    ],
    "edition_migration": false,
    "note": "FLAURA"
@@ -454,8 +511,8 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "histology",
@@ -466,13 +523,13 @@
     {
      "condition": "driver",
      "requirement": "egfr_classical",
-     "verdict": "met",
-     "why": "l858r"
+     "verdict": "not_met",
+     "why": "EGFR negative"
     }
    ],
    "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
+    "driver: EGFR negative (requires egfr_classical)"
    ],
    "edition_migration": false,
    "note": "FLAURA2"
@@ -485,19 +542,19 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
      "requirement": "egfr_classical",
-     "verdict": "met",
-     "why": "l858r"
+     "verdict": "not_met",
+     "why": "EGFR negative"
     }
    ],
    "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
+    "driver: EGFR negative (requires egfr_classical)"
    ],
    "edition_migration": false,
    "note": "MARIPOSA"
@@ -510,8 +567,8 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
@@ -522,7 +579,6 @@
    ],
    "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)",
     "driver: ALK negative (requires alk positive)"
    ],
    "edition_migration": false,
@@ -531,47 +587,42 @@
   {
    "regimen_id": "pembro_monotherapy",
    "declared": true,
-   "verdict": "ineligible",
+   "verdict": "eligible",
    "conditions": [
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "no_actionable_driver",
      "requirement": "no first-line actionable driver",
-     "verdict": "not_met",
-     "why": "actionable driver on record: EGFR"
+     "verdict": "met",
+     "why": "no actionable driver on record"
     },
     {
      "condition": "pd_l1_tps",
      "requirement": "TPS ≥ 50%",
-     "verdict": "unknown",
-     "why": "PD-L1 TPS not on record"
+     "verdict": "met",
+     "why": "TPS 80%"
     }
    ],
-   "unknown_conditions": [
-    "pd_l1_tps: PD-L1 TPS not on record"
-   ],
-   "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)",
-    "no_actionable_driver: actionable driver on record: EGFR (requires no first-line actionable driver)"
-   ],
+   "unknown_conditions": [],
+   "failed_conditions": [],
    "edition_migration": false,
    "note": "KEYNOTE-024: TPS≥50%, driver-negative"
   },
   {
    "regimen_id": "pembro_pemetrexed_platinum",
    "declared": true,
-   "verdict": "ineligible",
+   "verdict": "eligible",
    "conditions": [
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "histology",
@@ -582,15 +633,12 @@
     {
      "condition": "no_actionable_driver",
      "requirement": "no first-line actionable driver",
-     "verdict": "not_met",
-     "why": "actionable driver on record: EGFR"
+     "verdict": "met",
+     "why": "no actionable driver on record"
     }
    ],
    "unknown_conditions": [],
-   "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)",
-    "no_actionable_driver: actionable driver on record: EGFR (requires no first-line actionable driver)"
-   ],
+   "failed_conditions": [],
    "edition_migration": false,
    "note": "KEYNOTE-189"
   },
@@ -602,8 +650,8 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "histology",
@@ -614,15 +662,13 @@
     {
      "condition": "no_actionable_driver",
      "requirement": "no first-line actionable driver",
-     "verdict": "not_met",
-     "why": "actionable driver on record: EGFR"
+     "verdict": "met",
+     "why": "no actionable driver on record"
     }
    ],
    "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)",
-    "histology: case is adenocarcinoma (requires squamous)",
-    "no_actionable_driver: actionable driver on record: EGFR (requires no first-line actionable driver)"
+    "histology: case is adenocarcinoma (requires squamous)"
    ],
    "edition_migration": false,
    "note": "KEYNOTE-407"
@@ -630,26 +676,23 @@
   {
    "regimen_id": "nivo_ipi_chemo",
    "declared": true,
-   "verdict": "ineligible",
+   "verdict": "eligible",
    "conditions": [
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "no_actionable_driver",
      "requirement": "no first-line actionable driver",
-     "verdict": "not_met",
-     "why": "actionable driver on record: EGFR"
+     "verdict": "met",
+     "why": "no actionable driver on record"
     }
    ],
    "unknown_conditions": [],
-   "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)",
-    "no_actionable_driver: actionable driver on record: EGFR (requires no first-line actionable driver)"
-   ],
+   "failed_conditions": [],
    "edition_migration": false,
    "note": "CheckMate 9LA"
   },
@@ -662,7 +705,7 @@
      "condition": "stage",
      "requirement": "IA1/IA2/IA3/IB",
      "verdict": "not_met",
-     "why": "stage IIIB outside IA1/IA2/IA3/IB"
+     "why": "stage IVB outside IA1/IA2/IA3/IB"
     },
     {
      "condition": "operability",
@@ -675,7 +718,7 @@
     "operability: operability not assessed"
    ],
    "failed_conditions": [
-    "stage: stage IIIB outside IA1/IA2/IA3/IB (requires IA1/IA2/IA3/IB)"
+    "stage: stage IVB outside IA1/IA2/IA3/IB (requires IA1/IA2/IA3/IB)"
    ],
    "edition_migration": false,
    "note": "Stage I, medically inoperable / declines surgery"
@@ -689,7 +732,7 @@
      "condition": "stage",
      "requirement": "IVA",
      "verdict": "not_met",
-     "why": "stage IIIB outside IVA"
+     "why": "stage IVB outside IVA"
     },
     {
      "condition": "disease_extent",
@@ -702,7 +745,7 @@
     "disease_extent: disease extent not on record"
    ],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA (requires IVA)"
+    "stage: stage IVB outside IVA (requires IVA)"
    ],
    "edition_migration": false,
    "note": "Gomez LCT: ≤3 sites controlled on systemic therapy"
@@ -715,8 +758,8 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "histology",
@@ -728,13 +771,12 @@
      "condition": "driver",
      "requirement": "egfr_exon20ins",
      "verdict": "not_met",
-     "why": "l858r"
+     "why": "EGFR negative"
     }
    ],
    "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)",
-    "driver: l858r (requires egfr_exon20ins)"
+    "driver: EGFR negative (requires egfr_exon20ins)"
    ],
    "edition_migration": false,
    "note": "PAPILLON: EGFR exon 20 insertion"
@@ -747,20 +789,19 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
      "requirement": "egfr_uncommon",
      "verdict": "not_met",
-     "why": "l858r"
+     "why": "EGFR negative"
     }
    ],
    "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)",
-    "driver: l858r (requires egfr_uncommon)"
+    "driver: EGFR negative (requires egfr_uncommon)"
    ],
    "edition_migration": false,
    "note": "LUX-Lung pooled: G719X/L861Q/S768I"
@@ -773,21 +814,19 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
      "requirement": "ros1 positive",
-     "verdict": "unknown",
-     "why": "ROS1 not tested / not on record"
+     "verdict": "not_met",
+     "why": "ROS1 negative"
     }
    ],
-   "unknown_conditions": [
-    "driver: ROS1 not tested / not on record"
-   ],
+   "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
+    "driver: ROS1 negative (requires ros1 positive)"
    ],
    "edition_migration": false,
    "note": "TRIDENT-1: ROS1 fusion"
@@ -800,21 +839,19 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
      "requirement": "ret positive",
-     "verdict": "unknown",
-     "why": "RET not tested / not on record"
+     "verdict": "not_met",
+     "why": "RET negative"
     }
    ],
-   "unknown_conditions": [
-    "driver: RET not tested / not on record"
-   ],
+   "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
+    "driver: RET negative (requires ret positive)"
    ],
    "edition_migration": false,
    "note": "LIBRETTO-431: RET fusion"
@@ -827,21 +864,19 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
      "requirement": "met_ex14",
-     "verdict": "unknown",
-     "why": "MET not tested / not on record"
+     "verdict": "not_met",
+     "why": "MET negative"
     }
    ],
-   "unknown_conditions": [
-    "driver: MET not tested / not on record"
-   ],
+   "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
+    "driver: MET negative (requires met_ex14)"
    ],
    "edition_migration": false,
    "note": "GEOMETRY: MET exon 14 skipping"
@@ -854,21 +889,19 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
      "requirement": "braf_v600e",
-     "verdict": "unknown",
-     "why": "BRAF not tested / not on record"
+     "verdict": "not_met",
+     "why": "BRAF negative"
     }
    ],
-   "unknown_conditions": [
-    "driver: BRAF not tested / not on record"
-   ],
+   "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
+    "driver: BRAF negative (requires braf_v600e)"
    ],
    "edition_migration": false,
    "note": "BRF113928: BRAF V600E"
@@ -876,13 +909,13 @@
   {
    "regimen_id": "larotrectinib_first_line",
    "declared": true,
-   "verdict": "ineligible",
+   "verdict": "unknown",
    "conditions": [
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
@@ -894,22 +927,20 @@
    "unknown_conditions": [
     "driver: NTRK not tested / not on record"
    ],
-   "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
-   ],
+   "failed_conditions": [],
    "edition_migration": false,
    "note": "NAVIGATE: NTRK fusion"
   },
   {
    "regimen_id": "tdxd_subsequent_line",
    "declared": true,
-   "verdict": "ineligible",
+   "verdict": "unknown",
    "conditions": [
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
@@ -920,17 +951,14 @@
     {
      "condition": "prior_therapy",
      "requirement": "previously treated",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "met",
+     "why": "pembrolizumab/pemetrexed/carboplatin (progression); kras g12"
     }
    ],
    "unknown_conditions": [
-    "driver: ERBB2 not tested / not on record",
-    "prior_therapy: treatment history not on record"
+    "driver: ERBB2 not tested / not on record"
    ],
-   "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
-   ],
+   "failed_conditions": [],
    "edition_migration": false,
    "note": "DESTINY-Lung02: previously treated HER2-mutant"
   },
@@ -942,8 +970,8 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "histology",
@@ -954,28 +982,26 @@
     {
      "condition": "driver",
      "requirement": "egfr_classical",
-     "verdict": "met",
-     "why": "l858r"
+     "verdict": "not_met",
+     "why": "EGFR negative"
     },
     {
      "condition": "prior_therapy",
      "requirement": "previously treated",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "met",
+     "why": "pembrolizumab/pemetrexed/carboplatin (progression); kras g12"
     },
     {
      "condition": "prior_agents",
      "requirement": "progression on osimertinib",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "not_met",
+     "why": "no documented progression on osimertinib — this regimen's evidence is specifically post-osimertinib"
     }
    ],
-   "unknown_conditions": [
-    "prior_therapy: treatment history not on record",
-    "prior_agents: treatment history not on record"
-   ],
+   "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
+    "driver: EGFR negative (requires egfr_classical)",
+    "prior_agents: no documented progression on osimertinib — this regimen's evidence is specifically post-osimertinib (requires progression on osimertinib)"
    ],
    "edition_migration": false,
    "note": "MARIPOSA-2: ex19del/L858R after osimertinib progression"
@@ -988,8 +1014,8 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "histology",
@@ -1000,22 +1026,19 @@
     {
      "condition": "prior_therapy",
      "requirement": "previously treated",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "met",
+     "why": "pembrolizumab/pemetrexed/carboplatin (progression); kras g12"
     },
     {
      "condition": "prior_agents",
      "requirement": "progression on a targeted TKI",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "not_met",
+     "why": "no documented progression on a targeted TKI — this regimen's evidence is specifically post-a targeted TKI"
     }
    ],
-   "unknown_conditions": [
-    "prior_therapy: treatment history not on record",
-    "prior_agents: treatment history not on record"
-   ],
+   "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
+    "prior_agents: no documented progression on a targeted TKI — this regimen's evidence is specifically post-a targeted TKI (requires progression on a targeted TKI)"
    ],
    "edition_migration": false,
    "note": "Post-TKI chemo backbone; KEYNOTE-789 answered the IO question negatively"
@@ -1028,8 +1051,8 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
@@ -1040,23 +1063,20 @@
     {
      "condition": "prior_therapy",
      "requirement": "previously treated",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "met",
+     "why": "pembrolizumab/pemetrexed/carboplatin (progression); kras g12"
     },
     {
      "condition": "prior_agents",
      "requirement": "progression on a second-generation ALK TKI",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "not_met",
+     "why": "no documented progression on a second-generation ALK TKI — this regimen's evidence is specifically post-a second-generation ALK TKI"
     }
    ],
-   "unknown_conditions": [
-    "prior_therapy: treatment history not on record",
-    "prior_agents: treatment history not on record"
-   ],
+   "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)",
-    "driver: ALK negative (requires alk positive)"
+    "driver: ALK negative (requires alk positive)",
+    "prior_agents: no documented progression on a second-generation ALK TKI — this regimen's evidence is specifically post-a second-generation ALK TKI (requires progression on a second-generation ALK TKI)"
    ],
    "edition_migration": false,
    "note": "Post second-generation ALK TKI (phase 2 EXP cohorts) — distinct from CROWN first line"
@@ -1064,54 +1084,46 @@
   {
    "regimen_id": "docetaxel_ramucirumab_second_line",
    "declared": true,
-   "verdict": "ineligible",
+   "verdict": "eligible",
    "conditions": [
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "prior_therapy",
      "requirement": "previously treated",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "met",
+     "why": "pembrolizumab/pemetrexed/carboplatin (progression); kras g12"
     }
    ],
-   "unknown_conditions": [
-    "prior_therapy: treatment history not on record"
-   ],
-   "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
-   ],
+   "unknown_conditions": [],
+   "failed_conditions": [],
    "edition_migration": false,
    "note": "REVEL: second line after platinum-based therapy, all histologies"
   },
   {
    "regimen_id": "docetaxel_second_line",
    "declared": true,
-   "verdict": "ineligible",
+   "verdict": "eligible",
    "conditions": [
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "prior_therapy",
      "requirement": "previously treated",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "met",
+     "why": "pembrolizumab/pemetrexed/carboplatin (progression); kras g12"
     }
    ],
-   "unknown_conditions": [
-    "prior_therapy: treatment history not on record"
-   ],
-   "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
-   ],
+   "unknown_conditions": [],
+   "failed_conditions": [],
    "edition_migration": false,
    "note": "Ramucirumab-free second-line alternative"
   },
@@ -1123,35 +1135,32 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
      "requirement": "egfr_t790m",
      "verdict": "not_met",
-     "why": "l858r"
+     "why": "EGFR negative"
     },
     {
      "condition": "prior_therapy",
      "requirement": "previously treated",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "met",
+     "why": "pembrolizumab/pemetrexed/carboplatin (progression); kras g12"
     },
     {
      "condition": "prior_agents",
      "requirement": "progression on a first/second-generation EGFR TKI",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "not_met",
+     "why": "no documented progression on a first/second-generation EGFR TKI — this regimen's evidence is specifically post-a first/second-generation EGFR TKI"
     }
    ],
-   "unknown_conditions": [
-    "prior_therapy: treatment history not on record",
-    "prior_agents: treatment history not on record"
-   ],
+   "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)",
-    "driver: l858r (requires egfr_t790m)"
+    "driver: EGFR negative (requires egfr_t790m)",
+    "prior_agents: no documented progression on a first/second-generation EGFR TKI — this regimen's evidence is specifically post-a first/second-generation EGFR TKI (requires progression on a first/second-generation EGFR TKI)"
    ],
    "edition_migration": false,
    "note": "AURA3: acquired T790M after first/second-generation TKI progression"
@@ -1164,27 +1173,25 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
      "requirement": "egfr positive",
-     "verdict": "met",
-     "why": "EGFR positive"
+     "verdict": "not_met",
+     "why": "EGFR negative"
     },
     {
      "condition": "prior_therapy",
      "requirement": "previously treated",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "met",
+     "why": "pembrolizumab/pemetrexed/carboplatin (progression); kras g12"
     }
    ],
-   "unknown_conditions": [
-    "prior_therapy: treatment history not on record"
-   ],
+   "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
+    "driver: EGFR negative (requires egfr positive)"
    ],
    "edition_migration": false,
    "note": "Small-cell transformation (re-biopsy finding) — retrospective evidence, tumor-board framing; the transformation itself is gated in sequencing, not expressible as a predicate field"
@@ -1197,34 +1204,32 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
      "requirement": "egfr positive",
-     "verdict": "met",
-     "why": "EGFR positive"
+     "verdict": "not_met",
+     "why": "EGFR negative"
     },
     {
      "condition": "prior_therapy",
      "requirement": "previously treated",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "met",
+     "why": "pembrolizumab/pemetrexed/carboplatin (progression); kras g12"
     },
     {
      "condition": "prior_agents",
      "requirement": "progression on osimertinib",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "not_met",
+     "why": "no documented progression on osimertinib — this regimen's evidence is specifically post-osimertinib"
     }
    ],
-   "unknown_conditions": [
-    "prior_therapy: treatment history not on record",
-    "prior_agents: treatment history not on record"
-   ],
+   "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
+    "driver: EGFR negative (requires egfr positive)",
+    "prior_agents: no documented progression on osimertinib — this regimen's evidence is specifically post-osimertinib (requires progression on osimertinib)"
    ],
    "edition_migration": false,
    "note": "INSIGHT 2: MET-amplified osimertinib resistance (phase 2, not approved) — the MET-amp finding is gated in sequencing"
@@ -1237,41 +1242,38 @@
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
      "requirement": "egfr positive",
-     "verdict": "met",
-     "why": "EGFR positive"
+     "verdict": "not_met",
+     "why": "EGFR negative"
     },
     {
      "condition": "prior_therapy",
      "requirement": "previously treated",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "met",
+     "why": "pembrolizumab/pemetrexed/carboplatin (progression); kras g12"
     },
     {
      "condition": "prior_agents",
      "requirement": "progression on EGFR-directed therapy",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "not_met",
+     "why": "no documented progression on EGFR-directed therapy — this regimen's evidence is specifically post-EGFR-directed therapy"
     },
     {
      "condition": "prior_platinum",
      "requirement": "prior platinum-based chemotherapy",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "met",
+     "why": "platinum on the treatment record"
     }
    ],
-   "unknown_conditions": [
-    "prior_therapy: treatment history not on record",
-    "prior_agents: treatment history not on record",
-    "prior_platinum: treatment history not on record"
-   ],
+   "unknown_conditions": [],
    "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
+    "driver: EGFR negative (requires egfr positive)",
+    "prior_agents: no documented progression on EGFR-directed therapy — this regimen's evidence is specifically post-EGFR-directed therapy (requires progression on EGFR-directed therapy)"
    ],
    "edition_migration": false,
    "note": "TROPION-Lung05: EGFR-mutant after EGFR-directed therapy AND platinum — third line, never earlier"
@@ -1279,106 +1281,119 @@
   {
    "regimen_id": "sotorasib_subsequent_line",
    "declared": true,
-   "verdict": "ineligible",
+   "verdict": "eligible",
    "conditions": [
     {
      "condition": "stage",
      "requirement": "IVA/IVB",
-     "verdict": "not_met",
-     "why": "stage IIIB outside IVA/IVB"
+     "verdict": "met",
+     "why": "stage IVB"
     },
     {
      "condition": "driver",
      "requirement": "kras_g12c",
-     "verdict": "unknown",
-     "why": "KRAS not tested / not on record"
+     "verdict": "met",
+     "why": "kras g12c positive"
     },
     {
      "condition": "prior_therapy",
      "requirement": "previously treated",
-     "verdict": "unknown",
-     "why": "treatment history not on record"
+     "verdict": "met",
+     "why": "pembrolizumab/pemetrexed/carboplatin (progression); kras g12"
     }
    ],
-   "unknown_conditions": [
-    "driver: KRAS not tested / not on record",
-    "prior_therapy: treatment history not on record"
-   ],
-   "failed_conditions": [
-    "stage: stage IIIB outside IVA/IVB (requires IVA/IVB)"
-   ],
+   "unknown_conditions": [],
+   "failed_conditions": [],
    "edition_migration": false,
    "note": "CodeBreaK 100: KRAS G12C, previously treated — never first line"
   }
  ],
  "draft": {
-  "reply": "Stage IIIA unresectable NSCLC: definitive concurrent chemoradiation, then durvalumab consolidation for 12 months (PACIFIC).",
-  "assessment": "Unresectable stage III; curative intent.",
-  "stage_group": "IIIA",
-  "tnm": "cT2bN2bM0",
-  "intent": "curative",
+  "stage_group": "IVB",
+  "tnm": "cT4N3M1c",
+  "stage_rationale": "T4 (mediastinal pleura invaded), N3 (multistation mediastinal nodes), M1c: adrenal, bone, brain and later liver metastases — several organ systems, i.e. M1c2 by sites; stage IVB either way.",
+  "intent": "palliative",
+  "intent_rationale": "Polymetastatic stage IVB after progression on two lines; ECOG 1.",
+  "biomarker_category": [
+   "NSCL-26"
+  ],
+  "biomarker_rationale": "KRAS G12C positive; EGFR, ALK, ROS1, RET, MET exon 14 and BRAF V600E negative.",
+  "reply": "Stage IVB KRAS G12C adenocarcinoma (NSCL-26), third line after chemo-immunotherapy and a KRAS G12C inhibitor. Recommend docetaxel 75 mg/m2 plus ramucirumab 10 mg/kg every 3 weeks (REVEL). MET amplification at progression: consider a KRAS G12C inhibitor with a MET inhibitor (KRYSTAL-MET-7). Drain the malignant effusion; start a bone-modifying agent.",
+  "assessment": "Third-line, polymetastatic, ECOG 1.",
   "options": [
    {
-    "name": "Definitive concurrent chemoradiation",
+    "name": "Docetaxel + ramucirumab",
     "regimen_ids": [
-     "ccrt_60gy"
+     "docetaxel_ramucirumab_second_line"
     ],
     "evidence": [
-     "RTOG0617"
+     "REVEL"
+    ],
+    "preferred": true
+   },
+   {
+    "name": "Docetaxel monotherapy",
+    "regimen_ids": [
+     "docetaxel_second_line"
     ]
    },
    {
-    "name": "Durvalumab consolidation",
-    "regimen_ids": [
-     "durva_consolidation"
-    ],
+    "name": "KRAS G12C inhibitor + MET inhibitor",
     "evidence": [
-     "PACIFIC"
+     "KRYSTAL-MET-7"
     ]
    }
+  ],
+  "workup": [
+   "Blood count, liver function and bleeding history before ramucirumab"
   ],
   "confidence": "moderate"
  },
  "revised": {
-  "reply": "Stage IIIB (AJCC/UICC 9th edition; IIIA in the 8th) unresectable EGFR L858R adenocarcinoma: definitive concurrent chemoradiation, then osimertinib consolidation until progression (LAURA). Durvalumab consolidation is not indicated with an actionable EGFR driver.",
-  "assessment": "Unresectable stage IIIB, EGFR L858R; curative intent.",
-  "stage_group": "IIIB",
-  "tnm": "cT2bN2bM0",
-  "intent": "curative",
+  "stage_group": "IVB",
+  "tnm": "cT4N3M1c",
+  "stage_rationale": "T4 (mediastinal pleura invaded), N3 (multistation mediastinal nodes), M1c: adrenal, bone, brain and later liver metastases — several organ systems, i.e. M1c2 by sites; stage IVB either way.",
+  "intent": "palliative",
+  "intent_rationale": "Polymetastatic stage IVB after progression on two lines; ECOG 1.",
+  "biomarker_category": [
+   "NSCL-26"
+  ],
+  "biomarker_rationale": "KRAS G12C positive; EGFR, ALK, ROS1, RET, MET exon 14 and BRAF V600E negative.",
+  "reply": "Stage IVB KRAS G12C adenocarcinoma (NSCL-26), third line after chemo-immunotherapy and a KRAS G12C inhibitor. Recommend docetaxel plus ramucirumab (REVEL); docetaxel alone if ramucirumab is contraindicated. Doses follow the regimen library and the local protocol after blood count and liver function. MET amplification at progression is a recognised resistance mechanism; MET-directed combinations are investigational — no registered trial was found, so refer for a trial search rather than cite one. Drain the malignant effusion; bone-modifying agent after a dental review.",
+  "assessment": "Third-line, polymetastatic, ECOG 1.",
   "options": [
    {
-    "name": "Definitive concurrent chemoradiation",
+    "name": "Docetaxel + ramucirumab",
     "regimen_ids": [
-     "ccrt_60gy"
+     "docetaxel_ramucirumab_second_line"
     ],
     "evidence": [
-     "RTOG0617"
+     "REVEL"
+    ],
+    "preferred": true
+   },
+   {
+    "name": "Docetaxel monotherapy",
+    "regimen_ids": [
+     "docetaxel_second_line"
     ]
    },
    {
-    "name": "Osimertinib consolidation",
-    "regimen_ids": [
-     "osimertinib_consolidation"
-    ],
-    "evidence": [
-     "LAURA"
-    ]
+    "name": "Clinical trial (MET-directed combination)"
    }
   ],
-  "confidence": "high",
+  "workup": [
+   "Blood count, liver function and bleeding history before ramucirumab"
+  ],
+  "confidence": "moderate",
   "rule_responses": [
    {
-    "rule_id": "EGFR_III_CONSOLIDATION",
+    "rule_id": "UNVERIFIED_CITATION",
     "decision": "accepted",
     "reason": "revised"
    },
    {
-    "rule_id": "INDICATION_PREDICATE",
-    "decision": "accepted",
-    "reason": "revised"
-   },
-   {
-    "rule_id": "STAGE_DIFFERS_FROM_ENGINE",
+    "rule_id": "DOSE_NOT_FROM_LIBRARY",
     "decision": "accepted",
     "reason": "revised"
    }
@@ -1386,32 +1401,26 @@
  },
  "reviews": [
   {
-   "t": 3.009023726000123,
+   "t": 3.03278201299986,
    "round": 0,
-   "unanswered": 3,
+   "unanswered": 2,
    "findings": [
     {
-     "rule_id": "EGFR_III_CONSOLIDATION",
-     "severity": "block",
-     "message": "EGFR-mutated unresectable stage III: consolidation should be osimertinib (LAURA, PFS HR 0.16), not durvalumab — the PACIFIC EGFR subgroup showed no clear benefit.",
-     "hook": "rule_review"
-    },
-    {
-     "rule_id": "INDICATION_PREDICATE",
-     "severity": "block",
-     "message": "durva_consolidation fails its declared indication: no_actionable_driver: actionable driver on record: EGFR (requires no first-line actionable driver)",
-     "hook": "rule_review"
-    },
-    {
-     "rule_id": "STAGE_DIFFERS_FROM_ENGINE",
+     "rule_id": "UNVERIFIED_CITATION",
      "severity": "warn",
-     "message": "The model staged this as IIIA; the AJCC/UICC 9th-edition staging engine reads cT2bN2bM0 as IIIB",
-     "hook": "stage_consistency"
+     "message": "These references were neither returned by a tool in this consult nor found in the trial registry or guideline KB: KRYSTAL-MET-7 — verify them with search_trials / citation_verify, or remove them.",
+     "hook": "citation_provenance"
+    },
+    {
+     "rule_id": "DOSE_NOT_FROM_LIBRARY",
+     "severity": "warn",
+     "message": "The answer contains dose figures, but regimen_dosing was not called in this consult to check the library reference dose; verify or remove the specific doses.",
+     "hook": "dose_provenance"
     }
    ]
   },
   {
-   "t": 4.2129478360002395,
+   "t": 4.23892428399995,
    "round": 1,
    "unanswered": 0,
    "findings": []
@@ -1421,175 +1430,212 @@
   {
    "agent": "lead",
    "kind": "model",
-   "start": 0.0011135820000163221,
-   "end": 0.6014409370000067
+   "start": 0.001237172999935865,
+   "end": 0.6015344519998962
   },
   {
    "agent": "lead",
    "kind": "tool",
-   "name": "stage_tnm",
-   "start": 0.6022984890000771,
-   "end": 0.6022984890000771,
-   "ok": true
-  },
-  {
-   "agent": "lead",
-   "kind": "tool",
-   "name": "assess_biomarkers",
-   "start": 0.6028260670000236,
-   "end": 0.6028260670000236,
+   "name": "prognosis",
+   "start": 0.6017800029999307,
+   "end": 0.6017800029999307,
    "ok": true
   },
   {
    "agent": "lead",
    "kind": "tool",
    "name": "update_plan",
-   "start": 0.6031730409999909,
-   "end": 0.6031730409999909,
+   "start": 0.60185687399985,
+   "end": 0.60185687399985,
+   "ok": true
+  },
+  {
+   "agent": "lead",
+   "kind": "tool",
+   "name": "record_case_facts",
+   "start": 0.6019961349998084,
+   "end": 0.6019961349998084,
    "ok": true
   },
   {
    "agent": "lead",
    "kind": "model",
-   "start": 0.6033024440002919,
-   "end": 1.2037389120000626
+   "start": 0.60215425399997,
+   "end": 1.2024784539999018
   },
   {
    "agent": "radiology",
    "kind": "model",
-   "start": 1.2046214340002734,
-   "end": 1.8048726910001278
-  },
-  {
-   "agent": "radiology",
-   "kind": "tool",
-   "name": "stage_tnm",
-   "start": 1.8050974580000911,
-   "end": 1.8050974580000911,
-   "ok": true
+   "start": 1.2032716059998165,
+   "end": 1.8035271189999094
   },
   {
    "agent": "medical_oncology",
    "kind": "model",
-   "start": 1.2053189040002508,
-   "end": 1.8055412740000065
+   "start": 1.2037072959999477,
+   "end": 1.8092492679998031
   },
   {
    "agent": "medical_oncology",
    "kind": "tool",
    "name": "search_regimens",
-   "start": 1.8057912920003218,
-   "end": 1.8057912920003218,
+   "start": 1.8095226059999732,
+   "end": 1.8095226059999732,
+   "ok": true
+  },
+  {
+   "agent": "evidence",
+   "kind": "model",
+   "start": 1.2040971229998831,
+   "end": 1.8198064250000243
+  },
+  {
+   "agent": "evidence",
+   "kind": "tool",
+   "name": "search_trials",
+   "start": 1.8204115779999483,
+   "end": 1.8204115779999483,
    "ok": true
   },
   {
    "agent": "radiology",
-   "kind": "model",
-   "start": 1.8051697119999517,
-   "end": 2.4054129860001012
-  },
-  {
-   "agent": "lead",
    "kind": "tool",
-   "name": "delegate",
-   "start": 1.204610553000315,
-   "end": 2.405610553000315,
+   "name": "guideline_search",
+   "start": 1.803974570999866,
+   "end": 1.829974570999866,
    "ok": true
   },
   {
    "agent": "medical_oncology",
    "kind": "model",
-   "start": 1.8059793689999424,
-   "end": 2.406167106000339
+   "start": 1.809610917999862,
+   "end": 2.40984330099991
   },
   {
    "agent": "lead",
    "kind": "tool",
    "name": "delegate",
-   "start": 1.2053139550003142,
-   "end": 2.4063139550003143,
+   "start": 1.2040030849999712,
+   "end": 2.410003084999971,
+   "ok": true
+  },
+  {
+   "agent": "evidence",
+   "kind": "model",
+   "start": 1.8206149210000149,
+   "end": 2.4208415419998346
+  },
+  {
+   "agent": "lead",
+   "kind": "tool",
+   "name": "delegate",
+   "start": 1.2039939249999478,
+   "end": 2.420993924999948,
+   "ok": true
+  },
+  {
+   "agent": "radiology",
+   "kind": "model",
+   "start": 1.8303674310000133,
+   "end": 2.430576697999868
+  },
+  {
+   "agent": "lead",
+   "kind": "tool",
+   "name": "delegate",
+   "start": 1.2027156109998687,
+   "end": 2.4307156109998687,
    "ok": true
   },
   {
    "agent": "lead",
    "kind": "tool",
    "name": "update_plan",
-   "start": 2.4068618250003055,
-   "end": 2.4068618250003055,
+   "start": 2.4316656389999025,
+   "end": 2.4316656389999025,
    "ok": true
   },
   {
    "agent": "lead",
    "kind": "model",
-   "start": 2.406934888000251,
-   "end": 3.0072636260001673
-  },
-  {
-   "agent": "lead",
-   "kind": "model",
-   "start": 3.009113623000303,
-   "end": 3.6094442520002303
+   "start": 2.43175796599985,
+   "end": 3.032045842999878
   },
   {
    "agent": "lead",
    "kind": "tool",
-   "name": "check_indication",
-   "start": 3.6102726620001704,
-   "end": 3.6102726620001704,
+   "name": "update_plan",
+   "start": 3.0323046659998454,
+   "end": 3.0323046659998454,
+   "ok": true
+  },
+  {
+   "agent": "lead",
+   "kind": "model",
+   "start": 3.032840083999872,
+   "end": 3.633155165999824
+  },
+  {
+   "agent": "lead",
+   "kind": "tool",
+   "name": "regimen_dosing",
+   "start": 3.63391182700002,
+   "end": 3.63391182700002,
    "ok": true
   },
   {
    "agent": "lead",
    "kind": "tool",
-   "name": "search_trials",
-   "start": 3.6106579490001423,
-   "end": 3.6106579490001423,
+   "name": "citation_verify",
+   "start": 3.6343291629998475,
+   "end": 3.6343291629998475,
    "ok": true
   },
   {
    "agent": "lead",
    "kind": "tool",
    "name": "update_plan",
-   "start": 3.6109200529999725,
-   "end": 3.6109200529999725,
+   "start": 3.6345911139999316,
+   "end": 3.6345911139999316,
    "ok": true
   },
   {
    "agent": "lead",
    "kind": "model",
-   "start": 3.610985373999938,
-   "end": 4.211453782000262
+   "start": 3.6346693519999462,
+   "end": 4.238401119999935
   },
   {
    "agent": "lead",
    "kind": "tool",
    "name": "update_plan",
-   "start": 4.21164495100038,
-   "end": 4.21164495100038,
+   "start": 4.238586951999878,
+   "end": 4.238586951999878,
    "ok": true
   }
  ],
- "total_s": 4.213488158000018,
+ "total_s": 4.239621405999969,
  "latency_s": 0.6,
  "specialists": [
-  "radiology",
-  "medical_oncology"
+  "medical_oncology",
+  "evidence",
+  "radiology"
  ],
  "plan": [
   {
-   "content": "Confirm the stage",
+   "content": "Record the case notes",
    "status": "completed"
   },
   {
-   "content": "Read the driver report",
+   "content": "Restage and read the resistance findings",
    "status": "completed"
   },
   {
-   "content": "Consult radiology and medical oncology",
+   "content": "Consult radiology, medical oncology and evidence",
    "status": "completed"
   },
   {
-   "content": "Decide definitive therapy",
+   "content": "Decide stage, category, intent and plan",
    "status": "completed"
   },
   {
@@ -1597,49 +1643,166 @@
    "status": "completed"
   }
  ],
- "llm_calls": 9,
+ "llm_calls": 11,
+ "audit": {
+  "draft": {
+   "findings": [
+    {
+     "rule_id": "DOSE_IN_MODEL_OUTPUT",
+     "severity": "block",
+     "message": "A dose numeric appears in model-authored plan content. Doses enter plans only through the deterministic regimen library (dose_plan).",
+     "check": "rules"
+    }
+   ],
+   "checked": [
+    "stage",
+    "metastasis",
+    "biomarker_category",
+    "rules",
+    "emergency"
+   ],
+   "reference": {
+    "stage": {
+     "staged": true,
+     "stage_group": "IVB",
+     "tnm": "cT4N3M1c"
+    },
+    "suggested_m": {
+     "m": "M1c2",
+     "candidates": [
+      "M1c2"
+     ],
+     "basis": "extrathoracic metastases in 4 organ systems (adrenal, bone, liver, brain)",
+     "basis_zh": "胸腔外 4 个器官系统转移（肾上腺、骨、肝、脑）"
+    },
+    "biomarker_category": {
+     "status": "targetable",
+     "codes": [
+      "NSCL-26"
+     ],
+     "missing": [
+      "NTRK1/2/3 fusion",
+      "ERBB2 (HER2) mutation",
+      "NRG1 fusion"
+     ],
+     "summary_zh": "NSCL-26（KRAS G12C 突变阳性）",
+     "summary_en": "NSCL-26 (KRAS G12C mutation positive)"
+    },
+    "emergency": null
+   },
+   "facts_filled_from_narrative": [
+    "ngs_done",
+    "progression_findings.c797s",
+    "progression_findings.small_cell_transformation",
+    "progression_findings.other",
+    "cns_metastases.source"
+   ],
+   "role": "oncologist"
+  },
+  "revised": {
+   "findings": [],
+   "checked": [
+    "stage",
+    "metastasis",
+    "biomarker_category",
+    "rules",
+    "emergency"
+   ],
+   "reference": {
+    "stage": {
+     "staged": true,
+     "stage_group": "IVB",
+     "tnm": "cT4N3M1c"
+    },
+    "suggested_m": {
+     "m": "M1c2",
+     "candidates": [
+      "M1c2"
+     ],
+     "basis": "extrathoracic metastases in 4 organ systems (adrenal, bone, liver, brain)",
+     "basis_zh": "胸腔外 4 个器官系统转移（肾上腺、骨、肝、脑）"
+    },
+    "biomarker_category": {
+     "status": "targetable",
+     "codes": [
+      "NSCL-26"
+     ],
+     "missing": [
+      "NTRK1/2/3 fusion",
+      "ERBB2 (HER2) mutation",
+      "NRG1 fusion"
+     ],
+     "summary_zh": "NSCL-26（KRAS G12C 突变阳性）",
+     "summary_en": "NSCL-26 (KRAS G12C mutation positive)"
+    },
+    "emergency": null
+   },
+   "facts_filled_from_narrative": [
+    "ngs_done",
+    "progression_findings.c797s",
+    "progression_findings.small_cell_transformation",
+    "progression_findings.other",
+    "cns_metastases.source"
+   ],
+   "role": "oncologist"
+  }
+ },
  "steps": [
   {
    "kind": "tool",
    "name": "update_plan",
    "agent": "lead",
-   "summary": "plan 0/5 done · now: Confirm the stage",
+   "summary": "plan 0/5 done · now: Record the case notes",
    "ms": 0
   },
   {
    "kind": "tool",
-   "name": "stage_tnm",
+   "name": "record_case_facts",
    "agent": "lead",
-   "summary": "cT2bN2bM0 → stage IIIB (AJCC/UICC 9th edition)",
+   "summary": "recorded 30 fact(s)",
    "ms": 0
   },
   {
    "kind": "tool",
-   "name": "assess_biomarkers",
+   "name": "prognosis",
    "agent": "lead",
-   "summary": "2 gene(s); positive: EGFR",
+   "summary": "no cohort figure",
    "ms": 0
   },
   {
    "kind": "tool",
    "name": "update_plan",
    "agent": "lead",
-   "summary": "plan 2/5 done · now: Consult radiology and medical oncology",
+   "summary": "plan 2/5 done · now: Consult radiology, medical oncology and evidence",
    "ms": 0
   },
   {
    "kind": "tool",
    "name": "delegate",
    "agent": "lead",
-   "summary": "Radiologist: cT2bN2bM0 is stage IIIB in the AJCC/UICC 9th edition (IIIA in the 8th). Multistation N2b supports the MDT's unresectable",
-   "ms": 1201
+   "summary": "Radiologist: Adrenal, bone, brain and liver metastases: several organ systems (M1c2); stage IVB. New malignant effusion.",
+   "ms": 1228
   },
   {
    "kind": "tool",
    "name": "delegate",
    "agent": "lead",
-   "summary": "Medical oncologist: Concurrent platinum doublet with 60 Gy thoracic radiotherapy (cisplatin-etoposide or weekly carboplatin-paclitaxel).",
-   "ms": 1201
+   "summary": "Medical oncologist: After platinum, immunotherapy and a KRAS G12C inhibitor: docetaxel with or without ramucirumab.",
+   "ms": 1206
+  },
+  {
+   "kind": "tool",
+   "name": "delegate",
+   "agent": "lead",
+   "summary": "Evidence researcher: REVEL supports docetaxel-ramucirumab after platinum. No registered trial of a KRAS G12C plus MET inhibitor combination w",
+   "ms": 1217
+  },
+  {
+   "kind": "tool",
+   "name": "update_plan",
+   "agent": "lead",
+   "summary": "plan 3/5 done · now: Decide stage, category, intent and plan",
+   "ms": 0
   },
   {
    "kind": "submit",
@@ -1657,16 +1820,16 @@
   },
   {
    "kind": "tool",
-   "name": "check_indication",
+   "name": "regimen_dosing",
    "agent": "lead",
-   "summary": "ccrt_60gy=eligible, durva_consolidation=ineligible, osimertinib_consolidation=eligible",
+   "summary": "library dosing for docetaxel_ramucirumab_second_line; docetaxel_ramucirumab_second_line: 0 gate(s) failed, 4 unverified",
    "ms": 0
   },
   {
    "kind": "tool",
-   "name": "search_trials",
+   "name": "citation_verify",
    "agent": "lead",
-   "summary": "LAURA: LAURA (osimertinib after definitive CRT)",
+   "summary": "KRYSTAL-MET-7: NOT VERIFIED (unrecognized)",
    "ms": 0
   },
   {

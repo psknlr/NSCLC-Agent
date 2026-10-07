@@ -123,7 +123,14 @@ def write(name, title, header, rows, notes, *, spec, widths_cm):
 
 # -------------------------------------------------------------- tables
 def table1() -> None:
+    kn = load("knowledge")
+    rt = kn["runtime"]
     rows = [
+        ["Decision authority", "The model decides; the harness checks",
+         f"Full autonomy (default): the model decides stage, biomarker category, treatment intent and "
+         f"plan with {len(rt['full']['information_tools'])} information tools; the "
+         f"{len(rt['kernel_tools'])} kernel decision tools are offered only in kernel-assisted mode; "
+         "the kernel audits each consult independently afterwards"],
         ["Tool abstraction", "Typed tools; per-agent toolsets",
          "JSON-schema tools with parallel-safety and terminal flags; each agent sees its own filtered toolset"],
         ["Agent loop", "One ReAct loop for every agent",
@@ -133,7 +140,8 @@ def table1() -> None:
         ["Sub-agents", "Agents as tools",
          "delegate: 7 specialists, each with its own context, prompt and read-only allow-list; structured reports"],
         ["Hooks", "Prompt / post-tool / stop hooks",
-         "8 deterministic, individually switchable hooks hold every clinical safety net; all advisory"],
+         f"8 deterministic, individually switchable hooks; {len(rt['full']['hooks_on'])} on in full "
+         "autonomy (emergency and provenance), all advisory"],
         ["Memory", "Instruction files; memory proposals",
          "NSCLC.md in every system prompt; remember proposes, the clinician decides"],
         ["Context management", "Token accounting; compaction",
@@ -141,7 +149,8 @@ def table1() -> None:
         ["Checkpoints", "Rewind",
          "Snapshot before every turn of messages, case notes, plan and evidence ledger"],
         ["Commands", "Slash commands",
-         "15 commands, one definition for CLI and web (/mdt, /plan, /review, /rewind …)"],
+         f"{kn['commands']} commands, one definition for CLI and web (/mdt, /plan, /review, /audit, "
+         "/rewind …)"],
         ["Extensibility", "Model Context Protocol",
          "Streamable-HTTP client (JSON or SSE replies, session ids); tools named mcp__server__tool"],
         ["Interruption; headless use", "Stop; stream-json",
@@ -171,21 +180,27 @@ def table2() -> None:
     }
     event = {"user_prompt_submit": "Prompt submitted", "post_tool_use": "After each tool call",
              "stop": "Consult submitted"}
-    rows = [[h.title_en, event[h.event], h.description_en, findings[h.name]]
+    on = set(load("knowledge")["runtime"]["full"]["hooks_on"])
+    rows = [[h.title_en, event[h.event], h.description_en, findings[h.name],
+             "On" if h.name in on else "Off*"]
             for h in builtin_hooks()]
-    write("Table2", "Table 2 | Hooks: the clinical safety nets of agent mode",
-          ["Hook", "Runs when", "Check", "Output"], rows,
+    write("Table2", "Table 2 | Hooks: the in-loop checks of agent mode",
+          ["Hook", "Runs when", "Check", "Output", "Full autonomy"], rows,
           ["Every finding is returned to the model once; the model revises its plan or records a "
            "clinical reason (rule_responses). No hook blocks, rewrites or withholds output.",
+           "*Compares the model with the deterministic kernel, so it is off by default in full "
+           "autonomy and on in kernel-assisted mode; any hook can be switched individually. In full "
+           "autonomy the same kernel checks run after the consult as the independent audit, which "
+           "is never returned to the model.",
            "†For example DRIVER_FIRST_LINE, INDICATION_PREDICATE, N3_NO_SURGERY, ORGAN_FUNCTION_GATE."],
-          spec="p{2.6cm}p{2.4cm}p{6.6cm}p{3.6cm}", widths_cm=[2.8, 2.6, 7.4, 4.2])
+          spec="p{2.4cm}p{2.2cm}p{6.0cm}p{3.4cm}p{1.4cm}", widths_cm=[2.6, 2.4, 6.8, 3.8, 1.6])
 
 
 def ed_table1() -> None:
     gs = load("gold_standard")
     rows = [[name, f"{m['k']}/{m['n']}", pct_ci(m)] for name, m in gs["metrics"].items()]
     rows += [["Error taxonomy, all classes", "0 errors", "—"]]
-    write("ExtendedDataTable1", "Extended Data Table 1 | Gold-standard evaluation of the governed pipeline",
+    write("ExtendedDataTable1", "Extended Data Table 1 | The reference standard: gold-standard evaluation of the deterministic pipeline",
           ["Metric", "Cases (k/n)", "Proportion, % (95% CI)"], rows,
           [f"The set has {gs['total']} cases: {gs['kinds'].get('pipeline', 0)} end-to-end pipeline cases and "
            f"{gs['kinds'].get('audit', 0)} audit probes (deliberately unsafe plans given directly "
@@ -270,8 +285,9 @@ def ed_table3() -> None:
           [f"The {rl['n_functions']} rules raise {rl['n_ids']} finding identifiers; "
            "'(same rule)' marks a further identifier raised by the rule in the row above.",
            "*Severity is the rule's own grading. In governed mode a block finding stops "
-           "release (after the bounded repair loop); in agent mode every finding is advisory "
-           "and returns to the model, which must revise or justify an override.",
+           "release (after the bounded repair loop). In full autonomy (agent mode's default) the "
+           "rules run after the consult as part of the independent audit and are not returned "
+           "to the model; in kernel-assisted mode they run as an advisory stop hook.",
            f"†Gold-standard audit probes (n = {gs['kinds'].get('audit', 0)}; deliberately "
            "unsafe plans given directly to the rule engine) that raised the finding; a probe "
            "may raise several.",

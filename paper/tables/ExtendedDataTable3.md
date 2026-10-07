@@ -28,6 +28,6 @@
 | DOSE_IN_MODEL_OUTPUT | block | No dose figures in model-authored text | 0 |
 
 The 20 rules raise 24 finding identifiers; '(same rule)' marks a further identifier raised by the rule in the row above.
-*Severity is the rule's own grading. In governed mode a block finding stops release (after the bounded repair loop); in agent mode every finding is advisory and returns to the model, which must revise or justify an override.
+*Severity is the rule's own grading. In governed mode a block finding stops release (after the bounded repair loop). In full autonomy (agent mode's default) the rules run after the consult as part of the independent audit and are not returned to the model; in kernel-assisted mode they run as an advisory stop hook.
 †Gold-standard audit probes (n = 28; deliberately unsafe plans given directly to the rule engine) that raised the finding; a probe may raise several.
 CNS, central nervous system; ICI, immune checkpoint inhibitor.

@@ -800,7 +800,7 @@ function renderPlanDetail(plan, onc) {
     const ms = plan.metastatic_sites;
     blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "转移部位与 M 分期提示"),
       h("div", null, sitesText(ms.sites)),
-      h("div", { class: "muted small", style: { marginTop: "6px" } }, `按部位提示：${ms.suggested_m || (ms.candidates || []).join(" / ") || "—"}（${ms.basis || ""}）`)));
+      h("div", { class: "muted small", style: { marginTop: "6px" } }, `按部位提示：${ms.suggested_m || (ms.candidates || []).join(" / ") || "—"}（${(I18N.cur === "en" ? ms.basis : ms.basis_zh || ms.basis) || ""}）`)));
   }
   if ((plan.supportive_care || []).length) blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "支持治疗"), fmtList(plan.supportive_care)));
   if (plan.organ_gates) {

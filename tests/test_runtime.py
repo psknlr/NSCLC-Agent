@@ -444,7 +444,7 @@ def test_commands_expand_and_local_commands_answer():
     mdt = expand("/MDT 关注寡转移")
     assert mdt["kind"] == "prompt" and "delegate" in mdt["prompt"] and mdt["prompt"].endswith("关注寡转移")
     assert expand("/rewind 2") == {"kind": "local", "command": "rewind", "arg": "2"}
-    assert len(listing()) == 15
+    assert len(listing()) == 16
     session = AgentSession(MockLLMClient())
     session.turn("cT2aN0M1b")
     for name in ("help", "usage", "agents", "tools", "hooks", "memory"):
@@ -554,7 +554,7 @@ def mock_llm():
 
 def test_webapi_runtime_apis(mock_llm):
     catalog = _api("agent_info")
-    assert len(catalog["builtin_agents"]) == 7 and len(catalog["commands"]) == 15
+    assert len(catalog["builtin_agents"]) == 7 and len(catalog["commands"]) == 16
     cfg = _api("agent_configure", config={"hooks": {"fact_seed": False}, "max_steps": 6})
     assert cfg["max_steps"] == 6 and cfg["hooks"] == {"fact_seed": False}
     _api("agent_new", role="oncologist")
