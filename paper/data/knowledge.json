@@ -325,8 +325,132 @@
   ],
   "trials": 39
  },
- "commands": 15,
- "tests": 786,
+ "commands": 16,
+ "tests": 795,
+ "runtime": {
+  "full": {
+   "tools": [
+    "record_case_facts",
+    "search_trials",
+    "search_regimens",
+    "regimen_dosing",
+    "protocol_sections",
+    "guideline_search",
+    "prognosis",
+    "interaction_check",
+    "read_attachment",
+    "citation_verify",
+    "pubmed_search",
+    "update_plan",
+    "remember",
+    "delegate",
+    "submit_consult"
+   ],
+   "information_tools": [
+    "search_trials",
+    "search_regimens",
+    "regimen_dosing",
+    "protocol_sections",
+    "guideline_search",
+    "prognosis",
+    "interaction_check",
+    "read_attachment",
+    "citation_verify",
+    "pubmed_search"
+   ],
+   "kernel_tools": [],
+   "hooks_on": [
+    "emergency_screen",
+    "evidence_ledger",
+    "citation_provenance",
+    "dose_provenance",
+    "emergency_addressed"
+   ],
+   "hooks_off": [
+    "fact_seed",
+    "rule_review",
+    "stage_consistency"
+   ]
+  },
+  "assisted": {
+   "tools": [
+    "record_case_facts",
+    "stage_tnm",
+    "screen_emergency",
+    "assess_biomarkers",
+    "search_trials",
+    "search_regimens",
+    "regimen_dosing",
+    "check_indication",
+    "check_organ_function",
+    "cns_assessment",
+    "later_line_options",
+    "protocol_sections",
+    "guideline_search",
+    "prognosis",
+    "interaction_check",
+    "rule_review",
+    "governed_reference",
+    "read_attachment",
+    "citation_verify",
+    "pubmed_search",
+    "update_plan",
+    "remember",
+    "delegate",
+    "submit_consult"
+   ],
+   "information_tools": [
+    "search_trials",
+    "search_regimens",
+    "regimen_dosing",
+    "protocol_sections",
+    "guideline_search",
+    "prognosis",
+    "interaction_check",
+    "read_attachment",
+    "citation_verify",
+    "pubmed_search"
+   ],
+   "kernel_tools": [
+    "stage_tnm",
+    "screen_emergency",
+    "assess_biomarkers",
+    "check_indication",
+    "check_organ_function",
+    "cns_assessment",
+    "later_line_options",
+    "rule_review",
+    "governed_reference"
+   ],
+   "hooks_on": [
+    "emergency_screen",
+    "fact_seed",
+    "evidence_ledger",
+    "rule_review",
+    "stage_consistency",
+    "citation_provenance",
+    "dose_provenance",
+    "emergency_addressed"
+   ],
+   "hooks_off": []
+  },
+  "kernel_tools": [
+   "assess_biomarkers",
+   "check_indication",
+   "check_organ_function",
+   "cns_assessment",
+   "governed_reference",
+   "later_line_options",
+   "rule_review",
+   "screen_emergency",
+   "stage_tnm"
+  ],
+  "kernel_hooks": [
+   "fact_seed",
+   "rule_review",
+   "stage_consistency"
+  ]
+ },
  "kg_total": 2960,
  "kg_clusters": 147,
  "assets": {

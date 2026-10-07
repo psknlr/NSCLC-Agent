@@ -1,4 +1,4 @@
-**Extended Data Table 1 | Gold-standard evaluation of the governed pipeline**
+**Extended Data Table 1 | The reference standard: gold-standard evaluation of the deterministic pipeline**
 
 | Metric | Cases (k/n) | Proportion, % (95% CI) |
 |---|---|---|

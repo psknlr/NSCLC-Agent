@@ -768,6 +768,18 @@ class AgentSession:
                 text += _t(lang, "\n\n本次会诊中智能体提议记住：\n",
                            "\n\nProposed by the agent in this consult:\n") + "\n".join(
                     f"- {p}" for p in self.memory.proposals)
+        elif name == "audit":
+            from .audit import audit, render
+
+            consult = next((t.get("consult") for t in reversed(self.turns)
+                            if t.get("consult")), None)
+            if not consult:
+                data = {}
+                text = _t(lang, "还没有可核对的会诊结论。", "No consult to audit yet.")
+            else:
+                data = audit(consult, self.facts, "\n".join(self.narrative),
+                             role=self.role, lang=lang)
+                text = render(data, lang)
         elif name == "help":
             data = {"commands": listing(lang)}
             text = _t(lang, "命令：", "Commands:") + "\n" + "\n".join(

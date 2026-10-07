@@ -1253,6 +1253,7 @@ class TreatmentAgent:
                     "suggested_m": suggestion["m"],
                     "candidates": suggestion["candidates"],
                     "basis": suggestion["basis"],
+                    "basis_zh": suggestion["basis_zh"],
                 }
         notes += labs.supportive_notes(state.facts)
         if notes:

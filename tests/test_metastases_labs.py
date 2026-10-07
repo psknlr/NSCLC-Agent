@@ -50,6 +50,10 @@ def test_the_kras_case_sites_and_m_category():
     ("胸水找到腺癌细胞", {"pleural_effusion": "present"}),
     ("腹膜转移", {"other": "present"}),
     ("solitary adrenal metastasis; no liver metastases", {"adrenal": "single", "liver": "absent"}),
+    ("Liver, bone and adrenal metastases", {"liver": "present", "bone": "present",
+                                            "adrenal": "present"}),
+    ("no liver or bone metastases", {"liver": "absent", "bone": "absent"}),
+    ("bone or liver metastases?", {}),
 ])
 def test_site_extraction(text, expected):
     assert extract_sites(text) == expected
@@ -81,6 +85,11 @@ def test_a_contradicted_m_is_named_never_repaired():
     assert tnm_conflict({"tnm": {"m": "M0"}, "metastatic_sites": {"bone": "single"}})
     assert tnm_conflict({"tnm": {"m": "cM1c"}, "metastatic_sites": {"bone": "multiple"}}) is None
     assert tnm_conflict({"tnm": {"m": "M0"}, "metastatic_sites": {"bone": "absent"}}) is None
+    # a recorded M above the sites is not a contradiction: the record may not
+    # list every site
+    assert tnm_conflict({"tnm": {"m": "M1c2"}, "metastatic_sites": {"adrenal": "present"}}) is None
+    assert tnm_conflict({"tnm": {"m": "M1c1"},
+                         "metastatic_sites": {"liver": "multiple", "bone": "single"}})
 
 
 def test_sites_are_validated():

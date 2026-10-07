@@ -189,9 +189,38 @@ _LIST_RE = re.compile(
     r"\s*(多发|广泛|弥漫)?\s*转移")
 
 
-def _list_readings(text: str) -> dict[str, list[str]]:
+_EN_LIST_WORDS = {"liver": "liver", "hepatic": "liver", "bone": "bone", "osseous": "bone",
+                  "skeletal": "bone", "adrenal": "adrenal", "peritoneal": "other",
+                  "pleural": "pleura", "contralateral lung": "contralateral_lung"}
+_EN_LIST_RE = re.compile(
+    r"\b((?:multiple\s+)?(?:liver|hepatic|bone|osseous|skeletal|adrenal|brain|peritoneal|pleural|"
+    r"contralateral lung)(?:\s*(?:,|and|or|&|/)\s*(?:and\s+|or\s+)?(?:liver|hepatic|bone|osseous|skeletal|"
+    r"adrenal|brain|peritoneal|pleural|contralateral lung))+)\s+metasta", re.I)
+
+
+def _list_readings(text: str) -> tuple[dict[str, list[str]], list[tuple[int, int]]]:
+    """Readings of enumerated site lists, and their spans (a single-site
+    mention inside a list is the list's, not its own)."""
     out: dict[str, list[str]] = {}
+    spans: list[tuple[int, int]] = []
+    for match in _EN_LIST_RE.finditer(text):
+        spans.append((match.start(), match.end()))
+        before = text[max(0, match.start() - 24):match.start()]
+        after = text[match.end():match.end() + 16]
+        if re.search(r"\b(?:no|without|negative for)\b[^.;,]*$", before, re.I):
+            status = ABSENT
+        elif re.search(r"\b(?:possible|suspected|equivocal)\b[^.;,]*$", before, re.I) \
+                or re.match(r"\w*\s*\?", after):
+            continue
+        else:
+            status = MULTIPLE if re.match(r"multiple", match.group(1), re.I) else PRESENT
+        for word in re.split(r"\s*(?:,|\band\b|\bor\b|&|/)\s*", re.sub(r"^multiple\s+", "", match.group(1),
+                                                                 flags=re.I)):
+            site = _EN_LIST_WORDS.get(word.strip().lower())
+            if site:
+                out.setdefault(site, []).append(status)
     for match in _LIST_RE.finditer(text):
+        spans.append((match.start(), match.end()))
         clause_start = max(text.rfind(ch, 0, match.start()) for ch in "。；;\n,，")
         if _NEGATION_RE.search(text[clause_start + 1:match.start()]):
             status = ABSENT
@@ -203,7 +232,7 @@ def _list_readings(text: str) -> dict[str, list[str]]:
             site = _LIST_WORDS.get(word)
             if site:
                 out.setdefault(site, []).append(status)
-    return out
+    return out, spans
 
 
 def extract_sites(text: str) -> dict[str, str]:
@@ -214,9 +243,10 @@ def extract_sites(text: str) -> dict[str, str]:
     mention records ``absent`` only when nothing positive is said."""
     text = text or ""
     out: dict[str, str] = {}
-    listed = _list_readings(text)
+    listed, spans = _list_readings(text)
     for site, pattern in _SITE_RE.items():
-        readings = [s for s in (_site_status(text, m) for m in pattern.finditer(text)) if s]
+        readings = [s for s in (_site_status(text, m) for m in pattern.finditer(text)
+                                if not any(a <= m.start() < b for a, b in spans)) if s]
         readings += listed.get(site, [])
         if site in _SITE_ABSENT_RE and _SITE_ABSENT_RE[site].search(text):
             readings.append(ABSENT)
@@ -262,23 +292,34 @@ def suggest_m(facts: dict[str, Any]) -> dict[str, Any]:
     present = {s: v for s, v in sites.items() if v != ABSENT}
     extra = {s: v for s, v in present.items() if s not in THORACIC_SITES}
     thoracic = [s for s in present if s in THORACIC_SITES]
+
+    def zh(names: Any) -> str:
+        return "、".join(SITE_LABEL_ZH.get(n, "脑" if n == "brain" else n) for n in names)
+
+    def out(m: Optional[str], candidates: list[str], basis: str, basis_zh: str) -> dict[str, Any]:
+        return {"m": m, "candidates": candidates, "basis": basis, "basis_zh": basis_zh}
+
     if len(extra) >= 2:
-        return {"m": "M1c2", "candidates": ["M1c2"],
-                "basis": f"extrathoracic metastases in {len(extra)} organ systems ({', '.join(extra)})"}
+        return out("M1c2", ["M1c2"],
+                   f"extrathoracic metastases in {len(extra)} organ systems ({', '.join(extra)})",
+                   f"胸腔外 {len(extra)} 个器官系统转移（{zh(extra)}）")
     if len(extra) == 1:
         (site, status), = extra.items()
         if status == MULTIPLE:
-            return {"m": "M1c1", "candidates": ["M1c1"],
-                    "basis": f"multiple extrathoracic metastases in one organ system ({site})"}
+            return out("M1c1", ["M1c1"],
+                       f"multiple extrathoracic metastases in one organ system ({site})",
+                       f"单一器官系统多发转移（{zh([site])}）")
         if status == SINGLE:
-            return {"m": "M1b", "candidates": ["M1b"],
-                    "basis": f"single extrathoracic metastasis ({site})"}
-        return {"m": None, "candidates": ["M1b", "M1c1"],
-                "basis": f"extrathoracic metastasis in one organ system ({site}), count not stated"}
+            return out("M1b", ["M1b"], f"single extrathoracic metastasis ({site})",
+                       f"胸腔外单发转移（{zh([site])}）")
+        return out(None, ["M1b", "M1c1"],
+                   f"extrathoracic metastasis in one organ system ({site}), count not stated",
+                   f"单一器官系统转移（{zh([site])}），病灶数目未写明")
     if thoracic:
-        return {"m": "M1a", "candidates": ["M1a"],
-                "basis": f"intrathoracic metastatic disease only ({', '.join(thoracic)})"}
-    return {"m": None, "candidates": [], "basis": "no metastatic site on record"}
+        return out("M1a", ["M1a"],
+                   f"intrathoracic metastatic disease only ({', '.join(thoracic)})",
+                   f"仅胸腔内转移（{zh(thoracic)}）")
+    return out(None, [], "no metastatic site on record", "未记录转移部位")
 
 
 def _recorded_m(facts: dict[str, Any]) -> str:
@@ -286,16 +327,24 @@ def _recorded_m(facts: dict[str, Any]) -> str:
     return re.sub(r"^(?:YP|YC|RP|RC|C|P|R|Y)(?=M)", "", m)
 
 
-def _family_ok(recorded: str, candidates: list[str]) -> bool:
-    if not recorded or recorded in ("MX", "M1"):
-        return True
-    if recorded == "M1C":
-        return any(c.startswith("M1C") for c in (x.upper() for x in candidates))
-    return recorded in (c.upper() for c in candidates)
+_M_RANK = {"M0": 0, "M1A": 1, "M1B": 2, "M1C": 3, "M1C1": 3, "M1C2": 4}
+
+
+def _understaged(recorded: str, candidates: list[str]) -> bool:
+    """The recorded M sits BELOW every reading the sites allow. A recorded M
+    above the sites is not a contradiction: the record may simply not list
+    every site. Bare M1c covers M1c1 and M1c2."""
+    if recorded not in _M_RANK:
+        return False  # M1, MX: nothing specific to contradict
+    floor = min(_M_RANK.get(c.upper(), 0) for c in candidates)
+    rank = _M_RANK[recorded]
+    if recorded == "M1C" and floor == 4:
+        return False
+    return rank < floor
 
 
 def tnm_conflict(facts: dict[str, Any]) -> Optional[str]:
-    """A recorded M descriptor the recorded sites contradict, named —
+    """A recorded M descriptor BELOW what the recorded sites show, named —
     never repaired. Brain-only contradictions with M0 are ``cns.py``'s."""
     recorded = _recorded_m(facts)
     if not recorded:
@@ -304,20 +353,16 @@ def tnm_conflict(facts: dict[str, Any]) -> Optional[str]:
     if not isinstance(sites, dict) or not sites:
         return None
     suggestion = suggest_m(facts)
-    if not suggestion["candidates"]:
+    if not suggestion["candidates"] or not _understaged(recorded, suggestion["candidates"]):
         return None
     if recorded == "M0":
         listed = [s for s, v in sanitize_sites(sites)[0].items() if v != ABSENT]
-        if not listed:
-            return None
         return (f"Metastatic sites are on record ({', '.join(listed)}) but the TNM "
                 f"descriptors say M0 — {suggestion['basis']} reads as "
                 f"{'/'.join(suggestion['candidates'])}. Reconcile the imaging and the "
                 f"descriptors before treating either as true.")
-    if _family_ok(recorded, suggestion["candidates"]):
-        return None
     return (f"Recorded {recorded.replace('M1C', 'M1c').replace('M1A', 'M1a').replace('M1B', 'M1b')} "
-            f"but the recorded sites read as {'/'.join(suggestion['candidates'])} "
+            f"but the recorded sites read as at least {'/'.join(suggestion['candidates'])} "
             f"({suggestion['basis']}). AJCC 9: M1a intrathoracic; M1b single "
             f"extrathoracic lesion; M1c1 multiple lesions in one organ system; M1c2 "
             f"multiple organ systems. Reconcile before staging rests on it.")

@@ -49,12 +49,22 @@ COMMANDS: tuple[Command, ...] = (
             "Plan only: lay out the steps with update_plan and list the information and tests "
             "still needed; do not analyse treatment yet — use submit_consult to summarise the "
             "plan and the missing information. {arg}"),
-    Command("review", "", "让智能体用规则引擎与受治理流水线自查当前方案", "prompt",
-            "请对你当前的方案自查：调用 rule_review 与 governed_reference，逐条说明是否调整，"
-            "然后重新提交结论。{arg}",
-            "", "Self-review the current plan against the rule engine and the governed pipeline",
-            "Review your current plan: call rule_review and governed_reference, say for each "
-            "point whether you change the plan, then resubmit the conclusion. {arg}"),
+    Command("review", "", "让智能体自查当前方案（分期、生物标志物分类、适应证与证据）", "prompt",
+            "请对你当前的方案自查：按 AJCC/UICC 第 9 版重新核对分期（含转移部位与 M 分期）、"
+            "生物标志物分类、每个方案的适用人群与证据（用 search_regimens / search_trials / "
+            "guideline_search / citation_verify 等可用工具；内核辅助模式下也可调用 rule_review 与 "
+            "governed_reference），逐条说明是否调整，然后重新提交结论。{arg}",
+            "", "Self-review the current plan: stage, biomarker category, indications, evidence",
+            "Review your current plan: re-check the stage against AJCC/UICC 9th edition (including "
+            "the metastatic sites and the M category), the biomarker category, and each regimen's "
+            "population and evidence with the tools you have (search_regimens, search_trials, "
+            "guideline_search, citation_verify; in kernel-assisted mode also rule_review and "
+            "governed_reference). Say for each point whether you change the plan, then resubmit "
+            "the conclusion. {arg}"),
+    Command("audit", "", "独立核对：确定性内核在会诊后核对分期、生物标志物分类与方案（只给医生看，不回传模型）",
+            "local", description_en="Independent audit: the deterministic kernel re-reads the "
+                                    "stage, biomarker category and plan after the consult "
+                                    "(for the clinician; never returned to the model)"),
     Command("evidence", "[主题]", "请循证医学子智能体核实关键证据", "prompt",
             "请用 delegate 邀请 evidence（循证医学研究员）核实本例方案的关键证据（入组人群、"
             "主要结果、指南推荐差异），据此修订并提交结论。{arg}",
