@@ -114,6 +114,12 @@ def _n2_possible(facts: dict[str, Any], complaint: str) -> bool:
 
 
 def _surgery_plausible(facts: dict[str, Any], _c: str) -> bool:
+    # Documented distant metastases (any M1, bare families included) rule
+    # out a resection work-up before the engine has even staged the case.
+    tnm = facts.get("tnm")
+    m = facts.get("tnm.m") or (tnm.get("m") if isinstance(tnm, dict) else None)
+    if str(m or "").upper().replace(" ", "").startswith("M1"):
+        return False
     stage = str(facts.get("stage_group") or "")
     return stage in ("", "IA1", "IA2", "IA3", "IB", "IIA", "IIB", "IIIA", "IIIB")
 

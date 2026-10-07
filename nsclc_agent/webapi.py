@@ -102,9 +102,10 @@ def examples() -> list[dict[str, Any]]:
 def catalog() -> dict[str, Any]:
     """Regimen library and trial registry summaries — names, settings and
     anchors only; component dosing stays behind the dose channel."""
-    from .knowledge import regimens, trials
+    from .knowledge import biomarker_categories, regimens, trials
 
     return {
+        "biomarker_categories": [c.to_dict() for c in biomarker_categories.CATEGORIES],
         "regimens": {r.regimen_id: {"name": r.name, "setting": r.setting,
                                     "trial_ids": list(r.trial_ids),
                                     "contains_ici": r.contains_ici,

@@ -54,6 +54,11 @@ EXPECTATIONS: list[tuple[str, str, str, str]] = [
     ("T4", "N3", "M1c2", "IVB"),
     # --- Occult ---
     ("TX", "N0", "M0", "Occult"),
+    # --- Bare families staged only because every subcategory agrees ---
+    ("T2a", "N0", "M1c", "IVB"),   # M1c1 and M1c2 are both IVB
+    ("TX", "NX", "M1c", "IVB"),    # metastatic disease fixes the group
+    ("T4", "N2", "M0", "IIIB"),    # T4N2a and T4N2b are both IIIB
+    ("T2", "N1", "M0", "IIB"),     # T2aN1 and T2bN1 are both IIB
 ]
 
 #: Inputs the engine must refuse, with a substring the error must contain.
@@ -63,7 +68,7 @@ REJECTIONS: list[tuple[str, str, str, str]] = [
     ("T1", "N0", "M0", "Ambiguous 'T1'"),
     ("T2", "N0", "M0", "Ambiguous 'T2'"),
     ("T2a", "N2", "M0", "Ambiguous 'N2'"),
-    ("T2a", "N0", "M1c", "Ambiguous 'M1c'"),
+    ("T3", "N2", "M0", "Ambiguous 'N2'"),   # T3N2a IIIA vs T3N2b IIIB
     ("T2a", "N0", "M1", "Ambiguous 'M1'"),
     ("T2a", "N0", "", "metastatic workup"),
     ("T2a", "N0", "MX", "PET-CT"),

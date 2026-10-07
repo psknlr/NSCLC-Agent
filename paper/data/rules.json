@@ -160,6 +160,10 @@
     [
      "CNS_TNM_INCONSISTENT",
      "warn"
+    ],
+    [
+     "METASTASIS_TNM_INCONSISTENT",
+     "warn"
     ]
    ]
   },
@@ -210,5 +214,5 @@
   }
  ],
  "n_functions": 20,
- "n_ids": 23
+ "n_ids": 24
 }

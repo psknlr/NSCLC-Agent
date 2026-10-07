@@ -135,3 +135,26 @@ def test_cli_english():
     assert proc.returncode == 0, proc.stderr
     assert "Offline mock agent" in proc.stdout and "model calls" in proc.stdout
     assert "consulting Radiologist" in proc.stderr and "hooks review" in proc.stderr
+
+
+def test_every_web_ui_literal_has_english():
+    """Every Chinese string literal in the web app translates fully, apart
+    from the switch back to Chinese (shown in Chinese on purpose)."""
+    keep_chinese = {"中文界面 · 智能体将用中文回答", "切换到中文", "中文"}
+    source = (ROOT / "web/assets/app.js").read_text(encoding="utf-8")
+    literals = {m.group(1) for m in re.finditer(r'"((?:[^"\\\n]|\\.)*)"', source)
+                if HAN_RE.search(m.group(1))}
+    missing = sorted(t for t in literals - keep_chinese if HAN_RE.search(translate(t)))
+    assert missing == [], missing
+
+
+def test_v14_display_strings_translate():
+    from nsclc_agent.conversation import ConsultationSession
+    from tests.test_case_kras_later_line import CASE
+
+    reply = ConsultationSession(role="oncologist").turn(CASE).reply
+    shown = [line for line in reply.split("\n")
+             if line.startswith(("生物标志物分类", "转移部位", "＋ 支持治疗"))]
+    assert len(shown) >= 4
+    for line in shown:
+        assert not HAN_RE.search(translate(line)), line

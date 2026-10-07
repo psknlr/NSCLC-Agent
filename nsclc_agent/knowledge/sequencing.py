@@ -47,7 +47,8 @@ _PROGRESSION_TEXT_RE = re.compile(
     r"(?<![\w-])(?:progress(?:ion|ed|ive)?|pd)(?![\w-])|进展|耐药", re.I)
 _NEGATED_PROGRESSION_RE = re.compile(
     r"(?:\bno\s+|\bwithout\s+|\bnot\s+|未|无|没有)"
-    r"(?:evidence\s+of\s+|disease\s+|明显)?(?:progress\w*|pd\b|进展)",
+    r"(?:见|发现|evidence\s+of\s+|disease\s+)?(?:明显|明确)?"
+    r"(?:progress\w*|pd\b|进展)",
     re.I)
 
 #: Chinese (and brand) names → the generic English name the regimen
@@ -67,7 +68,16 @@ _AGENT_ALIASES = {
     "紫杉醇": "paclitaxel", "多西他赛": "docetaxel",
     "帕博利珠": "pembrolizumab", "阿替利珠": "atezolizumab",
     "纳武利尤": "nivolumab", "度伐利尤": "durvalumab",
+    "索托拉西布": "sotorasib", "阿达格拉西布": "adagrasib",
+    "格索雷塞": "garsorasib", "氟泽雷塞": "fulzerasib", "戈来雷塞": "glecirasib",
 }
+
+#: KRAS G12C inhibitors. Progression on the class ("KRAS G12C抑制剂",
+#: "G12C inhibitor") counts as progression on every member: there is no
+#: established sequential KRAS G12C inhibitor.
+_KRAS_G12C_AGENTS = ("sotorasib", "adagrasib", "garsorasib", "fulzerasib",
+                     "glecirasib", "divarasib")
+_KRAS_G12C_CLASS_RE = re.compile(r"g12c\s*(?:抑制剂|inhibitor)", re.I)
 
 #: Agent keywords (lowercase substring match against recorded agents).
 _THIRD_GEN_EGFR = ("osimertinib", "奥希替尼", "lazertinib", "amivantamab",
@@ -115,6 +125,8 @@ def _normalize_agent(agent: Any) -> list[str]:
     for alias, generic in _AGENT_ALIASES.items():
         if alias in text and generic not in text:
             out.append(generic)
+    if _KRAS_G12C_CLASS_RE.search(text):
+        out.extend(a for a in _KRAS_G12C_AGENTS if a not in out)
     return out
 
 
@@ -211,7 +223,11 @@ def driver_therapy_progressed(facts: dict[str, Any]) -> bool:
 def history_summary(facts: dict[str, Any]) -> str:
     parts = []
     for entry in treatment_history(facts):
-        label = "/".join(entry["agents"]) or "unspecified"
+        agents = entry["agents"]
+        if any(_KRAS_G12C_CLASS_RE.search(a) for a in agents):
+            # The class term stands for its expanded members.
+            agents = [a for a in agents if a not in _KRAS_G12C_AGENTS]
+        label = "/".join(agents) or "unspecified"
         if entry["status"]:
             label += f" ({entry['status']})"
         parts.append(label)
@@ -435,11 +451,53 @@ def sequencing_context(stage_group: str,
         honest.append(
             "Post-docetaxel salvage (further ADCs, rechallenge "
             "strategies) is NOT encoded.")
+    elif progressed_on(facts, _KRAS_G12C_AGENTS):
+        # Progression on a KRAS G12C inhibitor (usually after chemo-IO).
+        findings = progression_findings(facts)
+        cautions.append(
+            "Progression on a KRAS G12C inhibitor: no second KRAS G12C "
+            "inhibitor or KRAS-directed combination has established "
+            "benefit after progression — re-treatment with the class "
+            "belongs to a clinical trial, not to the standard next line.")
+        if findings["met_amplification"]:
+            cautions.append(
+                "Acquired MET amplification on the progression biopsy / "
+                "ctDNA is a recognized resistance mechanism to KRAS G12C "
+                "inhibitors; MET-directed combinations in this setting are "
+                "investigational — molecular tumor board and trial "
+                "screening, not an encoded regimen.")
+        if not facts.get("progression_ngs_done") and not findings["available"]:
+            workup.append(
+                "Re-biopsy or plasma NGS AT PROGRESSION — the resistance "
+                "mechanism (MET or KRAS amplification, new RAS/MAPK "
+                "alterations, histologic transformation) decides trial "
+                "eligibility")
+        if exposed_to(facts, _CHEMO_AGENTS):
+            options.append(_option(
+                "Docetaxel + ramucirumab", ["docetaxel_ramucirumab_second_line"],
+                "After platinum, immunotherapy and a KRAS G12C inhibitor: "
+                "the post-platinum standard (REVEL)"))
+            options.append(_option(
+                "Docetaxel monotherapy", ["docetaxel_second_line"],
+                "When ramucirumab is contraindicated (bleeding risk, "
+                "cavitating central lesions)"))
+        else:
+            cautions.append(
+                "No platinum-based chemotherapy is on record: platinum "
+                "doublet (± immunotherapy) is the question before any "
+                "post-platinum regimen — molecular tumor board.")
+        honest.append(
+            "Post-KRAS-G12C-inhibitor coverage is the docetaxel backbone "
+            "only: KRAS-directed combinations, MET-directed therapy for "
+            "acquired MET amplification and local therapy for "
+            "oligoprogression (an MDT decision when progression is "
+            "confined to a few sites) are NOT encoded.")
     elif progressed_on(facts, _IO_AGENTS) or progressed_on(facts,
                                                            _CHEMO_AGENTS):
         kras = drivers.get("kras")
         if kras is not None and driver_status(kras) == "positive" \
-                and "g12c" in str(kras).lower().replace(" ", ""):
+                and "g12c" in str(kras).lower().replace(" ", "") \
+                and not exposed_to(facts, _KRAS_G12C_AGENTS):
             options.append(_option(
                 "Sotorasib (KRAS G12C)", ["sotorasib_subsequent_line"],
                 "KRAS G12C after first-line chemo-IO: CodeBreaK 100 "

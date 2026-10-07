@@ -38,8 +38,8 @@ _FACTS_OVERRIDE = {
                    "for THIS call only (what-if reasoning; not recorded)",
 }
 _STAGE = {"type": "string", "description": "stage group, e.g. IIIB / IVA "
-                                           "(defaults to the engine staging "
-                                           "of the case notes' TNM)"}
+                                           "(defaults to the stage group "
+                                           "recorded in the case notes)"}
 
 TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
@@ -47,12 +47,23 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "Write structured facts into the case notes (your working record of "
         "this patient; shown to the clinician as the case dossier and used "
         "as the default input of every other tool). Keys: age, sex, tnm "
-        "{t,n,m,prefix}, histologic_category, driver_mutations {gene: report "
+        "{t,n,m,prefix}, stage_group (the stage you decided), "
+        "histologic_category, driver_mutations {gene: report "
         "text}, pd_l1 {tps}, ecog_ps, ngs_done, resectability_category "
         "(RESECTABLE/UNRESECTABLE), operable, disease_extent, cns_metastases "
-        "{status,symptomatic,treated,leptomeningeal,burden}, organ_function "
-        "{renal:{crcl_ml_min}, hepatic:{bilirubin_uln}}, qtc_ms, "
-        "comorbidities, medications, treatment_history [{line, agents, "
+        "{status,symptomatic,treated,leptomeningeal,burden}, metastatic_sites "
+        "{contralateral_lung|pleura|pleural_effusion|pericardial|bone|liver|"
+        "adrenal|distant_lymph_nodes|other: absent|present|single|multiple}, "
+        "organ_function {hematologic:{wbc,anc,plt (×10⁹/L),hb (g/L)}, "
+        "hepatic:{alt_uln,ast_uln,bilirubin_uln,alt_u_l,ast_u_l,"
+        "bilirubin_umol_l,albumin_g_l,child_pugh}, renal:{crcl_ml_min,"
+        "egfr_ml_min,creatinine_umol_l}, cardiac:{lvef_pct,nyha}, "
+        "pulmonary:{fev1_pct,dlco_pct}, electrolytes:{calcium_mmol_l,"
+        "sodium_mmol_l,potassium_mmol_l}}, qtc_ms, weight_kg, height_cm, "
+        "comorbidities {ild, active_autoimmune, heart_failure, "
+        "coronary_artery_disease, diabetes, copd, peripheral_neuropathy "
+        "(true or grade), hearing_loss, hbv, hcv, hiv, organ_transplant, "
+        "…: true/false}, medications, treatment_history [{line, agents, "
         "status}], progression_findings, progression_ngs_done. Values are "
         "validated; refused values come back as notes.",
         _obj({"facts": {"type": "object"},
@@ -219,23 +230,52 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
 
 TOOL_NAMES = frozenset(spec.name for spec in TOOL_SPECS)
 
+#: Tools that hand the model a DECISION computed by the deterministic
+#: kernel (a stage group, an eligibility verdict, a driver classification,
+#: a next-line option list, a rule verdict, the whole governed opinion).
+#: In full autonomy they are not offered: the model decides, and keeps the
+#: information tools (registries, library, guidelines, literature).
+KERNEL_TOOLS = frozenset({
+    "stage_tnm", "screen_emergency", "assess_biomarkers", "check_indication",
+    "check_organ_function", "cns_assessment", "later_line_options",
+    "rule_review", "governed_reference",
+})
+
 #: The lead agent's terminal tool (intercepted by the loop).
 SUBMIT_SPEC = ToolSpec(
 SUBMIT_TOOL,
     "Submit your consult conclusion for this turn. Call exactly once when "
     "you are done reasoning. `reply` is what the clinician reads (Chinese "
-    "unless they wrote in another language; Markdown allowed). If the "
-    "rule engine raises findings you will get them back once: revise, or "
-    "answer each in rule_responses, then submit again.",
+    "unless they wrote in another language; Markdown allowed). The stage "
+    "group, TNM and treatment intent are YOUR decisions — always give "
+    "intent with intent_rationale, and stage_group with stage_rationale "
+    "when the case can be staged. If hooks raise findings you will get "
+    "them back once: revise, or answer each in rule_responses, then "
+    "submit again.",
     _obj({
         "reply": {"type": "string"},
         "assessment": {"type": "string",
                        "description": "one-paragraph clinical judgement"},
-        "stage_group": {"type": "string"},
-        "tnm": {"type": "string"},
+        "stage_group": {"type": "string",
+                        "description": "YOUR stage group (AJCC/UICC 9th edition), "
+                                       "or 'undetermined'"},
+        "tnm": {"type": "string", "description": "YOUR cTNM / pTNM reading"},
+        "stage_rationale": {"type": "string",
+                            "description": "why: the T, N and M evidence you used"},
         "intent": {"type": "string",
                    "enum": ["curative", "palliative", "supportive",
-                            "emergency", "undetermined"]},
+                            "emergency", "undetermined"],
+                   "description": "YOUR treatment intent for this patient now"},
+        "intent_rationale": {"type": "string",
+                             "description": "why this intent (stage, disease "
+                                            "extent, fitness, goals of care)"},
+        "biomarker_category": {"type": "array", "items": {"type": "string"},
+                               "description": "YOUR biomarker category codes from "
+                                              "the table (NSCL-21 … NSCL-39); empty "
+                                              "while the work-up is incomplete"},
+        "biomarker_rationale": {"type": "string",
+                                "description": "which results place the case there, "
+                                               "or which markers are still untested"},
         "options": {"type": "array", "items": _obj({
             "name": {"type": "string"},
             "rationale": {"type": "string"},
@@ -313,6 +353,9 @@ class AgentToolbox:
         from ..tools.registry import ToolRegistry
 
         self.registry = ToolRegistry()
+        #: Full autonomy: the model's recorded stage (not the engine's) is
+        #: every tool's default, and the notes never echo an engine stage.
+        self.autonomous = False
         self.facts: dict[str, Any] = dict(facts or {})
         self.vision_llm = vision_llm
         self.attachments: dict[str, list[str]] = {"images": [], "reports": []}
@@ -345,14 +388,16 @@ class AgentToolbox:
     def specs() -> list[ToolSpec]:
         return list(TOOL_SPECS)
 
-    def as_tools(self, *, read_only: bool = False, lang: str = "zh") -> list[Any]:
+    def as_tools(self, *, read_only: bool = False, lang: str = "zh",
+                 exclude: frozenset[str] | set[str] = frozenset()) -> list[Any]:
         """The clinical tools as runtime ``Tool`` objects (``read_only``
-        drops the case-note writer — specialists read, the lead writes)."""
+        drops the case-note writer — specialists read, the lead writes;
+        ``exclude`` drops named tools, e.g. :data:`KERNEL_TOOLS`)."""
         from .tools import Tool
 
         out = []
         for spec in TOOL_SPECS:
-            if read_only and spec.name in _STATEFUL:
+            if read_only and spec.name in _STATEFUL or spec.name in exclude:
                 continue
             out.append(Tool(spec.name, spec.description, spec.parameters,
                             handler=self._impl[spec.name], category="clinical",
@@ -398,6 +443,15 @@ class AgentToolbox:
                facts: dict[str, Any] | None = None) -> str | None:
         if stage_group:
             return str(stage_group).strip().upper()
+        if self.autonomous:
+            # The model's own recorded stage — never the engine's.
+            from ..staging import StagingError, normalize_stage_group
+
+            recorded = (facts if facts is not None else self.facts).get("stage_group")
+            try:
+                return normalize_stage_group(str(recorded)) if recorded else None
+            except StagingError:
+                return str(recorded).strip().upper()
         engine = self.engine_stage(facts)
         return engine.get("stage_group") if engine and engine.get("staged") else None
 
@@ -413,14 +467,15 @@ class AgentToolbox:
 
         cleaned, notes = sanitize_fact_payload(facts if isinstance(facts, dict) else {})
         changed, conflicts = merge_facts(self.facts, cleaned, overwrite=True)
-        engine = self.engine_stage()
+        data: dict[str, Any] = {"changed": changed, "notes": notes + conflicts,
+                                "case_notes": self.facts}
+        if not self.autonomous:
+            data["engine_stage"] = self.engine_stage()
         return {
             "ok": True,
             "summary": (f"recorded {len(changed)} fact(s)"
                         + (f", {len(notes)} refused/ignored" if notes else "")),
-            "data": {"changed": changed, "notes": notes + conflicts,
-                     "case_notes": self.facts,
-                     "engine_stage": engine},
+            "data": data,
         }
 
     # ------------------------------------------------------------- staging
@@ -454,10 +509,15 @@ class AgentToolbox:
         status = {gene: {"report": str(value), "status": bm.driver_status(value),
                          "positive_evidence": bm.positive_evidence(value) or None}
                   for gene, value in drivers.items()}
+        from ..knowledge.biomarker_categories import classify
+
+        category = classify({**self.facts, **facts})
         data = {"genes": status,
                 "egfr_classes": sorted(bm.egfr_classes(facts)),
                 "first_line_actionable": bm.first_line_actionable_drivers(facts),
-                "later_line_actionable": bm.later_line_actionable_drivers(facts)}
+                "later_line_actionable": bm.later_line_actionable_drivers(facts),
+                "biomarker_category": {k: category[k] for k in (
+                    "status", "codes", "missing", "markers", "summary_en")}}
         positives = [g.upper() for g, s in status.items() if s["status"] == "positive"]
         return {"ok": True,
                 "summary": f"{len(status)} gene(s); positive: "
@@ -671,7 +731,9 @@ class AgentToolbox:
                     "staging": view.get("staging"),
                     "plan": {k: plan.get(k) for k in (
                         "intent", "summary", "options", "regimen_ids",
-                        "trial_refs", "workup_needed", "uncertainties")},
+                        "trial_refs", "workup_needed", "uncertainties",
+                        "biomarker_category", "metastatic_sites",
+                        "supportive_care") if plan.get(k) is not None},
                     "violations": audit.get("violations") or [],
                     "open_questions": view.get("open_questions") or [],
                     "emergency_plan": view.get("emergency_plan"),

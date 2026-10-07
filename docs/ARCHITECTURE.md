@@ -91,6 +91,26 @@ The harness runs in one of two modes.
 | Interruption | CLI: Ctrl-C ends the turn (`KeyboardInterrupt` → cancelled, history repaired). Web: the page terminates and restarts the worker; the case resumes from its last exported session. |
 | Authority | Role and runtime configuration come from the surface; a session file (format `nsclc-agent-session/2`, `/1` still readable) supplies data only: facts and checkpoint facts are re-validated, the system prompt is rebuilt, inconsistent checkpoints are dropped. |
 
+### 2.1a Decision mode (v1.3)
+
+`AgentConfig.autonomy` decides who makes the clinical decisions in agent mode.
+
+| | `full` (default) | `assisted` |
+|---|---|---|
+| Stage, TNM, treatment intent, plan | the model decides | the model decides; the kernel is offered as a second opinion |
+| Kernel decision tools (`stage_tnm`, `assess_biomarkers`, `check_indication`, `check_organ_function`, `cns_assessment`, `later_line_options`, `rule_review`, `governed_reference`, `screen_emergency`) | not offered (lead and specialists) | offered |
+| Information tools (trial registry, regimen library and reference doses, guideline KB, clinical pathways, PubMed, citations, prognosis cohorts, interactions, attachments) | offered | offered |
+| Kernel hooks (`fact_seed`, `stage_consistency`, `rule_review`) | off by default | on |
+| Safety and provenance hooks (`emergency_screen`, `evidence_ledger`, `citation_provenance`, `dose_provenance`, `emergency_addressed`) | on | on |
+| Engine stage in the case notes / turn result | never | shown next to the model's stage |
+| Tools' default stage | the `stage_group` the model recorded | the engine's staging of the notes |
+
+`submit_consult` carries the model's `stage_group`, `tnm`, `stage_rationale`,
+`intent` (curative / palliative / supportive / emergency / undetermined) and
+`intent_rationale`; a missing or unknown intent is recorded as
+`undetermined`, never inferred. Explicit hook settings always win over the
+autonomy defaults. Surfaces: web settings 「决策方式」, CLI `--autonomy`.
+
 ### 2.2 Languages (v1.1)
 
 Localisation happens at the display edge and never inside the clinical kernel.
@@ -111,9 +131,13 @@ matches third-party and hypothetical cues on word boundaries.
 
 1. **The stage is never the model's.** Only `StagingAgent` writes
    `state.staging`, and it only ever writes what the symbolic engine
-   computed. The engine refuses ambiguity (bare T1/T2/N2/M1c, missing M,
-   NX/MX, non-AJCC9 editions) with messages that name the resolving test —
-   a refusal is the seed of the workup plan, not a dead end.
+   computed. The engine refuses ambiguity (missing M, NX/MX, non-AJCC9
+   editions, and a bare T1/T2/N2/M1/M1c whose subcategories would stage
+   differently) with messages that name the resolving test — a refusal is
+   the seed of the workup plan, not a dead end. A bare family whose
+   subcategories all give the same group is staged with a note (bare M1c
+   is IVB whether M1c1 or M1c2), and the record keeps the descriptor as
+   documented.
 2. **The critic is terminal and unconditional.** `NSCLCRunner.run` invokes
    `CriticAgent` in a `finally`; it observes failed-closed runs and runs
    where every clinical task was skipped.

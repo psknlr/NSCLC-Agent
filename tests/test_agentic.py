@@ -45,6 +45,9 @@ class Scripted:
         return item(messages) if callable(item) else item
 
 
+#: The kernel-assisted runtime (kernel tools + advisory kernel hooks).
+ASSISTED = {"autonomy": "assisted"}
+
 def call(name, args=None, cid=None, text=""):
     return LLMResponse(text=text, finish_reason="tool_calls", model="scripted-1",
                        tool_calls=[ToolCall(name, args or {}, id=cid or f"c_{name}")])
@@ -72,17 +75,29 @@ def test_every_declared_tool_has_an_implementation():
         assert name in box._impl, name
 
 
-def test_record_case_facts_validates_and_refuses_bare_n2():
+def test_record_case_facts_validates_and_engine_refuses_ambiguous_n2():
     box = AgentToolbox()
     out = box.record_case_facts({"tnm": {"t": "T2b", "n": "N2", "m": "M0"},
                                  "ecog_ps": 9, "release_status": "x",
                                  "histologic_category": "adenocarcinoma"})
     notes = " ".join(out["data"]["notes"])
-    assert "CHAT_FACT_REFUSED[N]" in notes and "ecog_ps" in notes
-    assert "release_status" in notes
-    assert "tnm" not in box.facts and box.facts["histologic_category"] == "adenocarcinoma"
+    assert "ecog_ps" in notes and "release_status" in notes
+    assert box.facts["histologic_category"] == "adenocarcinoma"
+    # Bare N2 is recorded as documented; T2bN2a (IIIA) and T2bN2b (IIIB)
+    # differ, so the engine refuses and names the test that resolves it.
+    assert box.facts["tnm"]["n"] == "N2"
+    engine = out["data"]["engine_stage"]
+    assert engine["staged"] is False and "N2a" in engine["refusal"]
     box.record_case_facts({"tnm": {"t": "T2b", "n": "N2b", "m": "M0"}})
     assert box.engine_stage()["stage_group"] == "IIIB"
+
+
+def test_record_case_facts_stages_bare_m1c():
+    box = AgentToolbox()
+    box.record_case_facts({"tnm": {"t": "T4", "n": "N3", "m": "M1c", "prefix": "c"}})
+    engine = box.engine_stage()
+    assert engine["stage_group"] == "IVB" and engine["tnm"] == "cT4N3M1c"
+    assert "M1c not subclassified" in engine["descriptor_notes"][0]
 
 
 def test_tools_read_case_notes_and_overrides_do_not_persist():
@@ -159,7 +174,7 @@ def test_model_leads_and_rule_review_never_blocks():
         resubmit,
     )
     events = []
-    session = AgentSession(llm, on_event=events.append)
+    session = AgentSession(llm, on_event=events.append, config=ASSISTED)
     turn = session.turn("IV 期肺腺癌，EGFR L858R，PD-L1 80%。")
     assert turn.error is None
     assert turn.consult["options"][0]["regimen_ids"] == ["pembro_monotherapy"]
@@ -185,7 +200,7 @@ def test_model_leads_and_rule_review_never_blocks():
 def test_unanswered_findings_after_review_are_reported_not_enforced():
     llm = Scripted(call("submit_consult", PEMBRO_PLAN, cid="a"),
                    call("submit_consult", PEMBRO_PLAN, cid="b"))
-    session = AgentSession(llm)
+    session = AgentSession(llm, config=ASSISTED)
     session.toolbox.facts.update(json.loads(json.dumps(EGFR_IV)))
     turn = session.turn("同上")
     assert turn.review["unanswered"]
@@ -246,7 +261,7 @@ def test_reasoning_is_captured_from_think_tags_and_reasoning_content():
 
 def test_role_shapes_the_prompt_and_facts_are_seeded():
     llm = Scripted(call("submit_consult", {"reply": "ok"}))
-    session = AgentSession(llm, role="patient")
+    session = AgentSession(llm, role="patient", config=ASSISTED)
     session.turn("68岁，肺腺癌 cT2aN1M0，ECOG 1")
     system = llm.requests[0][0]["content"]
     assert "患者本人" in system
@@ -296,7 +311,8 @@ def test_history_compaction_keeps_prompt_bounded():
 
 
 def test_session_roundtrip_takes_no_authority_from_the_file():
-    session = AgentSession(Scripted(call("submit_consult", {"reply": "ok"})), role="oncologist")
+    session = AgentSession(Scripted(call("submit_consult", {"reply": "ok"})), role="oncologist",
+                           config=ASSISTED)
     session.turn("cT2aN0M1b 肺腺癌")
     data = json.loads(json.dumps(session.to_dict()))
     assert data["format"] == SESSION_FORMAT
@@ -320,7 +336,7 @@ def test_agent_mode_requires_a_model():
 
 def test_mock_agent_runs_the_real_loop():
     events = []
-    turn = AgentSession(MockLLMClient(), on_event=events.append).turn(
+    turn = AgentSession(MockLLMClient(), on_event=events.append, config=ASSISTED).turn(
         "68岁女性，肺腺癌 cT2bN2bM0，EGFR L858R，ALK阴性，不可切除，脑MRI阴性，无咯血。")
     assert [s["name"] for s in turn.steps if s["kind"] == "tool"] == [
         "update_plan", "governed_reference", "update_plan"]

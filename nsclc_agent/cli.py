@@ -782,6 +782,7 @@ def _agent_config(args) -> dict:
         "instructions": "" if args.no_memory else load_instructions(),
         "custom_agents": custom, "mcp_servers": servers,
         "language": getattr(args, "lang", None) or "zh",
+        "autonomy": getattr(args, "autonomy", None) or "full",
     }
     for key in ("max_steps", "context_window"):
         if getattr(args, key, None):
@@ -923,6 +924,17 @@ def cmd_agent(args) -> int:
             print(json.dumps(result.to_dict(), ensure_ascii=False, default=str))
         else:
             print(result.reply)
+            consult = result.consult or {}
+            intents = ({"curative": "curative", "palliative": "palliative",
+                        "supportive": "supportive", "emergency": "emergency",
+                        "undetermined": "undetermined"} if en else
+                       {"curative": "根治性", "palliative": "姑息性", "supportive": "支持治疗",
+                        "emergency": "急症处置", "undetermined": "待定"})
+            if consult.get("stage_group") or consult.get("intent"):
+                print(("\n— Model's decisions: stage {s} · intent {i}" if en
+                       else "\n— 模型判断：分期 {s} · 治疗意图 {i}").format(
+                    s=consult.get("stage_group") or "—",
+                    i=intents.get(consult.get("intent"), consult.get("intent") or "—")))
             review = result.review
             if review["findings"]:
                 print("\n— Hooks review (advisory, not hard constraints):" if en
@@ -1220,6 +1232,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="do not load NSCLC.md instructions")
     p.add_argument("--lang", choices=["zh", "en"],
                    help="language the agent writes in (default zh)")
+    p.add_argument("--autonomy", choices=["full", "assisted"],
+                   help="who decides: full = the model decides stage, intent "
+                        "and plan (default); assisted = also offer the "
+                        "deterministic kernel tools and kernel hooks")
     p.add_argument("--mcp", action="append", metavar="[NAME=]URL",
                    help="MCP server (Streamable HTTP); repeatable")
     p.set_defaults(func=cmd_agent)

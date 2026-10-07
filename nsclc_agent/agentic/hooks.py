@@ -23,6 +23,11 @@ from typing import Any, Callable
 
 EVENTS = ("user_prompt_submit", "post_tool_use", "stop")
 
+#: Hooks that compare the model's decisions with the deterministic kernel
+#: (or write kernel-extracted facts into its notes). Off by default in full
+#: autonomy; the safety alerts and provenance checks stay on.
+KERNEL_HOOKS = frozenset({"fact_seed", "stage_consistency", "rule_review"})
+
 
 @dataclass
 class HookResult:

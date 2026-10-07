@@ -46,12 +46,15 @@ from typing import Any
 
 from .case import Case
 from .interview import InterviewLoop
+from .knowledge.labs import _number as _lab_number
+from .knowledge.labs import extract_labs, sanitize_comorbidities, sanitize_organ_function
+from .knowledge.metastases import SITE_LABEL_ZH, extract_sites, sanitize_sites
 from .llm.base import LLMError, extract_json
 from .render import render
 from .runner import NSCLCRunner
 from .safety.rules import DOSE_RE, dose_in_payload, redact_doses
 from .staging import StagingError
-from .staging.tnm import _normalize_m, _normalize_n, _normalize_t  # noqa: PLC2701
+from .staging.tnm import normalize_descriptor
 from .state import CaseRunState, decision_fingerprint
 
 __all__ = [
@@ -97,6 +100,9 @@ ALLOWED_FACT_KEYS = frozenset({
     "treatment_history", "progression_findings", "progression_ngs_done",
     "prior_systemic_therapy", "cns_metastases", "bleeding_risk",
     "b12_folate_started", "qtc_ms",
+    # Metastatic sites beyond the brain, body measures for dosing and
+    # Cockcroft–Gault (v1.4.0).
+    "metastatic_sites", "weight_kg", "height_cm",
 })
 
 #: Harness-derived facts: re-derived from the cumulative narrative on
@@ -118,9 +124,12 @@ _ECOG_CHANGE_RE = re.compile(
     r"ECOG(?:\s*PS)?\s*(?:恶化到|升到|降到|变为|变成|到|至|为|is now)"
     r"\s*([0-4])\b", re.IGNORECASE)
 _PDL1_RE = re.compile(r"PD-?L1[^%\d]{0,12}(\d{1,3})\s*%", re.IGNORECASE)
+#: Bare families (T1, T2, N2, M1, M1c) are read too: the record keeps
+#: what was documented and the staging engine decides whether it fixes the
+#: stage group. Letter/digit boundaries (not \b) so "考虑cT4N3M1c期" reads.
 _TNM_RE = re.compile(
-    r"\b([cpy]{0,2})\s*T\s*(is|1mi|1a|1b|1c|2a|2b|3|4|x)\s*"
-    r"N\s*(0|1|2a|2b|3|x)\s*M\s*(0|1a|1b|1c1|1c2|x)\b",
+    r"(?<![A-Za-z0-9])([cpy]{0,2})\s*T\s*(is|1mi|1a|1b|1c|1|2a|2b|2|3|4|x)\s*"
+    r"N\s*(0|1|2a|2b|2|3|x)\s*M\s*(0|1a|1b|1c1|1c2|1c|1|x)(?![A-Za-z0-9])",
     re.IGNORECASE)
 _DRIVER_RE = re.compile(
     r"(EGFR|ALK|ROS1|KRAS|BRAF|MET|RET|HER2)"
@@ -146,14 +155,41 @@ _RESECT_UNSURE_RE = re.compile(
 _PACKYEARS_RE = re.compile(r"(\d{1,3})\s*(?:包年|pack.?years?)", re.IGNORECASE)
 
 
-_GENE_MENTION_RE = re.compile(r"(EGFR|ALK|ROS1|KRAS|BRAF|MET|RET|HER2)",
-                               re.IGNORECASE)
+_GENE_MENTION_RE = re.compile(
+    r"(EGFR|ALK|ROS1|KRAS|BRAF|NTRK\s*[123](?:\s*/\s*[23])*(?:\s*/\s*3)?|NTRK|MET|RET|"
+    r"ERBB2\s*[（(]\s*HER2\s*[）)]|ERBB2|HER2|NRG1)",
+    re.IGNORECASE)
+
+
+def _gene_key(mention: str) -> str:
+    """Report gene name → driver key (NTRK1/2/3 → ntrk, ERBB2/HER2 → erbb2)."""
+    text = re.sub(r"\s+", "", mention).lower()
+    if text.startswith("ntrk"):
+        return "ntrk"
+    if text.startswith(("erbb2", "her2")):
+        return "erbb2"
+    return text
 #: A "." breaks a clause only as sentence punctuation — never inside
 #: HGVS notation ("p.E746_A750del", "c.2573T>G").
 _CLAUSE_BREAK_RE = re.compile(r"[。;；\n,，、]|\.(?=\s|$)")
 #: Genes sharing one result ("EGFR/ALK阴性", "EGFR、ALK均阴性").
 _GENE_JOINER_RE = re.compile(r"^\s*(?:/|、|和|及|与|and|&|,|，)\s*$",
                              re.IGNORECASE)
+#: Between two genes of one enumerated list: the first gene's optional
+#: variant label ("MET exon14、", "BRAF V600E、") and a joiner — no result.
+_GENE_LIST_GAP_RE = re.compile(
+    r"^(?P<label>[\w.\-+>* ]{0,24}?)\s*(?P<joiner>/|、|和|及|与|\band\b|&|,|，)\s*$",
+    re.IGNORECASE)
+_RESULT_WORD_RE = re.compile(
+    r"阳性|阴性|野生型|未检出|无突变|检出|突变|扩增|融合|重排|结果|未出|待|"
+    r"positive|negative|wild|detected|mutat|amplif|fusion|rearrang|pending",
+    re.IGNORECASE)
+#: Where a list's shared result starts: a list-header colon or the first
+#: result word.
+_RESULT_START_RE = re.compile(r"[:：]|" + _RESULT_WORD_RE.pattern, re.IGNORECASE)
+#: Wording that makes one result explicitly cover the whole list.
+_RESULT_COVERS_ALL_RE = re.compile(r"^\s*[:：]|均|都|全部|\ball\b|\bboth\b",
+                                   re.IGNORECASE)
 #: A clause with no gene name that continues an EGFR result
 #: ("EGFR L858R，T790M阳性").
 _EGFR_CONTINUATION_RE = re.compile(
@@ -165,24 +201,41 @@ def _extract_drivers(text: str) -> dict[str, str]:
     """Each gene's result = its clause (up to a clause break or the next
     gene name), kept only when the SAME parser the planner uses reads it
     as positive or negative — the extractor can never disagree with the
-    planner, and a pending/untested clause states no result."""
+    planner, and a pending/untested clause states no result.
+
+    Genes enumerated in one list share the result that ends the list
+    ("EGFR、ALK、ROS1、RET、MET exon14、BRAF V600E：阴性" → all negative):
+    each gene is read as its own name and label plus that shared result,
+    never as the whole list (a list containing "MET exon14" once read as
+    five POSITIVE drivers). A list item carrying its own variant label is
+    ambiguous ("EGFR L858R、ALK阴性") unless a list-header colon or "均 /
+    all" makes the result cover every item; ambiguous items are left
+    unrecorded rather than guessed."""
     from .knowledge.biomarkers import driver_status
 
     drivers: dict[str, str] = {}
     mentions = list(_GENE_MENTION_RE.finditer(text))
-    for i, match in enumerate(mentions):
-        gene = match.group(1).lower()
-        # Shared result: walk over joined gene names to the clause that
-        # carries the status ("EGFR/ALK阴性" → both negative).
+    i = 0
+    while i < len(mentions):
+        # The enumerated list starting at gene i: genes joined by "、" "/"
+        # "和"…, each with an optional result-free variant label.
+        labels = []
         j = i
-        while j + 1 < len(mentions) and _GENE_JOINER_RE.match(
-                text[mentions[j].end():mentions[j + 1].start()]):
+        while j + 1 < len(mentions):
+            gap = text[mentions[j].end():mentions[j + 1].start()]
+            m = _GENE_LIST_GAP_RE.match(gap)
+            if not m or _RESULT_WORD_RE.search(gap):
+                break
+            if m.group("label").strip() and m.group("joiner") not in ("、", "/"):
+                break  # "EGFR 19del, ALK negative": a labelled item ends here
+            labels.append(m.group("label").strip())
             j += 1
         end = mentions[j + 1].start() if j + 1 < len(mentions) else len(text)
         brk = _CLAUSE_BREAK_RE.search(text, mentions[j].end(), end)
         clause_end = brk.start() if brk else end
-        snippet = text[match.start():clause_end].strip()
-        if gene == "egfr":
+        last = mentions[j]
+        last_snippet = text[last.start():clause_end].strip()
+        if last.group(1).lower() == "egfr":
             # Absorb gene-less continuation clauses (T790M, C797S …).
             cursor = clause_end
             while cursor < end:
@@ -190,13 +243,154 @@ def _extract_drivers(text: str) -> dict[str, str]:
                 piece = text[cursor + 1:(nxt.start() if nxt else end)]
                 if not _EGFR_CONTINUATION_RE.match(piece):
                     break
-                snippet = f"{snippet}; {piece.strip()}"
+                last_snippet = f"{last_snippet}; {piece.strip()}"
                 cursor = nxt.start() if nxt else end
-        if _PENDING_RE.search(snippet):
-            continue
-        if driver_status(snippet) in ("positive", "negative"):
-            drivers.setdefault(gene, snippet[:120])
+        tail = text[last.end():clause_end]
+        start = _RESULT_START_RE.search(tail)
+        shared = tail[start.start():].strip() if start else ""
+        covers_all = bool(_RESULT_COVERS_ALL_RE.search(shared)) or bool(
+            start and _RESULT_COVERS_ALL_RE.search(tail[:start.start()]))
+        snippets = []
+        if shared:
+            joint = shared if shared.startswith(("：", ":")) else " " + shared
+            for k, label in enumerate(labels):
+                gene_text = mentions[i + k].group(1)
+                if label and not covers_all:
+                    continue  # its own label + a later result: ambiguous
+                snippets.append((gene_text,
+                                 f"{gene_text}{' ' + label if label else ''}{joint}"))
+        snippets.append((last.group(1), last_snippet))
+        for gene_text, snippet in snippets:
+            snippet = snippet.strip()
+            if _PENDING_RE.search(snippet):
+                continue
+            if driver_status(snippet) in ("positive", "negative"):
+                drivers.setdefault(_gene_key(gene_text), snippet[:120])
+        i = j + 1
     return drivers
+
+
+#: Systemic agents the history extractor recognizes (Chinese names come
+#: from the sequencing alias table; the class "KRAS G12C抑制剂" too).
+_HISTORY_AGENT_RE = re.compile(
+    r"KRAS\s*G12C\s*(?:抑制剂|inhibitor)|G12C\s*(?:抑制剂|inhibitor)|"
+    r"奥希替尼|吉非替尼|厄洛替尼|阿法替尼|达可替尼|埃克替尼|阿美替尼|伏美替尼|"
+    r"克唑替尼|阿来替尼|布格替尼|塞瑞替尼|洛拉替尼|恩沙替尼|培美曲塞|卡铂|顺铂|"
+    r"紫杉醇|多西他赛|帕博利珠单抗|帕博利珠|阿替利珠单抗|纳武利尤单抗|度伐利尤单抗|"
+    r"索托拉西布|阿达格拉西布|格索雷塞|氟泽雷塞|戈来雷塞|"
+    r"\b(?:osimertinib|gefitinib|erlotinib|afatinib|dacomitinib|alectinib|"
+    r"brigatinib|lorlatinib|crizotinib|pemetrexed|carboplatin|cisplatin|"
+    r"paclitaxel|docetaxel|pembrolizumab|atezolizumab|nivolumab|durvalumab|"
+    r"sotorasib|adagrasib|amivantamab)\b", re.IGNORECASE)
+#: A sentence that reports giving the therapy (not a question about it).
+_HISTORY_GIVEN_RE = re.compile(
+    r"接受|给予|予以|使用|应用|服用|口服|治疗|[一二三四]线|"
+    r"\b(?:received|treated|started|given|line)\b", re.IGNORECASE)
+_HISTORY_QUESTION_RE = re.compile(
+    r"[?？]|是否|能否|可否|还是|下一步|建议|拟|计划|whether|should|\bplan", re.I)
+_HISTORY_LINE_RE = re.compile(
+    r"([一二三四])线|\b([1-4])(?:st|nd|rd|th)?[- ]line|\b([1-4])L\b", re.I)
+#: Progression in an outcome segment, beyond the word "进展/progression":
+#: enlarging lesions, new metastases, a new malignant effusion.
+_HISTORY_PROGRESSION_RE = re.compile(
+    r"(?:病灶|转移灶?|肿块|原发灶)[^。；;，,]{0,8}增大|新(?:出现|发)[^。；;]{0,10}"
+    r"(?:转移|病灶)|出现恶性(?:胸|心包)腔?积液|new\s+(?:\w+\s+){0,2}(?:lesion|metasta)|"
+    r"enlarg\w*\s+(?:lesion|metasta)", re.I)
+_REBIOPSY_RE = re.compile(
+    r"再次活检|重新活检|再活检|二次活检|液体活检|ctDNA|re-?biopsy|"
+    r"liquid biopsy|plasma\s+(?:ngs|genotyp)", re.I)
+_CN_LINE = {"一": 1, "二": 2, "三": 3, "四": 4}
+
+
+def _extract_history(text: str) -> dict[str, Any]:
+    """Treatment history from the narrative: one entry per sentence that
+    reports giving named systemic agents, with status "progression" only
+    when the text up to the next such sentence explicitly reports it
+    (progression, enlarging lesions, new metastases, a new malignant
+    effusion). Progression re-biopsy / ctDNA findings are recorded only
+    when a re-biopsy or ctDNA test is reported after the first therapy.
+    Questions about the next step never count."""
+    from .knowledge.sequencing import _text_says_progression
+
+    sentences = [x for x in re.split(r"(?<=[。！？!?；;\n])", text) if x.strip()]
+    therapy = [i for i, x in enumerate(sentences)
+               if _HISTORY_AGENT_RE.search(x) and _HISTORY_GIVEN_RE.search(x)
+               and not _HISTORY_QUESTION_RE.search(x)]
+    out: dict[str, Any] = {}
+    history = []
+    for k, i in enumerate(therapy):
+        stop = therapy[k + 1] if k + 1 < len(therapy) else len(sentences)
+        segment = "".join(x for x in sentences[i:stop]
+                          if not _HISTORY_QUESTION_RE.search(x))
+        agents = list(dict.fromkeys(m.group(0) for m in
+                                    _HISTORY_AGENT_RE.finditer(sentences[i])))
+        entry: dict[str, Any] = {"agents": agents}
+        m = _HISTORY_LINE_RE.search(sentences[i])
+        if m:
+            entry["line"] = _CN_LINE.get(m.group(1) or "") or int(m.group(2) or m.group(3))
+        if _text_says_progression(segment) or _HISTORY_PROGRESSION_RE.search(segment):
+            entry["status"] = "progression"
+        history.append(entry)
+    if history:
+        out["treatment_history"] = history
+        after = "".join(sentences[therapy[0]:])
+        rebiopsy = [x for x in sentences[therapy[0]:]
+                    if _REBIOPSY_RE.search(x) and not _HISTORY_QUESTION_RE.search(x)]
+        if rebiopsy:
+            out["progression_ngs_done"] = True
+            findings = {
+                "met_amplification": bool(re.search(r"MET\s*(?:基因)?(?:扩增|amplif)", after, re.I)),
+                "c797s": bool(re.search(r"C797S", after, re.I)),
+                "small_cell_transformation": bool(re.search(
+                    r"小细胞(?:肺癌)?转化|small[- ]cell transformation|SCLC transformation",
+                    after, re.I)),
+                "other": " ".join(x.strip() for x in rebiopsy)[:200],
+            }
+            out["progression_findings"] = findings
+    return out
+
+
+_CNS_ABSENT_RE = re.compile(
+    r"(?:无|未见|没有|未发现)(?:明显)?(?:颅内|脑)转移|脑\s*MRI\s*(?:阴性|未见(?:异常|转移)?|正常)|"
+    r"脑\s*MRI[^。；;，,\n]{0,10}(?:无|未见|没有)[^。；;，,\n]{0,6}转移|"
+    r"\bno\s+(?:evidence\s+of\s+)?brain\s+metasta|brain\s+MRI\s+(?:negative|normal|clear)",
+    re.I)
+_CNS_PRESENT_RE = re.compile(
+    r"(?:颅内|脑)[^。；;，,\n]{0,24}?转移|brain\s+(?:metasta|lesion)|"
+    r"\b(?:intracranial|cerebral)\s+metasta", re.I)
+_CNS_SYMPTOM_FREE_RE = re.compile(
+    r"无(?:明显)?(?:神经(?:系统)?)?症状|无(?:明显)?神经功能缺损|"
+    r"\basymptomatic\b|without\s+(?:neurologic(?:al)?\s+)?symptoms", re.I)
+_CNS_TREATED_RE = re.compile(
+    r"SRS|立体定向(?:放射|放疗)|伽马刀|全脑放疗|WBRT|gamma\s+knife|"
+    r"stereotactic\s+radio|(?:脑|颅内)[^。；;]{0,10}(?:切除|放疗)", re.I)
+
+
+def _extract_cns(text: str) -> dict[str, Any] | None:
+    """CNS status as documented: present only on a non-negated brain-
+    metastasis mention (an explicit negative wins only when nothing
+    positive is reported); symptom and treatment fields only when stated."""
+    present = [m for m in _CNS_PRESENT_RE.finditer(text)
+               if not _CNS_ABSENT_RE.search(text[max(0, m.start() - 8):m.end()])
+               and not re.search(r"无|未|没有|阴性|否认|\bno\b|negative|without",
+                                 m.group(0), re.I)]
+    if not present:
+        return {"status": "absent"} if _CNS_ABSENT_RE.search(text) else None
+    out: dict[str, Any] = {"status": "present", "source": "narrative"}
+    window = text[max(0, present[0].start() - 40):present[-1].end() + 60]
+    if _CNS_SYMPTOM_FREE_RE.search(window):
+        out["symptomatic"] = False
+    if _CNS_TREATED_RE.search(text):
+        out["treated"] = True
+    if re.search(r"单发|solitary|single", window, re.I):
+        out["burden"] = "limited"
+    elif re.search(r"多发(?:脑|颅内)?转移|multiple\s+brain", window, re.I):
+        out["burden"] = "extensive"
+    return out
+
+
+_NOS_RE = re.compile(
+    r"非特指|未特指|非特殊类型|NSCLC[-\s]*NOS|\bNOS\b|not\s+otherwise\s+specified", re.IGNORECASE)
 
 
 def extract_facts_deterministic(message: str) -> dict[str, Any]:
@@ -223,6 +417,19 @@ def extract_facts_deterministic(message: str) -> dict[str, Any]:
     drivers = _extract_drivers(text)
     if drivers:
         facts["driver_mutations"] = drivers
+        # A report giving results for most of the Tier-B genes IS a broad
+        # panel; do not ask for one again.
+        tier_b = {"ros1", "braf", "met", "ret", "kras", "her2"}
+        if len(tier_b & set(drivers)) >= 4:
+            facts["ngs_done"] = True
+    facts.update(_extract_history(text))
+    cns = _extract_cns(text)
+    if cns:
+        facts["cns_metastases"] = cns
+    sites = extract_sites(text)
+    if sites:
+        facts["metastatic_sites"] = sites
+    facts.update(extract_labs(text))
 
     lowered = text.lower()
     if "从不吸烟" in text or "不吸烟" in text or "never smok" in lowered:
@@ -253,6 +460,12 @@ def extract_facts_deterministic(message: str) -> dict[str, Any]:
         facts["histologic_category"] = "adenocarcinoma"
     elif "鳞癌" in text or "鳞状细胞癌" in text or "squamous" in lowered:
         facts["histologic_category"] = "squamous"
+    elif "大细胞癌" in text or re.search(r"large[- ]cell\s+(?:lung\s+)?carcinoma", lowered):
+        facts["histologic_category"] = "large_cell"
+    elif _NOS_RE.search(text):
+        # Only an explicit "not otherwise specified": a bare "NSCLC" says
+        # nothing about the subtype.
+        facts["histologic_category"] = "nsclc_nos"
     return facts
 
 
@@ -341,25 +554,52 @@ def sanitize_fact_payload(
             if not isinstance(value, dict):
                 notes.append("CHAT_FACT_IGNORED: tnm must be an object")
                 continue
+            # Each descriptor is kept as documented (a bare family such as
+            # "M1c" included — the staging engine decides whether it fixes
+            # the stage group); only an unrecognizable one is refused, and
+            # it never takes the valid descriptors down with it.
             validated: dict[str, Any] = {}
-            normalizers = {"t": _normalize_t, "n": _normalize_n, "m": _normalize_m}
-            ok = True
-            for kind, normalize in normalizers.items():
+            for kind in ("t", "n", "m"):
                 raw = value.get(kind)
                 if raw is None:
                     continue
                 try:
-                    validated[kind] = normalize(str(raw))
+                    validated[kind] = normalize_descriptor(kind, str(raw))
                 except StagingError as exc:
                     notes.append(f"CHAT_FACT_REFUSED[{kind.upper()}]: {exc}")
-                    ok = False
-            if not ok or not validated:
+            if not validated:
                 continue
             if value.get("prefix"):
                 validated["prefix"] = str(value["prefix"])
             value = validated
-        if key in ("driver_mutations", "pd_l1", "comorbidities",
-                   "organ_function"):
+        if key == "organ_function":
+            value, sub_notes = sanitize_organ_function(value)
+            notes.extend(sub_notes)
+            if not value:
+                continue
+            cleaned[key] = value
+            continue
+        if key == "metastatic_sites":
+            value, sub_notes = sanitize_sites(value)
+            notes.extend(sub_notes)
+            if not value:
+                continue
+            cleaned[key] = value
+            continue
+        if key in ("weight_kg", "height_cm"):
+            lo, hi = (20, 300) if key == "weight_kg" else (100, 250)
+            number = _lab_number(value)
+            if number is None:
+                notes.append(f"CHAT_FACT_IGNORED: {key} {value!r} is not a number")
+                continue
+            value = number
+            if not lo <= value <= hi:
+                notes.append(f"CHAT_FACT_IGNORED: {key} {value:g} out of range {lo}-{hi}")
+                continue
+        if key == "comorbidities" and isinstance(value, dict):
+            value, sub_notes = sanitize_comorbidities(value)
+            notes.extend(sub_notes)
+        if key in ("driver_mutations", "pd_l1", "comorbidities"):
             if not isinstance(value, dict):
                 notes.append(f"CHAT_FACT_IGNORED: {key} must be an object")
                 continue
@@ -465,8 +705,14 @@ def merge_facts(
             # Nulls neither write nor "touch": sanitize already drops them,
             # and a direct caller's null must not confirm a proposed fact.
             return
-        touched.append(path)
         current = container.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            # Nested blocks merge field by field (organ_function.renal.*):
+            # a new creatinine never erases the CrCl already on record.
+            for sub, sub_value in value.items():
+                settle(f"{path}.{sub}", current, sub, sub_value)
+            return
+        touched.append(path)
         if current is None or current == value:
             if current != value:
                 container[key] = value
@@ -509,6 +755,8 @@ def merge_facts(
 # Reply composition — deterministic first, polish optional and guarded
 # --------------------------------------------------------------------------
 
+_SITE_COUNT_ZH = {"single": "（单发）", "multiple": "（多发）"}
+
 _POLISH_SYSTEM = """你是会诊系统的表达润色器。把给你的已放行回复改写得更通顺、更贴合
 对话语气。硬性约束：不得新增任何临床内容、数值、药名或建议；不得删除问题或警示；
 不得出现任何剂量数值。只输出改写后的文本。"""
@@ -534,6 +782,17 @@ def compose_reply(state: CaseRunState, *, role: str,
             f"分期：{staging['stage_group']}"
             f"（{staging.get('edition', '')}，确定性引擎计算）")
     plan = state.outputs.get("treatment_plan") or {}
+    category = plan.get("biomarker_category") or {}
+    if category.get("summary_zh") and role != "patient":
+        parts.append(f"生物标志物分类：{category['summary_zh']}")
+    mets = plan.get("metastatic_sites") or {}
+    if mets.get("sites") and role != "patient":
+        listed = [f"{SITE_LABEL_ZH.get(site, '脑' if site == 'brain' else site)}"
+                  f"{_SITE_COUNT_ZH.get(status, '')}"
+                  for site, status in mets["sites"].items() if status != "absent"]
+        if listed:
+            hint = mets.get("suggested_m") or "/".join(mets.get("candidates") or [])
+            parts.append("转移部位：" + "、".join(listed) + (f"（按部位提示 {hint}）" if hint else ""))
     released = state.release_status in (
         "treatment_recommendation", "draft_for_tumor_board",
         "approved_by_tumor_board")
@@ -551,6 +810,9 @@ def compose_reply(state: CaseRunState, *, role: str,
             if name:
                 parts.append(f"• {tag}{name}"
                              + (f" — {rationale}" if rationale else ""))
+        if role != "patient":
+            for note in (plan.get("supportive_care") or [])[:3]:
+                parts.append(f"＋ 支持治疗：{note}")
     else:
         parts.append(f"目前尚不能给出治疗建议（{state.release_status}）："
                      f"请先完成下列问题与检查。")

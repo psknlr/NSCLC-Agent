@@ -20,13 +20,14 @@
 | PROGRESSION_SAME_DRUG | warn | Re-proposing a drug the disease progressed on | 3 |
 | CNS_UNTREATED_SYMPTOMATIC | block | Symptomatic untreated brain or leptomeningeal metastases are addressed first | 2 |
 | CNS_TNM_INCONSISTENT | warn | CNS metastases on record while the descriptors say M0 | 1 |
+| METASTASIS_TNM_INCONSISTENT | warn | (same rule) | 0 |
 | ORGAN_FUNCTION_GATE | block | Organ-function and comorbidity gates of each regimen | 3 |
 | ICI_COMORBIDITY_CAUTION | warn | Checkpoint inhibitor with interstitial lung disease or active autoimmune disease | 0 |
 | PS_GATE | warn | Performance status fits concurrent chemoradiation or perioperative therapy | 0 |
 | BIOMARKER_GAP | block | Tier-A biomarkers are known before systemic therapy | 0 |
 | DOSE_IN_MODEL_OUTPUT | block | No dose figures in model-authored text | 0 |
 
-The 20 rules raise 23 finding identifiers; '(same rule)' marks a further identifier raised by the rule in the row above.
+The 20 rules raise 24 finding identifiers; '(same rule)' marks a further identifier raised by the rule in the row above.
 *Severity is the rule's own grading. In governed mode a block finding stops release (after the bounded repair loop); in agent mode every finding is advisory and returns to the model, which must revise or justify an override.
 †Gold-standard audit probes (n = 28; deliberately unsafe plans given directly to the rule engine) that raised the finding; a probe may raise several.
 CNS, central nervous system; ICI, immune checkpoint inhibitor.

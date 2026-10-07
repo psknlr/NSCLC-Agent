@@ -264,7 +264,7 @@ const STATUS = {
   blocked: ["bad", "安全拦截", "终审发现阻断级违规，方案不得交付", "x"],
   failed_closed: ["bad", "故障关闭", "运行异常，按安全默认关闭", "x"],
   emergency_action_plan: ["emergency", "肿瘤急症", "急症短路：固定安全处置脚本，永不经模型改写", "siren"],
-  agent_done: ["accent", "模型结论", "模型主导会诊 · 规则引擎复核仅供参考", "sparkle"],
+  agent_done: ["accent", "模型结论", "模型主导 · 分期、治疗意图与方案由模型判断", "sparkle"],
   agent_emergency: ["emergency", "急症提示", "急症筛查命中 · 模型已优先处理", "siren"],
   agent_error: ["bad", "运行失败", "模型调用失败，可重试", "x"],
 };
@@ -445,11 +445,59 @@ function lastResult(c) {
 }
 const caseFacts = (c) => { const m = lastResult(c); return (m && (m.payload.session_facts || m.payload.facts)) || {}; };
 const isAgent = (p) => !!(p && p.mode === "agent");
-function defaultMode() { return llmOn() && LS.get("nsclc.pref.mode", "agent") !== "governed" ? "agent" : "governed"; }
+function defaultMode() { return llmOn() && LS.get("nsclc.pref.mode.v2", "agent") !== "governed" ? "agent" : "governed"; }
 
 /* ============================================================ fact display */
 
-const HIST = { adenocarcinoma: "腺癌", squamous: "鳞癌", adenosquamous: "腺鳞癌", large_cell: "大细胞癌", nsclc_nos: "NSCLC-NOS" };
+const HIST = { adenocarcinoma: "腺癌", squamous: "鳞癌", adenosquamous: "腺鳞癌", large_cell: "大细胞癌", nsclc_nos: "非特指" };
+const GENE_LABEL = { erbb2: "ERBB2（HER2）", her2: "HER2", ntrk: "NTRK1/2/3", nrg1: "NRG1" };
+const geneLabel = (g) => GENE_LABEL[g] || String(g).toUpperCase();
+const SITE_LABEL = { contralateral_lung: "对侧肺", pleura: "胸膜结节/播散", pleural_effusion: "恶性胸腔积液", pericardial: "心包结节/恶性心包积液",
+  bone: "骨", liver: "肝", adrenal: "肾上腺", distant_lymph_nodes: "远处淋巴结", other: "其他部位", brain: "脑" };
+const SITE_STATUS = { absent: "无", present: "有", single: "单发", multiple: "多发" };
+const COMORBID_LABEL = { ild: "间质性肺病", active_autoimmune: "活动性自身免疫病", autoimmune_disease: "自身免疫病史", heart_failure: "心力衰竭",
+  coronary_artery_disease: "冠心病", arrhythmia: "心律失常", hypertension: "高血压", diabetes: "糖尿病", copd: "慢阻肺", peripheral_neuropathy: "周围神经病变",
+  hearing_loss: "听力下降", hbv: "乙肝（HBsAg+）", hcv: "丙肝", hiv: "HIV", tuberculosis: "结核", organ_transplant: "器官移植",
+  chronic_kidney_disease: "慢性肾病", cirrhosis: "肝硬化" };
+/* Organ-function blocks: [label, [[key, label, unit], ...]] */
+const ORGAN_BLOCKS = {
+  hematologic: ["血常规", [["wbc", "WBC", "×10⁹/L"], ["anc", "ANC", "×10⁹/L"], ["hb", "Hb", "g/L"], ["plt", "PLT", "×10⁹/L"]]],
+  hepatic: ["肝功能", [["alt_uln", "ALT", "×ULN"], ["alt_u_l", "ALT", "U/L"], ["ast_uln", "AST", "×ULN"], ["ast_u_l", "AST", "U/L"], ["bilirubin_uln", "胆红素", "×ULN"],
+    ["bilirubin_umol_l", "胆红素", "µmol/L"], ["albumin_g_l", "白蛋白", "g/L"], ["child_pugh", "Child-Pugh", ""]]],
+  renal: ["肾功能", [["crcl_ml_min", "CrCl", "mL/min"], ["egfr_ml_min", "eGFR", "mL/min"], ["creatinine_umol_l", "肌酐", "µmol/L"]]],
+  cardiac: ["心功能", [["lvef_pct", "LVEF", "%"], ["nyha", "NYHA", ""]]],
+  pulmonary: ["肺功能", [["fev1_pct", "FEV1", "%"], ["dlco_pct", "DLCO", "%"]]],
+  electrolytes: ["电解质", [["calcium_mmol_l", "血钙", "mmol/L"], ["sodium_mmol_l", "血钠", "mmol/L"], ["potassium_mmol_l", "血钾", "mmol/L"]]],
+};
+function organBlockText(block, value) {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "object") return String(value);
+  const spec = (ORGAN_BLOCKS[block] || ["", []])[1];
+  const known = new Set(spec.map((x) => x[0]));
+  const parts = spec.filter(([k]) => value[k] !== undefined && value[k] !== null).map(([k, l, u]) => `${l} ${value[k]}${u ? (u === "%" ? "%" : ` ${u}`) : ""}`);
+  for (const [k, v] of Object.entries(value)) if (!known.has(k) && v !== null && typeof v !== "object") parts.push(`${k} ${v}`);
+  return parts.join(" · ");
+}
+function sitesText(sites) {
+  const entries = Object.entries(sites || {});
+  const present = entries.filter(([, v]) => v !== "absent").map(([k, v]) => `${SITE_LABEL[k] || k}${v === "single" || v === "multiple" ? `（${SITE_STATUS[v]}）` : ""}`);
+  const absent = entries.filter(([, v]) => v === "absent").map(([k]) => SITE_LABEL[k] || k);
+  return [present.join("、"), absent.length ? `无：${absent.join("、")}` : ""].filter(Boolean).join("；");
+}
+function comorbidText(c) {
+  const entries = Object.entries(c || {});
+  const label = (k, v) => (k === "peripheral_neuropathy" && typeof v === "number" ? `${COMORBID_LABEL[k]}（${v} 级）` : COMORBID_LABEL[k] || k);
+  const yes = entries.filter(([k, v]) => v && !(k === "peripheral_neuropathy" && v === 0)).map(([k, v]) => label(k, v));
+  const no = entries.filter(([k, v]) => v === false || (k === "peripheral_neuropathy" && v === 0)).map(([k]) => COMORBID_LABEL[k] || k);
+  return [yes.join("、"), no.length ? `已排除：${no.join("、")}` : ""].filter(Boolean).join("；") || "无";
+}
+function categoryInfo(code) {
+  const list = (Store.catalog && Store.catalog.biomarker_categories) || [];
+  return list.find((c) => c.code === code) || { code, label_zh: "" };
+}
+function categoryChips(codes) {
+  return h("div", { class: "chips" }, (codes || []).map((code) => { const c = categoryInfo(code); return h("span", { class: "chip regimen", title: c.label_zh || code }, c.label_zh ? `${code} · ${c.label_zh}` : code); }));
+}
 const NEG_RE = /negative|阴性|wild|野生|not detected|未检出|无突变/i;
 const ROLE_LABEL = { oncologist: "肿瘤科医师", patient: "患者", researcher: "研究者" };
 const OUTCOME = { progression: "进展", response: "缓解", stable: "稳定", toxicity: "毒性停药" };
@@ -459,7 +507,7 @@ function tnmText(tnm) {
   return `${tnm.prefix || "c"}${tnm.t || "T?"} ${tnm.n || "N?"} ${tnm.m || "M?"}`;
 }
 function keyDriver(f) {
-  for (const [g, v] of Object.entries(f.driver_mutations || {})) if (v && !NEG_RE.test(String(v))) return `${g.toUpperCase()} ${String(v).slice(0, 18)}`;
+  for (const [g, v] of Object.entries(f.driver_mutations || {})) if (v && !NEG_RE.test(String(v))) return `${geneLabel(g)} ${String(v).slice(0, 18)}`;
   return "";
 }
 function factChips(f) {
@@ -467,10 +515,12 @@ function factChips(f) {
   const out = [];
   if (f.tnm) out.push(tnmText(f.tnm));
   if (f.histologic_category) out.push(HIST[f.histologic_category] || f.histologic_category);
-  for (const [g, v] of Object.entries(f.driver_mutations || {})) out.push(`${g.toUpperCase()} ${v}`);
+  for (const [g, v] of Object.entries(f.driver_mutations || {})) out.push(`${geneLabel(g)} ${v}`);
   if (f.pd_l1 && f.pd_l1.tps !== undefined) out.push(`PD-L1 ${f.pd_l1.tps}%`);
   if (f.ecog_ps !== undefined) out.push(`ECOG ${f.ecog_ps}`);
   if (f.cns_metastases && f.cns_metastases.status) out.push(f.cns_metastases.status === "present" ? "脑转移" : "无脑转移");
+  const sites = Object.entries(f.metastatic_sites || {}).filter(([, v]) => v !== "absent").map(([k]) => SITE_LABEL[k] || k);
+  if (sites.length) out.push(`转移：${sites.join("、")}`);
   const crcl = f.organ_function && f.organ_function.renal && f.organ_function.renal.crcl_ml_min;
   if (crcl !== undefined) out.push(`CrCl ${crcl}`);
   for (const e of f.treatment_history || []) out.push(`${e.line ? `${e.line}线 ` : ""}${(e.agents || []).join("+")}${e.status ? ` ${OUTCOME[e.status] || e.status}` : ""}`);
@@ -483,7 +533,7 @@ function factRows(f) {
   if (f.tnm) add("TNM", h("span", { class: "mono" }, tnmText(f.tnm)));
   add("组织学", f.histologic_category ? HIST[f.histologic_category] || f.histologic_category : "");
   const drivers = Object.entries(f.driver_mutations || {});
-  if (drivers.length) add("驱动基因", h("div", null, drivers.map(([g, v]) => h("span", { class: "gene" + (NEG_RE.test(String(v)) ? " neg" : "") }, g.toUpperCase(), " ", String(v)))));
+  if (drivers.length) add("驱动基因", h("div", null, drivers.map(([g, v]) => h("span", { class: "gene" + (NEG_RE.test(String(v)) ? " neg" : "") }, geneLabel(g), " ", String(v)))));
   if (f.pd_l1) add("PD-L1", Object.entries(f.pd_l1).map(([k, v]) => `${k.toUpperCase()} ${v}%`).join(" · "));
   if (f.ecog_ps !== undefined) add("ECOG", String(f.ecog_ps));
   if (f.ngs_done !== undefined) add("广谱 NGS", f.ngs_done ? "已完成" : "未完成");
@@ -495,11 +545,16 @@ function factRows(f) {
     add("脑转移", [{ present: "有", absent: "无" }[c.status] || c.status, c.symptomatic === true ? "有症状" : c.symptomatic === false ? "无症状" : "",
       c.treated === true ? "已局部治疗" : c.treated === false ? "未治疗" : "", c.leptomeningeal ? "软脑膜" : "", c.burden || ""].filter(Boolean).join(" · "));
   }
+  if (f.metastatic_sites && Object.keys(f.metastatic_sites).length) add("转移部位", sitesText(f.metastatic_sites));
+  if (f.weight_kg || f.height_cm) add("体重/身高", [f.weight_kg ? `${f.weight_kg} kg` : "", f.height_cm ? `${f.height_cm} cm` : ""].filter(Boolean).join(" · "));
   if (f.organ_function) {
-    const o = f.organ_function; const parts = [];
-    if (o.renal && o.renal.crcl_ml_min !== undefined) parts.push(`CrCl ${o.renal.crcl_ml_min} mL/min`);
-    if (o.hepatic && o.hepatic.bilirubin_uln !== undefined) parts.push(`胆红素 ${o.hepatic.bilirubin_uln}×ULN`);
-    add("器官功能", parts.join(" · ") || JSON.stringify(o));
+    const o = f.organ_function;
+    for (const [block, value] of Object.entries(o)) {
+      if (block === "ppo_fev1_pct" || block === "ppo_dlco_pct") continue;
+      add((ORGAN_BLOCKS[block] || [block])[0], organBlockText(block, value));
+    }
+    const ppo = [o.ppo_fev1_pct !== undefined ? `ppoFEV1 ${o.ppo_fev1_pct}%` : "", o.ppo_dlco_pct !== undefined ? `ppoDLCO ${o.ppo_dlco_pct}%` : ""].filter(Boolean).join(" · ");
+    if (ppo) add("预计术后肺功能", ppo);
   }
   if (f.qtc_ms !== undefined) add("QTc", `${f.qtc_ms} ms`);
   if ((f.treatment_history || []).length) add("治疗史", h("div", null, f.treatment_history.map((e) => h("div", null, `${e.line ? `${e.line} 线 · ` : ""}${(e.agents || []).join(" + ")}${e.status ? ` · ${OUTCOME[e.status] || e.status}` : ""}`))));
@@ -512,8 +567,8 @@ function factRows(f) {
   add("体重下降", f.weight_loss ? String(f.weight_loss) : "");
   add("治疗目标", f.goals_of_care ? String(f.goals_of_care) : "");
   if ((f.medications || []).length) add("当前用药", f.medications.join("、"));
-  if (f.comorbidities) add("合并症", Object.entries(f.comorbidities).filter(([, v]) => v).map(([k]) => k).join("、") || "无");
-  const known = new Set(["age", "sex", "tnm", "histologic_category", "driver_mutations", "pd_l1", "ecog_ps", "ngs_done", "resectability_category", "operable", "disease_extent", "cns_metastases", "organ_function", "qtc_ms", "treatment_history", "progression_ngs_done", "progression_findings", "prior_systemic_therapy", "bleeding_risk", "b12_folate_started", "smoking_history", "weight_loss", "goals_of_care", "medications", "comorbidities", "staging_system", "stage_group"]);
+  if (f.comorbidities) add("合并症与器官损害", comorbidText(f.comorbidities));
+  const known = new Set(["age", "sex", "tnm", "histologic_category", "driver_mutations", "pd_l1", "ecog_ps", "ngs_done", "resectability_category", "operable", "disease_extent", "cns_metastases", "organ_function", "qtc_ms", "treatment_history", "progression_ngs_done", "progression_findings", "prior_systemic_therapy", "bleeding_risk", "b12_folate_started", "smoking_history", "weight_loss", "goals_of_care", "medications", "comorbidities", "staging_system", "stage_group", "metastatic_sites", "weight_kg", "height_cm"]);
   for (const [k, v] of Object.entries(f)) if (!known.has(k) && !k.startsWith("_")) add(k, typeof v === "object" ? JSON.stringify(v).slice(0, 90) : String(v));
   return rows;
 }
@@ -690,6 +745,8 @@ function renderResult(res, ms, opts) {
       h("div", { class: "card-head" }, h("h3", null, "方案概要"),
         h("div", { class: "right" }, plan.intent ? h("span", { class: "chip" }, plan.intent) : null, plan.mdt_referral ? h("span", { class: "chip warn" }, "MDT 转诊") : null)),
       h("div", null, plan.summary || "—"),
+      plan.biomarker_category && plan.biomarker_category.status ? h("div", { style: { marginTop: "10px" } }, h("div", { class: "muted small" }, "生物标志物分类"),
+        (plan.biomarker_category.codes || []).length ? categoryChips(plan.biomarker_category.codes) : h("div", null, plan.biomarker_category.summary_zh)) : null,
       (plan.trial_refs || []).length ? h("div", { style: { marginTop: "12px" } }, h("div", { class: "chips" }, plan.trial_refs.map(trialChip))) : null)));
   const options = plan.options || [];
   wrap.appendChild(h("div", { class: "card" },
@@ -733,6 +790,19 @@ function renderPlanDetail(plan, onc) {
   blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "待完善检查"), fmtList(plan.workup_needed)));
   if ((plan.extrapolations || []).length) blocks.appendChild(h("div", null, h("h4", null, "声明的外推"), jsonBlock(plan.extrapolations)));
   if ((plan.provisional_regimens || []).length) blocks.appendChild(h("div", null, h("h4", null, "暂定方案（待补事实）"), jsonBlock(plan.provisional_regimens)));
+  if (plan.biomarker_category && plan.biomarker_category.status) {
+    const bc = plan.biomarker_category;
+    blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "生物标志物分类（NSCL-21 … NSCL-39）"),
+      (bc.codes || []).length ? categoryChips(bc.codes) : h("div", null, bc.summary_zh),
+      (bc.missing || []).length ? h("div", { style: { marginTop: "6px" } }, h("div", { class: "muted small" }, "分类前待检："), fmtList(bc.missing)) : null));
+  }
+  if (plan.metastatic_sites) {
+    const ms = plan.metastatic_sites;
+    blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "转移部位与 M 分期提示"),
+      h("div", null, sitesText(ms.sites)),
+      h("div", { class: "muted small", style: { marginTop: "6px" } }, `按部位提示：${ms.suggested_m || (ms.candidates || []).join(" / ") || "—"}（${ms.basis || ""}）`)));
+  }
+  if ((plan.supportive_care || []).length) blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "支持治疗"), fmtList(plan.supportive_care)));
   if (plan.organ_gates) {
     blocks.appendChild(h("div", null, h("h4", { style: { marginBottom: "6px" } }, "器官功能闸门"),
       (plan.organ_gates.failed || []).length ? h("div", { class: "chips", style: { marginBottom: "8px" } }, plan.organ_gates.failed.map((f) => h("span", { class: "chip block" }, `${f.gate}: ${f.note}`))) : h("div", { class: "muted small" }, "无不合格闸门"),
@@ -1063,7 +1133,12 @@ function traceBlock(steps, live) {
 const DECISION = { accepted: ["ok", "已采纳"], overridden: ["warn", "保留方案 · 已说明理由"] };
 function reviewPanel(review) {
   const findings = (review && review.findings) || [];
-  if (!findings.length) return h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "Hooks 复核"), h("div", { class: "metrics" }, h("span", { class: "metric ok" }, icon("lab"), "无复核意见 · 规则引擎、分期一致性、引用与剂量溯源已核对")));
+  if (!findings.length) {
+    /* Name only the stop hooks that ran (older sessions carry no list). */
+    const ran = (review && review.checked) || null;
+    const what = ran ? (ran.length ? `${ran.map((x) => HOOK_TITLE[x] || x).join("、")}已核对` : "未启用提交时的 Hooks") : "规则引擎、分期一致性、引用与剂量溯源已核对";
+    return h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "Hooks 复核"), h("div", { class: "metrics" }, h("span", { class: "metric ok" }, icon("lab"), `无复核意见 · ${what}`)));
+  }
   const answers = Object.fromEntries((review.responses || []).filter((r) => r && r.rule_id).map((r) => [r.rule_id, r]));
   return h("div", { class: "rx-sec" },
     h("div", { class: "lbl" }, "Hooks 复核", h("span", { class: "chip" }, "参考意见 · 非硬约束")),
@@ -1076,6 +1151,18 @@ function reviewPanel(review) {
         h("div", { class: "msg" }, f.message),
         a && a.reason ? h("div", { class: "why" }, h("b", null, "模型理由："), raw(a.reason)) : null);
     }));
+}
+const INTENT_LABEL = { curative: "根治性", palliative: "姑息性", supportive: "支持治疗", emergency: "急症处置", undetermined: "待定" };
+/* The model's own reasoning for its stage and treatment intent. */
+function judgementSec(k) {
+  const codes = k.biomarker_category || [];
+  if (!k.stage_rationale && !k.intent_rationale && !codes.length && !k.biomarker_rationale) return null;
+  return h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "模型判断依据"),
+    h("div", { class: "stack", style: { gap: "6px" } },
+      k.stage_rationale ? h("div", null, h("b", null, `分期${k.stage_group ? ` ${k.stage_group}` : ""}：`), raw(k.stage_rationale)) : null,
+      codes.length || k.biomarker_rationale ? h("div", null, h("b", null, "生物标志物分类："), codes.length ? categoryChips(codes) : h("span", { class: "muted" }, "未归类（检测未完成）"),
+        k.biomarker_rationale ? h("div", { class: "why" }, raw(k.biomarker_rationale)) : null) : null,
+      k.intent_rationale ? h("div", null, h("b", null, `治疗意图（${INTENT_LABEL[k.intent] || k.intent || "待定"}）：`), raw(k.intent_rationale)) : null));
 }
 function agentCard(p, m) {
   const k = p.consult || {};
@@ -1094,12 +1181,15 @@ function agentCard(p, m) {
         ? h("div", { class: "chip warn", style: { marginTop: "6px" } }, `引擎：${engine.stage_group}`) : null),
     h("div", { class: `rx-status tone-${meta[0]}` },
       h("div", { class: "st" }, h("span", { class: "g" }, icon(meta[3])), meta[1],
-        k.intent ? h("span", { class: "chip" }, { curative: "根治性", palliative: "姑息性", supportive: "支持治疗", emergency: "急症处置", undetermined: "待定" }[k.intent] || k.intent) : null,
+        k.intent ? h("span", { class: "chip", title: "治疗意图 · 模型判断" }, INTENT_LABEL[k.intent] || k.intent) : null,
+        (k.biomarker_category || []).length ? h("span", { class: "chip regimen", title: "生物标志物分类 · 模型判断" }, k.biomarker_category.join(" · ")) : null,
         conf ? h("span", { class: `chip ${conf[0]}` }, conf[1]) : null),
       k.assessment ? h("div", { class: "d" }, raw(k.assessment)) : h("div", { class: "d" }, meta[2]),
       h("div", { class: "metrics" }, h("span", { class: "metric" }, icon("sparkle"), `${p.model || "模型"} · ${p.llm_calls} 次推理`),
         h("span", { class: "metric" }, `${tools} 次工具调用`), m.ms ? h("span", { class: "metric" }, `${(m.ms / 1000).toFixed(1)} s`) : null,
         ctx.ratio !== undefined ? h("span", { class: "metric", title: `约 ${ctx.tokens} / ${ctx.window} tokens` }, `上下文 ${Math.max(1, Math.round(ctx.ratio * 100))}%`) : null))));
+  const judged = judgementSec(k);
+  if (judged) rx.appendChild(judged);
   if (p.emergency) {
     rx.appendChild(h("div", { class: "rx-sec emergency" }, h("div", { class: "lbl" }, "急症筛查（标准处置路径，供参考）"),
       fmtList((p.emergency.pathway || {}).immediate_actions || p.emergency.signals)));
@@ -1200,33 +1290,75 @@ const T_OPTIONS = ["", "Tis", "T1mi", "T1a", "T1b", "T1c", "T2a", "T2b", "T3", "
 const N_OPTIONS = ["", "N0", "N1", "N2a", "N2b", "N2", "N3", "NX"];
 const M_OPTIONS = ["", "M0", "M1a", "M1b", "M1c1", "M1c2", "M1c", "MX"];
 const TRI = [["", "未记录"], ["true", "是"], ["false", "否"]];
-const GENES = ["egfr", "alk", "ros1", "ret", "met", "braf", "ntrk", "her2", "kras"];
-const DRIVER_HINTS = ["negative", "L858R", "exon 19 deletion", "exon 20 insertion", "G719X", "L858R + T790M", "EML4-ALK fusion", "CD74-ROS1 fusion", "KIF5B-RET fusion", "exon 14 skipping", "V600E", "G12C", "not tested", "阴性", "19外显子缺失"];
+/* Driver genes in the order of the category table (NSCL-21 … NSCL-37). */
+const GENES = ["egfr", "kras", "alk", "ros1", "braf", "ntrk", "met", "ret", "erbb2", "nrg1"];
+const GENE_ALIAS = { erbb2: "her2" };
+const DRIVER_HINTS = ["negative", "L858R", "exon 19 deletion", "exon 20 insertion", "G719X", "L861Q", "S768I", "L858R + T790M", "G12C", "G12D", "EML4-ALK fusion",
+  "CD74-ROS1 fusion", "V600E", "ETV6-NTRK3 fusion", "NTRK1 fusion", "exon 14 skipping", "KIF5B-RET fusion", "exon 20 insertion (YVMA)", "CD74-NRG1 fusion",
+  "not tested", "阴性", "19外显子缺失", "融合阳性"];
+const SITE_OPTIONS = [["", "未记录"], ["absent", "无"], ["present", "有（数目未明）"], ["single", "单发"], ["multiple", "多发"]];
+const GRADE_OPTIONS = [["", "未记录"], ["false", "无"], ["1", "1 级"], ["2", "2 级"], ["3", "3 级"], ["4", "4 级"]];
 const FACT_FIELDS = [
-  { g: "临床", key: "histologic_category", label: "组织学", type: "select", options: [["", "未记录"], ["adenocarcinoma", "腺癌"], ["squamous", "鳞癌"], ["adenosquamous", "腺鳞癌"], ["large_cell", "大细胞癌"], ["nsclc_nos", "NSCLC-NOS"]] },
+  { g: "临床", key: "histologic_category", label: "组织学", type: "select", options: [["", "未记录"], ["adenocarcinoma", "腺癌"], ["squamous", "鳞癌"], ["adenosquamous", "腺鳞癌"], ["large_cell", "大细胞癌"], ["nsclc_nos", "非特指"]] },
+  { g: "临床", key: "age", label: "年龄（岁）", type: "number" },
+  { g: "临床", key: "sex", label: "性别", type: "select", options: [["", "未记录"], ["male", "男"], ["female", "女"]] },
   { g: "临床", key: "ecog_ps", label: "ECOG PS", type: "int", options: [["", "未记录"], ["0", "0"], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"]] },
   { g: "临床", key: "pd_l1.tps", label: "PD-L1 TPS (%)", type: "number" },
   { g: "临床", key: "ngs_done", label: "广谱 NGS 已完成", type: "bool" },
   { g: "临床", key: "resectability_category", label: "可切除性", type: "select", options: [["", "未记录"], ["RESECTABLE", "可切除"], ["UNRESECTABLE", "不可切除"]] },
   { g: "临床", key: "operable", label: "可耐受手术", type: "tri" },
   { g: "临床", key: "disease_extent", label: "疾病范围", type: "select", options: [["", "未记录"], ["OLIGOMETASTATIC", "寡转移"], ["POLYMETASTATIC", "广泛转移"]] },
+  { g: "临床", key: "weight_kg", label: "体重（kg）", type: "number" },
+  { g: "临床", key: "height_cm", label: "身高（cm）", type: "number" },
   { g: "临床", key: "medications", label: "当前用药（逗号分隔）", type: "list" },
-  ...GENES.map((gene) => ({ g: "驱动基因（报告原文）", key: `driver_mutations.${gene}`, label: gene.toUpperCase(), type: "driver" })),
+  ...GENES.map((gene) => ({ g: "驱动基因（报告原文）", key: `driver_mutations.${gene}`, alias: GENE_ALIAS[gene] && `driver_mutations.${GENE_ALIAS[gene]}`, label: geneLabel(gene), type: "driver" })),
   { g: "脑转移（CNS）", key: "cns_metastases.status", label: "状态", type: "select", options: [["", "未记录"], ["absent", "无"], ["present", "有"]] },
   { g: "脑转移（CNS）", key: "cns_metastases.symptomatic", label: "有症状", type: "tri" },
   { g: "脑转移（CNS）", key: "cns_metastases.treated", label: "已局部治疗", type: "tri" },
   { g: "脑转移（CNS）", key: "cns_metastases.leptomeningeal", label: "软脑膜病变", type: "tri" },
-  { g: "器官功能与合并症", key: "organ_function.renal.crcl_ml_min", label: "CrCl (mL/min)", type: "number" },
-  { g: "器官功能与合并症", key: "organ_function.hepatic.bilirubin_uln", label: "胆红素 (×ULN)", type: "number" },
-  { g: "器官功能与合并症", key: "qtc_ms", label: "QTc (ms)", type: "number" },
-  { g: "器官功能与合并症", key: "comorbidities.ild", label: "间质性肺病史", type: "tri" },
-  { g: "器官功能与合并症", key: "comorbidities.active_autoimmune", label: "活动性自身免疫病", type: "tri" },
-  { g: "器官功能与合并症", key: "bleeding_risk.hemoptysis_history", label: "咯血史", type: "tri" },
+  ...Object.keys(SITE_LABEL).filter((k) => k !== "brain").map((site) => ({ g: "转移部位（脑以外）", key: `metastatic_sites.${site}`, label: SITE_LABEL[site], type: "select", options: SITE_OPTIONS })),
+  { g: "血常规", key: "organ_function.hematologic.wbc", label: "WBC (×10⁹/L)", type: "number" },
+  { g: "血常规", key: "organ_function.hematologic.anc", label: "中性粒细胞 ANC (×10⁹/L)", type: "number" },
+  { g: "血常规", key: "organ_function.hematologic.hb", label: "血红蛋白 Hb (g/L)", type: "number" },
+  { g: "血常规", key: "organ_function.hematologic.plt", label: "血小板 PLT (×10⁹/L)", type: "number" },
+  { g: "肝功能", key: "organ_function.hepatic.alt_u_l", label: "ALT (U/L)", type: "number" },
+  { g: "肝功能", key: "organ_function.hepatic.ast_u_l", label: "AST (U/L)", type: "number" },
+  { g: "肝功能", key: "organ_function.hepatic.bilirubin_uln", label: "胆红素 (×ULN)", type: "number" },
+  { g: "肝功能", key: "organ_function.hepatic.bilirubin_umol_l", label: "总胆红素 (µmol/L)", type: "number" },
+  { g: "肝功能", key: "organ_function.hepatic.albumin_g_l", label: "白蛋白 (g/L)", type: "number" },
+  { g: "肝功能", key: "organ_function.hepatic.child_pugh", label: "Child-Pugh 分级", type: "select", options: [["", "未记录"], ["A", "A"], ["B", "B"], ["C", "C"]] },
+  { g: "肾功能与电解质", key: "organ_function.renal.crcl_ml_min", label: "CrCl (mL/min)", type: "number" },
+  { g: "肾功能与电解质", key: "organ_function.renal.creatinine_umol_l", label: "血肌酐 (µmol/L)", type: "number" },
+  { g: "肾功能与电解质", key: "organ_function.renal.egfr_ml_min", label: "eGFR (mL/min/1.73m²)", type: "number" },
+  { g: "肾功能与电解质", key: "organ_function.electrolytes.calcium_mmol_l", label: "校正血钙 (mmol/L)", type: "number" },
+  { g: "肾功能与电解质", key: "organ_function.electrolytes.sodium_mmol_l", label: "血钠 (mmol/L)", type: "number" },
+  { g: "肾功能与电解质", key: "organ_function.electrolytes.potassium_mmol_l", label: "血钾 (mmol/L)", type: "number" },
+  { g: "心肺功能", key: "organ_function.cardiac.lvef_pct", label: "LVEF (%)", type: "number" },
+  { g: "心肺功能", key: "organ_function.cardiac.nyha", label: "NYHA 心功能分级", type: "int", options: [["", "未记录"], ["1", "I"], ["2", "II"], ["3", "III"], ["4", "IV"]] },
+  { g: "心肺功能", key: "qtc_ms", label: "QTc (ms)", type: "number" },
+  { g: "心肺功能", key: "organ_function.pulmonary.fev1_pct", label: "FEV1 (% 预计值)", type: "number" },
+  { g: "心肺功能", key: "organ_function.pulmonary.dlco_pct", label: "DLCO (% 预计值)", type: "number" },
+  { g: "心肺功能", key: "organ_function.ppo_fev1_pct", label: "ppoFEV1 (%)", type: "number" },
+  { g: "合并症与器官损害", key: "comorbidities.ild", label: "间质性肺病史", type: "tri" },
+  { g: "合并症与器官损害", key: "comorbidities.active_autoimmune", label: "活动性自身免疫病", type: "tri" },
+  { g: "合并症与器官损害", key: "bleeding_risk.hemoptysis_history", label: "咯血史", type: "tri" },
+  ...["heart_failure", "coronary_artery_disease", "arrhythmia", "hypertension", "diabetes", "copd", "chronic_kidney_disease", "cirrhosis", "hearing_loss", "hbv", "hcv", "hiv", "tuberculosis", "organ_transplant"]
+    .map((k) => ({ g: "合并症与器官损害", key: `comorbidities.${k}`, label: COMORBID_LABEL[k], type: "tri" })),
+  { g: "合并症与器官损害", key: "comorbidities.peripheral_neuropathy", label: "周围神经病变", type: "grade", options: GRADE_OPTIONS },
   { g: "进展与耐药", key: "progression_ngs_done", label: "进展期 NGS 已做", type: "bool" },
   { g: "进展与耐药", key: "progression_findings.met_amplification", label: "MET 扩增", type: "bool" },
   { g: "进展与耐药", key: "progression_findings.c797s", label: "C797S", type: "bool" },
   { g: "进展与耐药", key: "progression_findings.small_cell_transformation", label: "小细胞转化", type: "bool" },
 ];
+const FORM_OPEN_GROUPS = new Set(["临床", "驱动基因（报告原文）", "脑转移（CNS）", "转移部位（脑以外）"]);
+/* Reference shown inside a form group: the biomarker category table and the M rules. */
+const FORM_GROUP_NOTES = {
+  "驱动基因（报告原文）": () => h("details", { class: "ref-table" }, h("summary", null, "生物标志物分类表（NSCL-21 … NSCL-39）"),
+    h("div", { class: "muted small", style: { margin: "6px 0" } }, "晚期 NSCLC 依据检测结果确定治疗类别；12 项可靶向标志物均为阴性后，才按 PD-L1 归入 NSCL-38 / NSCL-39。"),
+    h("div", { class: "todo" }, ((Store.catalog && Store.catalog.biomarker_categories) || []).map((c) => h("div", null, h("b", { class: "mono" }, c.code), h("span", null, c.label_zh))))),
+  "转移部位（脑以外）": () => h("div", { class: "muted small", style: { marginBottom: "8px" } },
+    "M1a：对侧肺、胸膜/心包结节或恶性胸腔/心包积液；M1b：胸腔外单发转移；M1c1：单一器官系统多发；M1c2：多个器官系统。侵犯纵隔/脏层胸膜属 T 分期。脑转移在上方「脑转移（CNS）」填写。"),
+};
 function getPath(obj, path) { return path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), obj); }
 function setPath(obj, path, value) {
   const keys = path.split("."); let o = obj;
@@ -1249,7 +1381,9 @@ function formState(facts) {
   const tnm = facts.tnm || {};
   const fields = {};
   for (const f of FACT_FIELDS) {
-    const v = getPath(facts, f.key);
+    let v = getPath(facts, f.key);
+    if ((v === undefined || v === null) && f.alias) v = getPath(facts, f.alias);
+    if (v === true && f.type === "grade") v = "";
     if (v !== undefined && v !== null) fields[f.key] = f.type === "list" && Array.isArray(v) ? v.join(", ") : String(v);
   }
   const history = (facts.treatment_history || []).map((e) => ({ line: e.line ? String(e.line) : "", agents: (e.agents || []).join(", "), status: e.status || "" }));
@@ -1273,6 +1407,7 @@ function diffFacts(init, cur) {
     if (f.type === "int") value = parseInt(raw, 10);
     else if (f.type === "number") { value = Number(raw); if (Number.isNaN(value)) continue; }
     else if (f.type === "bool" || f.type === "tri") value = raw === "true";
+    else if (f.type === "grade") value = raw === "false" ? false : parseInt(raw, 10);
     else if (f.type === "list") value = raw.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
     setPath(out, f.key, value);
   }
@@ -1313,14 +1448,18 @@ function openCaseForm(c) {
       const val = cur.fields[f.key] || "";
       const set = (v) => { cur.fields[f.key] = v; };
       let control;
-      if (f.type === "select" || f.type === "int") control = selectEl(f.options, val, set);
+      if (f.type === "select" || f.type === "int" || f.type === "grade") control = selectEl(f.options, val, set);
       else if (f.type === "tri" || f.type === "bool") control = selectEl(TRI, val, set);
       else if (f.type === "number") control = inputEl("number", val, set);
       else if (f.type === "driver") control = inputEl("text", val, set, "报告原文，如 L858R / negative", "driver-hints");
       else control = inputEl("text", val, set);
       grid.appendChild(fieldLabel(f.label, control, f.key, f.type === "list" ? "span-2" : ""));
     }
-    body.appendChild(h("fieldset", null, h("legend", null, g), grid));
+    const filled = fields.filter((f) => (cur.fields[f.key] || "") !== "").length;
+    const note = FORM_GROUP_NOTES[g] ? FORM_GROUP_NOTES[g]() : null;
+    /* Lab and comorbidity groups start folded unless they already hold values. */
+    body.appendChild(h("details", { class: "fgroup", open: FORM_OPEN_GROUPS.has(g) || filled > 0 },
+      h("summary", null, g, filled ? h("span", { class: "count" }, `已填 ${filled} 项`) : null), note, grid));
   }
   const histHost = h("div", { class: "stack" });
   const drawHistory = () => {
@@ -1436,10 +1575,16 @@ const Workspace = {
         h("div", { class: "turn-body" }, h("div", { class: "thinking" }, h("span", { class: "dots" }, h("i"), h("i"), h("i")),
           h("span", { class: "shimmer" }, llmOn() ? "模型辅助推理中 · 分期与安全规则由确定性内核裁决…" : "正在会诊 · 急症筛查 → 分期 → 方案 → 安全终审…")))));
       const needsModel = c.mode === "agent" && !llmOn();
+      /* A governed case with a model connected: say plainly who decides,
+         and offer the model-led consult the clinician probably expected. */
+      const governedWithModel = c.mode !== "agent" && llmOn() && !this.busy;
       col.appendChild(h("div", { class: "dock" }, h("div", { class: "dock-inner" },
         needsModel ? h("div", { class: "callout warn", style: { marginBottom: "10px" } }, icon("key"), h("div", { style: { flex: 1 } },
           "这是模型主导的会诊，当前未接入模型（为安全起见，密钥默认只保存在当前页面内存中，刷新后需重新接入）。"),
           h("button", { class: "btn sm", type: "button", onclick: () => { location.hash = "#/settings"; } }, "接入模型")) : null,
+        governedWithModel ? h("div", { class: "callout governed-note", style: { marginBottom: "10px" } }, icon("info"), h("div", { style: { flex: 1 } },
+          "这是「受治理」会诊：分期、安全规则与放行由确定性内核裁决，已接入的模型只做事实抽取与措辞润色，不做临床决策。"),
+          h("button", { class: "btn sm", type: "button", onclick: () => this.rerunAsAgent(c) }, "改用模型主导重新会诊")) : null,
         composer,
         h("div", { class: "disclaimer" }, "NSCLC-Agent 由 IMPF-AI 研发 · 仅供教学与研究，不构成医疗建议，治疗决定须由主治团队确认"))));
     }
@@ -1492,7 +1637,9 @@ const Workspace = {
       h("div", { class: "welcome" }, logoMark(),
         h("h1", null, "今天会诊哪位患者？"),
         h("p", null, agent
-          ? `由 ${model} 主导会诊：自主规划，调用分期引擎、试验库、方案库、指南知识库等 20 个临床工具，并可并行邀请 7 位专科子智能体（MDT）；Hooks 的安全复核只作参考，由模型逐条判断。输入 / 查看命令。`
+          ? (AgentCfg.cfg.autonomy === "assisted"
+            ? `由 ${model} 主导会诊：自主规划，调用分期引擎、试验库、方案库、指南知识库等 20 个临床工具，并可并行邀请 7 位专科子智能体（MDT）；Hooks 的安全复核只作参考，由模型逐条判断。输入 / 查看命令。`
+            : `由 ${model} 主导会诊：分期、治疗意图与方案全部由模型自主判断；可检索试验库、方案库、指南知识库与文献，并可并行邀请 7 位专科子智能体（MDT）。输入 / 查看命令。`)
           : "描述病例、补充检查结果或上传报告。NSCLC-Agent 完成确定性分期、循证方案与安全终审 —— 未通过终审的方案不会放行。"),
         h("div", { class: "trust" },
           agent ? h("span", null, icon("sparkle"), `模型主导 · ${Store.llm.llm.model}`) : h("span", null, icon("cpu"), "浏览器内运行"),
@@ -1733,9 +1880,22 @@ const Workspace = {
     finally { this.stopping = false; render(); }
   },
 
+  /* Start a new model-led consult carrying this case's first description
+     (the clinician reviews it and sends; nothing runs on its own). */
+  rerunAsAgent(c) {
+    if (!llmOn()) { toast("模型主导需要先接入模型"); location.hash = "#/settings"; return; }
+    const first = c.messages.find((m) => m.role === "user" && m.text && m.text !== "（附件）");
+    LS.set("nsclc.pref.mode.v2", "agent");
+    this.reset();
+    Cases.newDraft();
+    this.text = first ? first.text : "";
+    if (currentRoute().tool || currentRoute().caseId) location.hash = "#/"; else render();
+    toast("已新建模型主导会诊：原病例描述已填入输入框，确认后发送");
+  },
+
   setMode(mode) {
     if (mode === "agent" && !llmOn()) { toast("模型主导需要先接入模型"); location.hash = "#/settings"; return; }
-    LS.set("nsclc.pref.mode", mode);
+    LS.set("nsclc.pref.mode.v2", mode);
     toast(mode === "agent" ? "新会诊将由模型主导：自主推理与调用工具，规则仅作参考" : "新会诊使用受治理流水线：确定性内核裁决");
     render();
   },
@@ -1839,6 +1999,9 @@ const Workspace = {
     const f = p.session_facts || {};
     if (st && st.stage_group) inner.appendChild(h("div", { class: "stage-tile" }, h("div", { class: "muted small" }, "分期 · 确定性引擎"), h("div", { class: "big" }, st.stage_group), h("div", { class: "tnm" }, `${st.tnm || ""} · ${st.edition || ""}`)));
     else if (f.tnm) inner.appendChild(h("div", { class: "stage-tile" }, h("div", { class: "muted small" }, onc ? "TNM · 未能分期" : "TNM（患者视角不显示分期细节）"), h("div", { class: "tnm" }, tnmText(f.tnm))));
+    const category = onc && onc.treatment_plan && onc.treatment_plan.biomarker_category;
+    if (category && category.status) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "生物标志物分类"),
+      (category.codes || []).length ? categoryChips(category.codes) : h("div", { class: "muted small" }, category.summary_zh)));
     const rows = factRows(f);
     if (rows.length) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "关键事实"), h("div", { class: "facts" }, rows.map(([k, v]) => [h("div", { class: "k" }, k), h("div", { class: "v" }, v)]))));
     const plan = onc && onc.treatment_plan;
@@ -1871,6 +2034,12 @@ const Workspace = {
     const stage = k.stage_group || engine.stage_group;
     if (stage || f.tnm) inner.appendChild(h("div", { class: "stage-tile" }, h("div", { class: "muted small" }, `分期 · 模型判断${engine.staged ? `（引擎：${engine.stage_group}）` : ""}`),
       h("div", { class: "big" }, stage || "—"), h("div", { class: "tnm" }, k.tnm || engine.tnm || tnmText(f.tnm))));
+    if (k.intent) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "治疗意图 · 模型判断"),
+      h("div", { class: "row", style: { gap: "8px", alignItems: "baseline" } }, h("span", { class: "chip" }, INTENT_LABEL[k.intent] || k.intent),
+        k.intent_rationale ? h("span", { class: "muted small" }, raw(k.intent_rationale)) : null)));
+    if ((k.biomarker_category || []).length || k.biomarker_rationale) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "生物标志物分类 · 模型判断"),
+      (k.biomarker_category || []).length ? categoryChips(k.biomarker_category) : h("div", { class: "muted small" }, "未归类（检测未完成）"),
+      k.biomarker_rationale ? h("div", { class: "muted small", style: { marginTop: "6px" } }, raw(k.biomarker_rationale)) : null));
     if ((p.plan || []).length) inner.appendChild(h("div", { class: "dsec" }, planList(p.plan, true)));
     const rows = factRows(f);
     if (rows.length) inner.appendChild(h("div", { class: "dsec" }, h("div", { class: "lbl" }, "病例笔记（模型维护）"), h("div", { class: "facts" }, rows.map(([a, b]) => [h("div", { class: "k" }, a), h("div", { class: "v" }, b)]))));
@@ -2230,6 +2399,19 @@ VIEWS.agent = () => {
       metric(`${hooks.filter((x) => x.enabled).length}/${hooks.length} 个 Hooks`), metric(`${(cfg.mcp_servers || []).length} 个 MCP 服务器`),
       metric(`记忆 ${(cfg.instructions || "").length} 字`), metric(`最多 ${cfg.max_steps || 24} 步`))));
 
+  /* --- who decides */
+  const full = cfg.autonomy !== "assisted";
+  const setAutonomy = (value) => save({ autonomy: value, hooks: {} },
+    value === "full" ? "已切换为模型完全自主：分期、治疗意图与方案由模型判断；Hooks 已恢复该模式的默认设置" : "已切换为内核辅助：提供确定性工具与规则复核（仍只作参考）；Hooks 已恢复该模式的默认设置");
+  root.appendChild(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("h3", null, "决策方式"), h("span", { class: "sub" }, "谁来判断分期、治疗意图与方案"),
+      h("div", { class: "right" }, h("div", { class: "seg", role: "group", "aria-label": "决策方式" },
+        h("button", { type: "button", class: full ? "on" : "", onclick: () => setAutonomy("full") }, "模型完全自主"),
+        h("button", { type: "button", class: full ? "" : "on", onclick: () => setAutonomy("assisted") }, "内核辅助")))),
+    h("p", { class: "muted", style: { margin: 0 } }, full
+      ? "当前：模型完全自主（默认）。分期、治疗意图与方案全部由模型判断；不提供分期引擎、适应证与器官功能核对、后线序贯、规则复核、受治理参考等确定性决策工具；Hooks 只保留急症提醒与引用、剂量溯源。"
+      : "当前：内核辅助。模型仍主导会诊，但可以调用确定性内核工具（分期引擎、适应证与器官功能核对、后线序贯、规则复核、受治理参考），Hooks 也会对照分期与安全规则提出参考意见。")));
+
   /* --- specialists */
   const disabled = new Set(cfg.disabled_agents || []);
   const custom = cfg.custom_agents || [];
@@ -2362,8 +2544,8 @@ VIEWS.settings = () => {
     out.appendChild(h("div", { class: "card flat" }, h("div", { class: "card-head" }, h("h3", null, "当前状态")),
       h("div", { class: "kv" }, h("div", { class: "k" }, "新会诊模式"), h("div", null,
           llmOn() ? h("div", { class: "seg" },
-            h("button", { type: "button", class: defaultMode() === "agent" ? "on" : "", onclick: () => { LS.set("nsclc.pref.mode", "agent"); render(); } }, "模型主导"),
-            h("button", { type: "button", class: defaultMode() !== "agent" ? "on" : "", onclick: () => { LS.set("nsclc.pref.mode", "governed"); render(); } }, "受治理"))
+            h("button", { type: "button", class: defaultMode() === "agent" ? "on" : "", onclick: () => { LS.set("nsclc.pref.mode.v2", "agent"); render(); } }, "模型主导"),
+            h("button", { type: "button", class: defaultMode() !== "agent" ? "on" : "", onclick: () => { LS.set("nsclc.pref.mode.v2", "governed"); render(); } }, "受治理"))
             : "确定性（未接入模型）",
           h("div", { class: "muted small", style: { marginTop: "6px" } }, llmOn()
             ? (defaultMode() === "agent" ? "模型自主规划、调用 20 个临床工具、邀请专科子智能体；Hooks 复核意见交回模型逐条判断，不作硬约束。专科、Hooks、记忆与 MCP 在「智能体」页配置。" : "模型只能提议，分期、规则与放行由确定性内核裁决。")

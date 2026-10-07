@@ -999,15 +999,22 @@ def _rule_cns_untreated_symptomatic(ctx: PlanContext) -> list[Violation]:
 
 
 def _rule_cns_tnm_consistency(ctx: PlanContext) -> list[Violation]:
-    """CNS metastases on record while the descriptors say M0: name the
-    contradiction; never repair it (the staging engine stays the only
-    staging authority)."""
+    """Metastases on record that the M descriptor contradicts: CNS
+    metastases under M0, or other sites that read as a different M
+    category (AJCC 9: M1a intrathoracic; M1b single extrathoracic lesion;
+    M1c1 multiple in one organ system; M1c2 several systems). Name the
+    contradiction; never repair it (staging stays with whoever staged)."""
     from ..knowledge.cns import tnm_conflict
+    from ..knowledge.metastases import tnm_conflict as site_conflict
 
+    out: list[Violation] = []
     conflict = tnm_conflict(ctx.facts)
     if conflict:
-        return [Violation("CNS_TNM_INCONSISTENT", "warn", conflict)]
-    return []
+        out.append(Violation("CNS_TNM_INCONSISTENT", "warn", conflict))
+    conflict = site_conflict(ctx.facts)
+    if conflict:
+        out.append(Violation("METASTASIS_TNM_INCONSISTENT", "warn", conflict))
+    return out
 
 
 RULES = (

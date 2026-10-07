@@ -60,7 +60,7 @@ Machine-measured by `paper/qc.py` from the submitted files (PDF text layer, PDF 
 |---|---|---|---|
 | Width | 183.0 mm — double column (183 mm) | 89 / 120–136 / 183 mm | PASS |
 | Height | 74.0 mm | ≤ 170 mm | PASS |
-| Vector, live text | 471 live glyphs in PDF text layer | text not outlined | PASS |
+| Vector, live text | 497 live glyphs in PDF text layer | text not outlined | PASS |
 | Font family | LiberationSans, LiberationSans-Bold (metric-identical Arial substitute; rerun make_figures.py where Arial is installed) | Arial / Helvetica, one family | WARN |
 | Text size | 5.5–7 pt body (138 text runs); 3 run(s) at 8 pt | 5–7 pt; panel labels 8 pt bold | PASS |
 | Stroke weight | 0.6–0.9 pt (104 strokes) | 0.25–1 pt | PASS |
@@ -86,10 +86,10 @@ Machine-measured by `paper/qc.py` from the submitted files (PDF text layer, PDF 
 |---|---|---|---|
 | Width | 183.0 mm — double column (183 mm) | 89 / 120–136 / 183 mm | PASS |
 | Height | 62.0 mm | ≤ 170 mm | PASS |
-| Vector, live text | 230 live glyphs in PDF text layer | text not outlined | PASS |
+| Vector, live text | 223 live glyphs in PDF text layer | text not outlined | PASS |
 | Font family | LiberationSans, LiberationSans-Bold (metric-identical Arial substitute; rerun make_figures.py where Arial is installed) | Arial / Helvetica, one family | WARN |
-| Text size | 6–7 pt body (39 text runs); 2 run(s) at 8 pt | 5–7 pt; panel labels 8 pt bold | PASS |
-| Stroke weight | 0.6–1 pt (53 strokes) | 0.25–1 pt | PASS |
+| Text size | 6–7 pt body (35 text runs); 2 run(s) at 8 pt | 5–7 pt; panel labels 8 pt bold | PASS |
+| Stroke weight | 0.6–1 pt (49 strokes) | 0.25–1 pt | PASS |
 | Raster preview | 4322×1464 px, 600 dpi at print size, RGB | ≥ 300 dpi, RGB | PASS |
 | Red/green pairing | red 0.0%, green 0.0% of pixels | no red+green contrast | PASS |
 

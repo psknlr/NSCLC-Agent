@@ -11,12 +11,19 @@ python paper/make_tables.py   # → paper/tables/*.docx|tex|md    (three-line, e
 python paper/qc.py            # Nature display-item QC → paper/QC.md
 ```
 
+**Decision mode.** The agent-runtime figures (Fig. 1, 3, 4, 5, Extended Data
+Fig. 1) describe the kernel-assisted mode (`autonomy: "assisted"`), in which the
+deterministic kernel is offered as tools and advisory hooks. Since v1.3.0 the
+product default is full autonomy: the model decides the stage, the treatment
+intent and the plan, and the kernel's decision tools and kernel-comparison
+hooks are off. `analysis.py` pins the assisted mode so the numbers reproduce.
+
 ## Argument, one message per figure
 
 | Item | Message | Data |
 |---|---|---|
 | **Fig. 1** | What the system is: a model-led agent runtime on a deterministic clinical kernel | Full framework: interfaces, agent runtime (lead, specialists, tools, hooks, session, providers), kernel, evaluation; counts read from the code |
-| **Fig. 2** | Stage is computed, never generated; ambiguity is refused | AJCC/UICC 9th-edition T×N×M matrix; gold-standard accuracy with exact 95% CIs (70 cases) |
+| **Fig. 2** | Stage is computed, never generated; ambiguity is refused unless it cannot change the stage | AJCC/UICC 9th-edition T×N×M matrix; gold-standard accuracy with exact 95% CIs (70 cases) |
 | **Fig. 3** | Advisory hooks cover the defect space of agent consults | Perturbation study: 35 released plans × 7 injected defect classes; clean baseline 2/35 |
 | **Fig. 4** | The runtime scales and stays bounded | Wall clock vs number of specialists (serial vs concurrent); prompt size with and without compaction |
 | **Fig. 5** | A worked consult: the hooks catch real errors and the model revises | Unresectable IIIB EGFR L858R: timed MDT trace, draft → 3 findings → revision with none; all 40 library regimens checked against the case |
@@ -27,7 +34,7 @@ python paper/qc.py            # Nature display-item QC → paper/QC.md
 | **Table 2** | The hooks that hold the clinical safety nets | — |
 | **Extended Data Table 1** | Gold-standard evaluation | 70 cases, Clopper–Pearson CIs |
 | **Extended Data Table 2** | Bilingual emergency screen | 25-phrase battery (positive, negated, third-party, hypothetical) |
-| **Extended Data Table 3** | The deterministic safety rules | 20 rules, 23 finding identifiers, severities, audit probes raising each |
+| **Extended Data Table 3** | The deterministic safety rules | 20 rules, 24 finding identifiers, severities, audit probes raising each |
 
 Legends are in [`legends.md`](legends.md) (each under 300 words, with n, the
 interval definition and the method stated). The QC report is in [`QC.md`](QC.md).

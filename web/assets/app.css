@@ -475,6 +475,16 @@ input:focus, select:focus, .field textarea:focus { border-color: var(--accent); 
 .form-grid .span-4 { grid-column: 1 / -1; }
 fieldset { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px 14px; margin: 0 0 12px; min-width: 0; background: var(--surface); }
 legend { font-size: 12px; font-weight: 700; color: var(--accent); padding: 0 6px; letter-spacing: .03em; }
+.fgroup { border: 1px solid var(--border); border-radius: 12px; padding: 0 14px; margin: 0 0 12px; min-width: 0; background: var(--surface); }
+.fgroup[open] { padding-bottom: 14px; }
+.fgroup > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; padding: 11px 0; font-size: 12px; font-weight: 700; color: var(--accent); letter-spacing: .03em; }
+.fgroup > summary::-webkit-details-marker { display: none; }
+.fgroup > summary::after { content: "+"; margin-left: auto; font-size: 15px; font-weight: 600; color: var(--muted); }
+.fgroup[open] > summary::after { content: "−"; }
+.fgroup > summary .count { font-weight: 500; color: var(--muted); letter-spacing: 0; }
+.ref-table { margin: 0 0 10px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2, var(--bg)); }
+.ref-table > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--accent-strong, var(--accent)); }
+.ref-table .todo b { min-width: 64px; display: inline-block; }
 .changed select, .changed input { border-color: var(--indigo); box-shadow: 0 0 0 2px var(--indigo-soft); }
 
 .btn {

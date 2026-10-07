@@ -165,8 +165,10 @@ class SubAgentRunner:
                  parallel: bool = False, temperature: float = 0.2,
                  max_tokens: int = 4000, instructions: str = "",
                  post_tool: Callable[[str, dict[str, Any], dict[str, Any]], str | None]
-                 | None = None, language: str = "zh") -> None:
+                 | None = None, language: str = "zh",
+                 autonomous: bool = False) -> None:
         self.language = language
+        self.autonomous = autonomous
         self.llm = llm
         self.clinical = clinical
         self.definitions = {d.name: d for d in definitions}
@@ -209,6 +211,10 @@ class SubAgentRunner:
                     "data": {"error": f"unknown specialist {agent!r}",
                              "available": list(self.definitions)}}
         system = _COMMON.format(title=definition.title) + "\n\n" + definition.prompt
+        if self.autonomous:
+            from .prompts import SPECIALIST_AUTONOMY
+
+            system += SPECIALIST_AUTONOMY
         if self.instructions:
             system += "\n\n【机构规范与用户偏好】\n" + self.instructions
         if self.language == "en":
