@@ -1143,7 +1143,72 @@
 "丙肝：查 HCV RNA，与肝病科共同管理": "Hepatitis C: HCV RNA and co-management with hepatology",
 "器官移植受者：免疫检查点抑制剂有移植物排斥风险，须与移植团队共同决策": "Organ-transplant recipient: checkpoint inhibitors risk graft rejection; decide with the transplant team",
 "结核病史：免疫治疗/激素使用前评估潜伏或活动性结核": "Tuberculosis history: assess latent or active TB before immunotherapy or steroids",
-"规则引擎、分期一致性、引用与剂量溯源已核对": "Rule engine, stage consistency, citation and dose provenance checked"
+"规则引擎、分期一致性、引用与剂量溯源已核对": "Rule engine, stage consistency, citation and dose provenance checked",
+"奥希替尼": "osimertinib",
+"泰瑞沙": "osimertinib",
+"吉非替尼": "gefitinib",
+"易瑞沙": "gefitinib",
+"厄洛替尼": "erlotinib",
+"特罗凯": "erlotinib",
+"阿法替尼": "afatinib",
+"达可替尼": "dacomitinib",
+"埃克替尼": "icotinib",
+"阿美替尼": "aumolertinib",
+"伏美替尼": "furmonertinib",
+"克唑替尼": "crizotinib",
+"阿来替尼": "alectinib",
+"布格替尼": "brigatinib",
+"塞瑞替尼": "ceritinib",
+"洛拉替尼": "lorlatinib",
+"恩沙替尼": "ensartinib",
+"培美曲塞": "pemetrexed",
+"卡铂": "carboplatin",
+"顺铂": "cisplatin",
+"紫杉醇": "paclitaxel",
+"多西他赛": "docetaxel",
+"帕博利珠": "pembrolizumab",
+"阿替利珠": "atezolizumab",
+"纳武利尤": "nivolumab",
+"度伐利尤": "durvalumab",
+"索托拉西布": "sotorasib",
+"阿达格拉西布": "adagrasib",
+"格索雷塞": "garsorasib",
+"氟泽雷塞": "fulzerasib",
+"戈来雷塞": "glecirasib",
+"阳性": "positive",
+"帕博利珠单抗": "pembrolizumab",
+"阿替利珠单抗": "atezolizumab",
+"纳武利尤单抗": "nivolumab",
+"度伐利尤单抗": "durvalumab",
+"替雷利珠单抗": "tislelizumab",
+"信迪利单抗": "sintilimab",
+"卡瑞利珠单抗": "camrelizumab",
+"特瑞普利单抗": "toripalimab",
+"舒格利单抗": "sugemalimab",
+"贝伐珠单抗": "bevacizumab",
+"雷莫西尤单抗": "ramucirumab",
+"依托泊苷": "etoposide",
+"长春瑞滨": "vinorelbine",
+"吉西他滨": "gemcitabine",
+"白蛋白紫杉醇": "nab-paclitaxel",
+"安罗替尼": "anlotinib",
+"KRAS G12C抑制剂": "KRAS G12C inhibitor",
+"G12C抑制剂": "G12C inhibitor",
+"伊匹木单抗": "ipilimumab",
+"埃万妥单抗": "amivantamab",
+"拉泽替尼": "lazertinib",
+"塞普替尼": "selpercatinib",
+"普拉替尼": "pralsetinib",
+"卡马替尼": "capmatinib",
+"特泊替尼": "tepotinib",
+"赛沃替尼": "savolitinib",
+"达拉非尼": "dabrafenib",
+"曲美替尼": "trametinib",
+"拉罗替尼": "larotrectinib",
+"恩曲替尼": "entrectinib",
+"瑞普替尼": "repotrectinib",
+"德曲妥珠单抗": "trastuzumab deruxtecan",
+"芦康沙妥珠单抗": "sacituzumab tirumotecan"
 },
 "rules": [
 [
@@ -1417,6 +1482,26 @@
 [
 "低白蛋白（([0-9.]+) g/L）：[^\\n]*",
 "Hypoalbuminaemia ($1 g/L): nutrition assessment and support; a poor-prognosis marker that also alters drug binding"
+],
+[
+"(\\d+) 岁(?= · |$)",
+"$1 y"
+],
+[
+"(^| · )男$",
+"$1male"
+],
+[
+"(^| · )女$",
+"$1female"
+],
+[
+"^有(?= · )",
+"Present"
+],
+[
+"^无(?= · )",
+"Absent"
 ]
 ]
 }

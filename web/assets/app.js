@@ -496,7 +496,7 @@ function categoryInfo(code) {
   return list.find((c) => c.code === code) || { code, label_zh: "" };
 }
 function categoryChips(codes) {
-  return h("div", { class: "chips" }, (codes || []).map((code) => { const c = categoryInfo(code); return h("span", { class: "chip regimen", title: c.label_zh || code }, code, c.label_zh ? ` · ${c.label_zh}` : ""); }));
+  return h("div", { class: "chips" }, (codes || []).map((code) => { const c = categoryInfo(code); return h("span", { class: "chip regimen", title: c.label_zh || code }, c.label_zh ? `${code} · ${c.label_zh}` : code); }));
 }
 const NEG_RE = /negative|阴性|wild|野生|not detected|未检出|无突变/i;
 const ROLE_LABEL = { oncologist: "肿瘤科医师", patient: "患者", researcher: "研究者" };
@@ -1350,7 +1350,7 @@ const FACT_FIELDS = [
   { g: "进展与耐药", key: "progression_findings.c797s", label: "C797S", type: "bool" },
   { g: "进展与耐药", key: "progression_findings.small_cell_transformation", label: "小细胞转化", type: "bool" },
 ];
-const FORM_OPEN_GROUPS = new Set(["临床", "驱动基因（报告原文）"]);
+const FORM_OPEN_GROUPS = new Set(["临床", "驱动基因（报告原文）", "脑转移（CNS）", "转移部位（脑以外）"]);
 /* Reference shown inside a form group: the biomarker category table and the M rules. */
 const FORM_GROUP_NOTES = {
   "驱动基因（报告原文）": () => h("details", { class: "ref-table" }, h("summary", null, "生物标志物分类表（NSCL-21 … NSCL-39）"),

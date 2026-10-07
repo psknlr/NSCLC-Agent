@@ -23,6 +23,7 @@ CONSOLIDATION\_WITHOUT\_CRT & block & Consolidation (PACIFIC, LAURA) only after 
 PROGRESSION\_SAME\_DRUG & warn & Re-proposing a drug the disease progressed on & 3 \\
 CNS\_UNTREATED\_SYMPTOMATIC & block & Symptomatic untreated brain or leptomeningeal metastases are addressed first & 2 \\
 CNS\_TNM\_INCONSISTENT & warn & CNS metastases on record while the descriptors say M0 & 1 \\
+METASTASIS\_TNM\_INCONSISTENT & warn & (same rule) & 0 \\
 ORGAN\_FUNCTION\_GATE & block & Organ-function and comorbidity gates of each regimen & 3 \\
 ICI\_COMORBIDITY\_CAUTION & warn & Checkpoint inhibitor with interstitial lung disease or active autoimmune disease & 0 \\
 PS\_GATE & warn & Performance status fits concurrent chemoradiation or perioperative therapy & 0 \\
@@ -30,7 +31,7 @@ BIOMARKER\_GAP & block & Tier-A biomarkers are known before systemic therapy & 0
 DOSE\_IN\_MODEL\_OUTPUT & block & No dose figures in model-authored text & 0 \\
 \bottomrule
 \end{tabular}
-\par\footnotesize The 20 rules raise 23 finding identifiers; '(same rule)' marks a further identifier raised by the rule in the row above.
+\par\footnotesize The 20 rules raise 24 finding identifiers; '(same rule)' marks a further identifier raised by the rule in the row above.
 \par\footnotesize *Severity is the rule's own grading. In governed mode a block finding stops release (after the bounded repair loop); in agent mode every finding is advisory and returns to the model, which must revise or justify an override.
 \par\footnotesize †Gold-standard audit probes (n = 28; deliberately unsafe plans given directly to the rule engine) that raised the finding; a probe may raise several.
 \par\footnotesize CNS, central nervous system; ICI, immune checkpoint inhibitor.

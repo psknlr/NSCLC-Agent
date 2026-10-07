@@ -34,7 +34,7 @@ hooks are off. `analysis.py` pins the assisted mode so the numbers reproduce.
 | **Table 2** | The hooks that hold the clinical safety nets | — |
 | **Extended Data Table 1** | Gold-standard evaluation | 70 cases, Clopper–Pearson CIs |
 | **Extended Data Table 2** | Bilingual emergency screen | 25-phrase battery (positive, negated, third-party, hypothetical) |
-| **Extended Data Table 3** | The deterministic safety rules | 20 rules, 23 finding identifiers, severities, audit probes raising each |
+| **Extended Data Table 3** | The deterministic safety rules | 20 rules, 24 finding identifiers, severities, audit probes raising each |
 
 Legends are in [`legends.md`](legends.md) (each under 300 words, with n, the
 interval definition and the method stated). The QC report is in [`QC.md`](QC.md).
