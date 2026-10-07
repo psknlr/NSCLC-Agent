@@ -271,7 +271,7 @@ _GENE_ALIASES = {
 #: Known driver genes; a report key like "ROS1_fusion", "ALK
 #: rearrangement" or "EGFR mutation" normalizes to its leading gene.
 _GENE_KEY_RE = re.compile(
-    r"^(egfr|alk|ros1|ret|met|braf|ntrk[123]?|erbb2|her2|kras)(?![a-z0-9])")
+    r"^(egfr|alk|ros1|ret|met|braf|ntrk[123]?|erbb2|her2|kras|nrg1)(?![a-z0-9])")
 
 
 def _canonical_gene(key: Any) -> str:
@@ -391,4 +391,10 @@ def later_line_actionable_drivers(facts: dict[str, Any]) -> list[dict[str, Any]]
         found.append({"gene": "KRAS G12C", "value": str(value),
                       "note": "sotorasib/adagrasib in subsequent lines; "
                               "first-line remains chemo±IO"})
+    value = drivers.get("nrg1")
+    if value is not None and driver_status(value) == "positive":
+        found.append({"gene": "NRG1", "value": str(value),
+                      "note": "zenocutuzumab after prior systemic therapy "
+                              "(eNRGy; FDA 2024) — not a library regimen; "
+                              "first-line follows the driver-negative table"})
     return found

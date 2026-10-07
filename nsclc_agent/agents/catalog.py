@@ -980,6 +980,7 @@ class TreatmentAgent:
             self._attach_prognosis(state, tools, broker, stage_group)
             self._attach_indications(state, stage_group)
             self._attach_organ_gates(state)
+            self._attach_supportive_care(state, stage_group)
             self._claim_options(state)
             state.trace(
                 "TreatmentAgent", "plan_reused",
@@ -1029,6 +1030,7 @@ class TreatmentAgent:
         self._attach_prognosis(state, tools, broker, stage_group)
         self._attach_indications(state, stage_group)
         self._attach_organ_gates(state)
+        self._attach_supportive_care(state, stage_group)
         self._claim_options(state)
         state.trace(
             "TreatmentAgent", "plan",
@@ -1220,6 +1222,41 @@ class TreatmentAgent:
                     "事实——推荐层不因缺化验而扣住方案，剂量层因缺化验而"
                     "拒绝开药",
         }
+
+    @staticmethod
+    def _attach_supportive_care(state: CaseRunState, stage_group: str) -> None:
+        """Stage-IV biomarker category, then the supportive measures the
+        record calls for — metastatic sites
+        (stage IV: bone-modifying agents, effusion drainage …) and labs or
+        comorbidities (hypercalcaemia, HBV prophylaxis …). Advice beside
+        the regimen, never a regimen; nothing here gates release."""
+        from ..knowledge import labs, metastases
+
+        plan = state.outputs.get("treatment_plan")
+        if not isinstance(plan, dict):
+            return
+        notes: list[str] = []
+        if str(stage_group).startswith("IV"):
+            # The biomarker category (NSCL-21 … NSCL-39) the test results
+            # put this patient in, with the markers still to test — on
+            # every stage-IV plan, the work-up-first ones included.
+            from ..knowledge.biomarker_categories import classify
+
+            category = classify(state.facts)
+            plan["biomarker_category"] = {k: category[k] for k in (
+                "status", "codes", "missing", "summary_zh", "summary_en")}
+            notes += metastases.supportive_notes(state.facts)
+            suggestion = metastases.suggest_m(state.facts)
+            if suggestion["candidates"]:
+                plan["metastatic_sites"] = {
+                    "sites": metastases.site_readings(state.facts),
+                    "suggested_m": suggestion["m"],
+                    "candidates": suggestion["candidates"],
+                    "basis": suggestion["basis"],
+                }
+        notes += labs.supportive_notes(state.facts)
+        if notes:
+            plan["supportive_care"] = notes
 
     @staticmethod
     def _attach_prognosis(

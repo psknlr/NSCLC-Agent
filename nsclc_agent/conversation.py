@@ -46,6 +46,9 @@ from typing import Any
 
 from .case import Case
 from .interview import InterviewLoop
+from .knowledge.labs import _number as _lab_number
+from .knowledge.labs import extract_labs, sanitize_comorbidities, sanitize_organ_function
+from .knowledge.metastases import SITE_LABEL_ZH, extract_sites, sanitize_sites
 from .llm.base import LLMError, extract_json
 from .render import render
 from .runner import NSCLCRunner
@@ -97,6 +100,9 @@ ALLOWED_FACT_KEYS = frozenset({
     "treatment_history", "progression_findings", "progression_ngs_done",
     "prior_systemic_therapy", "cns_metastases", "bleeding_risk",
     "b12_folate_started", "qtc_ms",
+    # Metastatic sites beyond the brain, body measures for dosing and
+    # Cockcroft–Gault (v1.4.0).
+    "metastatic_sites", "weight_kg", "height_cm",
 })
 
 #: Harness-derived facts: re-derived from the cumulative narrative on
@@ -149,8 +155,20 @@ _RESECT_UNSURE_RE = re.compile(
 _PACKYEARS_RE = re.compile(r"(\d{1,3})\s*(?:包年|pack.?years?)", re.IGNORECASE)
 
 
-_GENE_MENTION_RE = re.compile(r"(EGFR|ALK|ROS1|KRAS|BRAF|MET|RET|HER2)",
-                               re.IGNORECASE)
+_GENE_MENTION_RE = re.compile(
+    r"(EGFR|ALK|ROS1|KRAS|BRAF|NTRK\s*[123](?:\s*/\s*[23])*(?:\s*/\s*3)?|NTRK|MET|RET|"
+    r"ERBB2\s*[（(]\s*HER2\s*[）)]|ERBB2|HER2|NRG1)",
+    re.IGNORECASE)
+
+
+def _gene_key(mention: str) -> str:
+    """Report gene name → driver key (NTRK1/2/3 → ntrk, ERBB2/HER2 → erbb2)."""
+    text = re.sub(r"\s+", "", mention).lower()
+    if text.startswith("ntrk"):
+        return "ntrk"
+    if text.startswith(("erbb2", "her2")):
+        return "erbb2"
+    return text
 #: A "." breaks a clause only as sentence punctuation — never inside
 #: HGVS notation ("p.E746_A750del", "c.2573T>G").
 _CLAUSE_BREAK_RE = re.compile(r"[。;；\n,，、]|\.(?=\s|$)")
@@ -247,7 +265,7 @@ def _extract_drivers(text: str) -> dict[str, str]:
             if _PENDING_RE.search(snippet):
                 continue
             if driver_status(snippet) in ("positive", "negative"):
-                drivers.setdefault(gene_text.lower(), snippet[:120])
+                drivers.setdefault(_gene_key(gene_text), snippet[:120])
         i = j + 1
     return drivers
 
@@ -371,6 +389,10 @@ def _extract_cns(text: str) -> dict[str, Any] | None:
     return out
 
 
+_NOS_RE = re.compile(
+    r"非特指|未特指|非特殊类型|NSCLC[-\s]*NOS|\bNOS\b|not\s+otherwise\s+specified", re.IGNORECASE)
+
+
 def extract_facts_deterministic(message: str) -> dict[str, Any]:
     """Regex extraction of the unambiguous, high-value structured facts."""
     facts: dict[str, Any] = {}
@@ -404,6 +426,10 @@ def extract_facts_deterministic(message: str) -> dict[str, Any]:
     cns = _extract_cns(text)
     if cns:
         facts["cns_metastases"] = cns
+    sites = extract_sites(text)
+    if sites:
+        facts["metastatic_sites"] = sites
+    facts.update(extract_labs(text))
 
     lowered = text.lower()
     if "从不吸烟" in text or "不吸烟" in text or "never smok" in lowered:
@@ -434,6 +460,12 @@ def extract_facts_deterministic(message: str) -> dict[str, Any]:
         facts["histologic_category"] = "adenocarcinoma"
     elif "鳞癌" in text or "鳞状细胞癌" in text or "squamous" in lowered:
         facts["histologic_category"] = "squamous"
+    elif "大细胞癌" in text or re.search(r"large[- ]cell\s+(?:lung\s+)?carcinoma", lowered):
+        facts["histologic_category"] = "large_cell"
+    elif _NOS_RE.search(text):
+        # Only an explicit "not otherwise specified": a bare "NSCLC" says
+        # nothing about the subtype.
+        facts["histologic_category"] = "nsclc_nos"
     return facts
 
 
@@ -540,8 +572,34 @@ def sanitize_fact_payload(
             if value.get("prefix"):
                 validated["prefix"] = str(value["prefix"])
             value = validated
-        if key in ("driver_mutations", "pd_l1", "comorbidities",
-                   "organ_function"):
+        if key == "organ_function":
+            value, sub_notes = sanitize_organ_function(value)
+            notes.extend(sub_notes)
+            if not value:
+                continue
+            cleaned[key] = value
+            continue
+        if key == "metastatic_sites":
+            value, sub_notes = sanitize_sites(value)
+            notes.extend(sub_notes)
+            if not value:
+                continue
+            cleaned[key] = value
+            continue
+        if key in ("weight_kg", "height_cm"):
+            lo, hi = (20, 300) if key == "weight_kg" else (100, 250)
+            number = _lab_number(value)
+            if number is None:
+                notes.append(f"CHAT_FACT_IGNORED: {key} {value!r} is not a number")
+                continue
+            value = number
+            if not lo <= value <= hi:
+                notes.append(f"CHAT_FACT_IGNORED: {key} {value:g} out of range {lo}-{hi}")
+                continue
+        if key == "comorbidities" and isinstance(value, dict):
+            value, sub_notes = sanitize_comorbidities(value)
+            notes.extend(sub_notes)
+        if key in ("driver_mutations", "pd_l1", "comorbidities"):
             if not isinstance(value, dict):
                 notes.append(f"CHAT_FACT_IGNORED: {key} must be an object")
                 continue
@@ -647,8 +705,14 @@ def merge_facts(
             # Nulls neither write nor "touch": sanitize already drops them,
             # and a direct caller's null must not confirm a proposed fact.
             return
-        touched.append(path)
         current = container.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            # Nested blocks merge field by field (organ_function.renal.*):
+            # a new creatinine never erases the CrCl already on record.
+            for sub, sub_value in value.items():
+                settle(f"{path}.{sub}", current, sub, sub_value)
+            return
+        touched.append(path)
         if current is None or current == value:
             if current != value:
                 container[key] = value
@@ -691,6 +755,8 @@ def merge_facts(
 # Reply composition — deterministic first, polish optional and guarded
 # --------------------------------------------------------------------------
 
+_SITE_COUNT_ZH = {"single": "（单发）", "multiple": "（多发）"}
+
 _POLISH_SYSTEM = """你是会诊系统的表达润色器。把给你的已放行回复改写得更通顺、更贴合
 对话语气。硬性约束：不得新增任何临床内容、数值、药名或建议；不得删除问题或警示；
 不得出现任何剂量数值。只输出改写后的文本。"""
@@ -716,6 +782,17 @@ def compose_reply(state: CaseRunState, *, role: str,
             f"分期：{staging['stage_group']}"
             f"（{staging.get('edition', '')}，确定性引擎计算）")
     plan = state.outputs.get("treatment_plan") or {}
+    category = plan.get("biomarker_category") or {}
+    if category.get("summary_zh") and role != "patient":
+        parts.append(f"生物标志物分类：{category['summary_zh']}")
+    mets = plan.get("metastatic_sites") or {}
+    if mets.get("sites") and role != "patient":
+        listed = [f"{SITE_LABEL_ZH.get(site, '脑' if site == 'brain' else site)}"
+                  f"{_SITE_COUNT_ZH.get(status, '')}"
+                  for site, status in mets["sites"].items() if status != "absent"]
+        if listed:
+            hint = mets.get("suggested_m") or "/".join(mets.get("candidates") or [])
+            parts.append("转移部位：" + "、".join(listed) + (f"（按部位提示 {hint}）" if hint else ""))
     released = state.release_status in (
         "treatment_recommendation", "draft_for_tumor_board",
         "approved_by_tumor_board")
@@ -733,6 +810,9 @@ def compose_reply(state: CaseRunState, *, role: str,
             if name:
                 parts.append(f"• {tag}{name}"
                              + (f" — {rationale}" if rationale else ""))
+        if role != "patient":
+            for note in (plan.get("supportive_care") or [])[:3]:
+                parts.append(f"＋ 支持治疗：{note}")
     else:
         parts.append(f"目前尚不能给出治疗建议（{state.release_status}）："
                      f"请先完成下列问题与检查。")

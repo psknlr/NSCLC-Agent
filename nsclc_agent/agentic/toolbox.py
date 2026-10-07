@@ -51,9 +51,19 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         "histologic_category, driver_mutations {gene: report "
         "text}, pd_l1 {tps}, ecog_ps, ngs_done, resectability_category "
         "(RESECTABLE/UNRESECTABLE), operable, disease_extent, cns_metastases "
-        "{status,symptomatic,treated,leptomeningeal,burden}, organ_function "
-        "{renal:{crcl_ml_min}, hepatic:{bilirubin_uln}}, qtc_ms, "
-        "comorbidities, medications, treatment_history [{line, agents, "
+        "{status,symptomatic,treated,leptomeningeal,burden}, metastatic_sites "
+        "{contralateral_lung|pleura|pleural_effusion|pericardial|bone|liver|"
+        "adrenal|distant_lymph_nodes|other: absent|present|single|multiple}, "
+        "organ_function {hematologic:{wbc,anc,plt (×10⁹/L),hb (g/L)}, "
+        "hepatic:{alt_uln,ast_uln,bilirubin_uln,alt_u_l,ast_u_l,"
+        "bilirubin_umol_l,albumin_g_l,child_pugh}, renal:{crcl_ml_min,"
+        "egfr_ml_min,creatinine_umol_l}, cardiac:{lvef_pct,nyha}, "
+        "pulmonary:{fev1_pct,dlco_pct}, electrolytes:{calcium_mmol_l,"
+        "sodium_mmol_l,potassium_mmol_l}}, qtc_ms, weight_kg, height_cm, "
+        "comorbidities {ild, active_autoimmune, heart_failure, "
+        "coronary_artery_disease, diabetes, copd, peripheral_neuropathy "
+        "(true or grade), hearing_loss, hbv, hcv, hiv, organ_transplant, "
+        "…: true/false}, medications, treatment_history [{line, agents, "
         "status}], progression_findings, progression_ngs_done. Values are "
         "validated; refused values come back as notes.",
         _obj({"facts": {"type": "object"},
@@ -259,6 +269,13 @@ SUBMIT_TOOL,
         "intent_rationale": {"type": "string",
                              "description": "why this intent (stage, disease "
                                             "extent, fitness, goals of care)"},
+        "biomarker_category": {"type": "array", "items": {"type": "string"},
+                               "description": "YOUR biomarker category codes from "
+                                              "the table (NSCL-21 … NSCL-39); empty "
+                                              "while the work-up is incomplete"},
+        "biomarker_rationale": {"type": "string",
+                                "description": "which results place the case there, "
+                                               "or which markers are still untested"},
         "options": {"type": "array", "items": _obj({
             "name": {"type": "string"},
             "rationale": {"type": "string"},
@@ -492,10 +509,15 @@ class AgentToolbox:
         status = {gene: {"report": str(value), "status": bm.driver_status(value),
                          "positive_evidence": bm.positive_evidence(value) or None}
                   for gene, value in drivers.items()}
+        from ..knowledge.biomarker_categories import classify
+
+        category = classify({**self.facts, **facts})
         data = {"genes": status,
                 "egfr_classes": sorted(bm.egfr_classes(facts)),
                 "first_line_actionable": bm.first_line_actionable_drivers(facts),
-                "later_line_actionable": bm.later_line_actionable_drivers(facts)}
+                "later_line_actionable": bm.later_line_actionable_drivers(facts),
+                "biomarker_category": {k: category[k] for k in (
+                    "status", "codes", "missing", "markers", "summary_en")}}
         positives = [g.upper() for g, s in status.items() if s["status"] == "positive"]
         return {"ok": True,
                 "summary": f"{len(status)} gene(s); positive: "
@@ -709,7 +731,9 @@ class AgentToolbox:
                     "staging": view.get("staging"),
                     "plan": {k: plan.get(k) for k in (
                         "intent", "summary", "options", "regimen_ids",
-                        "trial_refs", "workup_needed", "uncertainties")},
+                        "trial_refs", "workup_needed", "uncertainties",
+                        "biomarker_category", "metastatic_sites",
+                        "supportive_care") if plan.get(k) is not None},
                     "violations": audit.get("violations") or [],
                     "open_questions": view.get("open_questions") or [],
                     "emergency_plan": view.get("emergency_plan"),

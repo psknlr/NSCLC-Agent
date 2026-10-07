@@ -406,6 +406,19 @@ class MockLLMClient:
         consult["intent_rationale"] = (
             "Offline mock: follows the stage and any emergency signal; not a clinical "
             "judgement" if en else "离线 Mock：随分期与急症信号而定，不是临床判断")
+        category = (reference.get("plan") or {}).get("biomarker_category") or {}
+        if category.get("status"):
+            consult["biomarker_category"] = list(category.get("codes") or [])
+            summary = category.get("summary_en" if en else "summary_zh") or ""
+            consult["biomarker_rationale"] = (
+                f"Offline mock: read from the category table — {summary}" if en
+                else f"离线 Mock：按分类表对照检测结果——{summary}")
+            label = "**Biomarker category**: " if en else "**生物标志物分类**："
+            lines = consult["reply"].split("\n")
+            at = next((i for i, line in enumerate(lines)
+                       if line.startswith(("**分期**", "**Stage**"))), len(lines) - 1)
+            lines[at + 1:at + 1] = ["", f"{label}{summary}"]
+            consult["reply"] = "\n".join(lines)
         return consult
 
     @staticmethod

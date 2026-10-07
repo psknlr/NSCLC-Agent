@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable
@@ -467,6 +468,20 @@ class AgentSession:
         # or unknown value is recorded as undetermined, never inferred.
         if consult.get("intent") not in INTENTS:
             consult["intent"] = "undetermined"
+        # Biomarker categories: the model's codes, kept only when they are
+        # real table codes ("NSCL-26", "nscl 26" …); nothing is inferred.
+        from ..knowledge.biomarker_categories import BY_CODE
+
+        raw = consult.get("biomarker_category")
+        raw = [raw] if isinstance(raw, str) else raw if isinstance(raw, list) else []
+        codes = []
+        for item in raw:
+            match = re.search(r"NSCL\s*-?\s*(\d{2})", str(item), re.I)
+            code = f"NSCL-{match.group(1)}" if match else ""
+            if code in BY_CODE and code not in codes:
+                codes.append(code)
+        if raw or "biomarker_category" in consult:
+            consult["biomarker_category"] = codes
         if not str(consult.get("reply") or "").strip():
             return {"status": "invalid",
                     "error": "submit_consult needs a non-empty reply"}, False
