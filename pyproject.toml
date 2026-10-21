@@ -38,7 +38,7 @@ packages = [
 [tool.setuptools.package-data]
 "nsclc_agent.prompts" = ["*.md"]
 "nsclc_agent.i18n" = ["*.json"]
-"nsclc_agent.eval" = ["golden/*.json"]
+"nsclc_agent.eval" = ["golden/*.json", "golden/redteam/*.json"]
 "nsclc_agent.knowledge" = ["data/*.json.gz", "data/curation.jsonl"]
 
 [tool.pytest.ini_options]

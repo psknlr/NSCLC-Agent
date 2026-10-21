@@ -730,6 +730,28 @@ def cmd_eval(args) -> int:
     return 0 if report["summary"]["all_passed"] else 1
 
 
+def cmd_redteam(args) -> int:
+    from .eval.redteam import run_redteam
+
+    try:
+        report = run_redteam(args.split, directory=Path(args.dir) if args.dir else None)
+    except ValueError as exc:
+        print(f"red-team suite refused: {exc}", file=sys.stderr)
+        return 2
+    summaries = {name: {**entry["summary"],
+                        **({"test_set_intact": entry["test_set_intact"]}
+                           if "test_set_intact" in entry else {}),
+                        **({"warning": entry["warning"]} if "warning" in entry else {})}
+                 for name, entry in report["splits"].items()}
+    print(json.dumps(summaries, ensure_ascii=False, indent=2))
+    if args.out:
+        Path(args.out).write_text(
+            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    failed = any(entry["summary"]["passed"] < entry["summary"]["total"]
+                 for entry in report["splits"].values())
+    return 1 if (args.strict and failed) else 0
+
+
 def cmd_llm_check(args) -> int:
     try:
         llm = build_client(args.llm_provider or None, model=args.llm_model or None)
@@ -1198,6 +1220,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--golden", help="Golden case directory")
     p.add_argument("--out", help="Write the full report JSON here")
     p.set_defaults(func=cmd_eval)
+
+    p = sub.add_parser(
+        "redteam",
+        help="Run the red-team benchmark (safety, grounding and injection layers)")
+    p.add_argument("--split", choices=["dev", "test", "all"], default="dev",
+                   help="dev (iterate on it), test (held out, digest-pinned) or all")
+    p.add_argument("--dir", help="Probe directory (default: the packaged suite)")
+    p.add_argument("--out", help="Write the full report JSON here")
+    p.add_argument("--strict", action="store_true",
+                   help="Exit 1 when any probe fails")
+    p.set_defaults(func=cmd_redteam)
 
     p = sub.add_parser(
         "agent",
