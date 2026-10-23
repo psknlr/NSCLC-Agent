@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
+from collections import Counter
 from typing import Any, Iterable
 
 #: Free-text fields of a consult, as the clinician reads them.
@@ -170,10 +172,51 @@ platinum doublet platinum-doublet chemotherapy concurrent thoracic radiotherapy 
 cisplatin-based platinum-based histology appropriate histology-appropriate nonsquamous
 surgery residual sites weekly
 """.split())
-#: Generic-name endings, for drugs the library does not carry.
+#: Generic-name endings, for drugs the library does not carry (minus the
+#: English words that share an ending: "combine", "intestine").
 _DRUG_SUFFIX_RE = re.compile(
-    r"\b[a-z]{3,}(?:mab|nib|platin|taxel|trexed|tecan|rasib|bine|stine|poside|rubicin)\b|"
+    r"\b(?!(?:combine|turbine|carbine|intestine|pristine|destine|clandestine|sistine)\b)"
+    r"[a-z]{3,}(?:mab|nib|platin|taxel|trexed|tecan|rasib|bine|stine|poside|rubicin)\b|"
     r"[一-鿿]{1,5}(?:替尼|单抗|铂|紫杉醇|他赛|曲塞|滨|泊苷)", re.IGNORECASE)
+#: The same endings for counting drugs in a text: an unknown Chinese name is
+#: keyed on the two characters before its ending, so the words around it
+#: ("联合伊匹木单抗") do not change the key.
+_EN_DRUG_SUFFIX_RE = re.compile(_DRUG_SUFFIX_RE.pattern.split("|[一-鿿]")[0], re.IGNORECASE)
+_ZH_DRUG_SUFFIX_RE = re.compile(r"[一-鿿]{1,2}(?:替尼|单抗|铂|紫杉醇|他赛|曲塞|滨|泊苷|拉西布|雷塞)")
+#: Drug-class words that end like a drug name ("含铂双药").
+_ZH_CLASS_WORDS_RE = re.compile(r"含铂|铂类|铂双药")
+#: Chinese names and brands the regimen library and the sequencing aliases
+#: do not spell, and the two-word ADC names (keyed whole).
+_MORE_ALIASES = {
+    "伊匹木": "ipilimumab", "西米普利": "cemiplimab", "信迪利": "sintilimab",
+    "替雷利珠": "tislelizumab", "卡瑞利珠": "camrelizumab", "特瑞普利": "toripalimab",
+    "舒格利": "sugemalimab", "斯鲁利": "serplulimab", "派安普利": "penpulimab",
+    "依沃西": "ivonescimab", "替西木": "tremelimumab", "贝伐珠": "bevacizumab",
+    "雷莫西尤": "ramucirumab", "耐昔妥珠": "necitumumab", "埃万妥": "amivantamab",
+    "拉泽替尼": "lazertinib", "安罗替尼": "anlotinib", "恩曲替尼": "entrectinib",
+    "瑞波替尼": "repotrectinib", "拉罗替尼": "larotrectinib", "塞普替尼": "selpercatinib",
+    "普拉替尼": "pralsetinib", "卡马替尼": "capmatinib", "特泊替尼": "tepotinib",
+    "赛沃替尼": "savolitinib", "达拉非尼": "dabrafenib", "曲美替尼": "trametinib",
+    "舒沃替尼": "sunvozertinib", "贝福替尼": "befotertinib", "伊鲁阿克": "iruplinalkib",
+    "德曲妥珠": "trastuzumab deruxtecan", "吉西他滨": "gemcitabine", "长春瑞滨": "vinorelbine",
+    "依托泊苷": "etoposide", "白蛋白紫杉醇": "nab-paclitaxel", "奈达铂": "nedaplatin",
+    "洛铂": "lobaplatin", "地舒单抗": "denosumab", "唑来膦酸": "zoledronic acid",
+    "地塞米松": "dexamethasone",
+    "trastuzumab deruxtecan": "trastuzumab deruxtecan", "t-dxd": "trastuzumab deruxtecan",
+    "datopotamab deruxtecan": "datopotamab deruxtecan", "dato-dxd": "datopotamab deruxtecan",
+    "keytruda": "pembrolizumab", "opdivo": "nivolumab", "yervoy": "ipilimumab",
+    "tecentriq": "atezolizumab", "imfinzi": "durvalumab", "imjudo": "tremelimumab",
+    "libtayo": "cemiplimab", "tagrisso": "osimertinib", "iressa": "gefitinib",
+    "tarceva": "erlotinib", "gilotrif": "afatinib", "vizimpro": "dacomitinib",
+    "alecensa": "alectinib", "alunbrig": "brigatinib", "lorbrena": "lorlatinib",
+    "xalkori": "crizotinib", "zykadia": "ceritinib", "rybrevant": "amivantamab",
+    "lazcluze": "lazertinib", "lumakras": "sotorasib", "krazati": "adagrasib",
+    "retevmo": "selpercatinib", "gavreto": "pralsetinib", "tabrecta": "capmatinib",
+    "tepmetko": "tepotinib", "tafinlar": "dabrafenib", "mekinist": "trametinib",
+    "enhertu": "trastuzumab deruxtecan", "datroway": "datopotamab deruxtecan",
+    "avastin": "bevacizumab", "cyramza": "ramucirumab", "alimta": "pemetrexed",
+    "taxotere": "docetaxel", "abraxane": "nab-paclitaxel",
+}
 _RT_RE = re.compile(r"c?gy\b|戈瑞", re.IGNORECASE)
 
 
@@ -195,7 +238,26 @@ def drug_lexicon() -> dict[str, str]:
     lexicon = {w: w for r in _library().REGIMENS for c in r.components
                for w in _drug_words(c.drug)}
     lexicon.update(AGENT_ALIASES)
+    lexicon.update(_MORE_ALIASES)
     return lexicon
+
+
+def drugs(text: str) -> Counter[str]:
+    """Drug mentions in a text, counted under their generic names (Chinese
+    names and brands folded in); a drug-shaped word the lexicon does not
+    know counts under its own spelling."""
+    lowered = _ZH_CLASS_WORDS_RE.sub(" ", unicodedata.normalize("NFKC", text or "").lower())
+    lexicon = drug_lexicon()
+    found: Counter[str] = Counter()
+    for word in sorted(lexicon, key=len, reverse=True):
+        pattern = re.escape(word) if not word.isascii() else \
+            r"(?<![a-z])" + re.escape(word) + r"(?![a-z])"
+        lowered, count = re.subn(pattern, " ", lowered)
+        if count:
+            found[lexicon[word]] += count
+    for regex in (_EN_DRUG_SUFFIX_RE, _ZH_DRUG_SUFFIX_RE):
+        found.update(match.group(0) for match in regex.finditer(lowered))
+    return found
 
 
 def _drug_near(text: str, start: int, end: int, lexicon: dict[str, str]) -> str | None:

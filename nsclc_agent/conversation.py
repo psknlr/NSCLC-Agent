@@ -19,7 +19,9 @@ Three hard boundaries, verbatim from the YaoBi design:
   because the screen re-runs on the full narrative every turn.
 * **Replies are dose-scanned before they leave.** A gram value the
   deterministic chain did not produce cannot appear in the reply prose; a
-  model polish that introduces one is discarded wholesale.
+  model polish that introduces one is discarded wholesale — as is one that
+  changes any other content (a drug, a number, the stage, a protected
+  line: :mod:`.safety.rewrite`).
 
 What makes turns FAST here:
 
@@ -52,6 +54,7 @@ from .knowledge.metastases import SITE_LABEL_ZH, extract_sites, sanitize_sites
 from .llm.base import LLMError, extract_json
 from .render import render
 from .runner import NSCLCRunner
+from .safety.rewrite import rewrite_changes
 from .safety.rules import DOSE_RE, dose_in_payload, redact_doses
 from .staging import StagingError
 from .staging.tnm import normalize_descriptor
@@ -893,8 +896,13 @@ _PATIENT_CAUTION = {
 _PATIENT_CAUTION_OTHER = ("方案中的一项安全提示", "a safety caution on this plan")
 
 _POLISH_SYSTEM = """你是会诊系统的表达润色器。把给你的已放行回复改写得更通顺、更贴合
-对话语气。硬性约束：不得新增任何临床内容、数值、药名或建议；不得删除问题或警示；
-不得出现任何剂量数值。只输出改写后的文本。"""
+对话语气。硬性约束（违反任何一条，改写整体作废，系统改回原文）：
+1. 不得新增、删除或替换药名、治疗方式、试验或文献引用、数值、阈值、检测结果、分期；
+2. 不得新增建议、指令、安慰或预后判断（如“可以不做”“直接手术”“不用担心”）；
+3. 以下内容逐字保留：编号问题，以 ⚠️ ⛔ ⚑ → ※ 开头的行，“目前尚不能给出治疗建议”一行，
+   方括号状态行，免责声明，【未放行】标记；
+4. 不得出现任何剂量数值。
+只输出改写后的文本。"""
 
 
 def compose_reply(state: CaseRunState, *, role: str,
@@ -1016,8 +1024,10 @@ def polish_reply(llm: Any, deterministic_text: str, *,
                  state: CaseRunState) -> tuple[str, bool]:
     """Optional model polish, contained:
 
-    never for the emergency script, dose-scanned on the way out, and any
-    failure falls back to the deterministic text. Returns (text, polished).
+    never for the emergency script, dose-scanned on the way out, discarded
+    when it changes content (:func:`~nsclc_agent.safety.rewrite.rewrite_changes`),
+    and any failure falls back to the deterministic text. Returns
+    (text, polished).
     """
     if state.release_status == "emergency_action_plan":
         return deterministic_text, False
@@ -1041,6 +1051,13 @@ def polish_reply(llm: Any, deterministic_text: str, *,
     # cannot be introduced by the polish.
     if DOSE_RE.search(text) and not DOSE_RE.search(deterministic_text):
         state.warn("reply polish discarded: it introduced a dose numeric")
+        return deterministic_text, False
+    # Nothing else of substance changes either (v1.4.1 red-team: a rewrite
+    # that swapped the drug, changed the stage or dropped the disclaimer
+    # was accepted).
+    reason = rewrite_changes(deterministic_text, text, keep=state.open_questions)
+    if reason:
+        state.warn(f"reply polish discarded: {reason}")
         return deterministic_text, False
     return text, True
 

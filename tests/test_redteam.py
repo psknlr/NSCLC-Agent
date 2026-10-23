@@ -94,6 +94,14 @@ def test_baseline_records_the_frozen_code():
         assert set(baseline["splits"][split]["passed"]) == ids
 
 
+def test_dev_split_stays_green():
+    """Regression floor: every dev probe passes (v1.5.0: 101/101, from a
+    39/101 baseline). The held-out split is run to report, never here."""
+    entry = redteam.run_redteam("dev")["splits"]["dev"]
+    failed = [r["id"] for r in entry["results"] if not r["passed"]]
+    assert failed == [], failed
+
+
 def test_cli_redteam_dev(capsys, tmp_path):
     out = tmp_path / "rt.json"
     assert main(["redteam", "--split", "dev", "--out", str(out)]) == 0

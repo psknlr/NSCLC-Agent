@@ -5,7 +5,7 @@ In agent mode the model is the clinician-in-the-loop's reasoning partner and
 it LEADS: it decides what to look up, what to compute and what to recommend.
 The deterministic kernel is still here — staging engine, trial registry,
 regimen library, indication predicates, organ gates, CNS and later-line
-modules, guideline KG, the 20-rule safety engine, even the whole governed
+modules, guideline KG, the 22-rule safety engine, even the whole governed
 pipeline — but as instruments and second opinions the model consults, never
 as gates it must pass. Nothing in this module blocks, rewrites or releases.
 
@@ -183,7 +183,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ),
     ToolSpec(
         "rule_review",
-        "Run the deterministic 20-rule safety engine over a draft plan and "
+        "Run the deterministic 22-rule safety engine over a draft plan and "
         "get its findings. ADVISORY: the findings are a second opinion you "
         "weigh — accept and revise, or keep your plan and give the clinical "
         "reason.",
