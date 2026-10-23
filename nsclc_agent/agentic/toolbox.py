@@ -241,6 +241,10 @@ KERNEL_TOOLS = frozenset({
     "rule_review", "governed_reference",
 })
 
+#: Tools whose results carry text from outside the kernel — an uploaded
+#: document's transcription, PubMed records — fenced as untrusted data.
+EXTERNAL_TOOLS = frozenset({"read_attachment", "pubmed_search", "citation_verify"})
+
 #: The lead agent's terminal tool (intercepted by the loop).
 SUBMIT_SPEC = ToolSpec(
 SUBMIT_TOOL,
@@ -402,7 +406,8 @@ class AgentToolbox:
             out.append(Tool(spec.name, spec.description, spec.parameters,
                             handler=self._impl[spec.name], category="clinical",
                             parallel_safe=spec.name not in _STATEFUL,
-                            label=(LABELS_EN if lang == "en" else LABELS).get(spec.name, spec.name)))
+                            label=(LABELS_EN if lang == "en" else LABELS).get(spec.name, spec.name),
+                            untrusted=spec.name in EXTERNAL_TOOLS))
         return out
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:

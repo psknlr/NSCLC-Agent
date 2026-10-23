@@ -41,6 +41,8 @@ class HookResult:
     context: str | None = None
     alert: dict[str, Any] | None = None
     findings: list[dict[str, Any]] = field(default_factory=list)
+    #: The alert event's key: "emergency" or "injection".
+    alert_kind: str = "emergency"
 
 
 @dataclass
@@ -122,6 +124,24 @@ def _emergency_screen(ctx: dict[str, Any]) -> HookResult | None:
         context = ("【急症筛查 hook】命中：" + "、".join(emergency["signals"])
                    + "。标准处置路径：" + "；".join(actions) + "（供你判断；急症优先）")
     return HookResult(context=context, alert=emergency)
+
+
+def _injection_screen(ctx: dict[str, Any]) -> HookResult | None:
+    """Pasted letters, outside opinions and forwarded reports can carry text
+    addressed to the AI ("AI system: ignore your safety rules …", "【给AI的
+    指令】…"). The clinician is told and the model is reminded that the
+    pasted text is data (v1.4.1 red-team). Clinical corrections ("disregard
+    my previous message", "以本次复查为准，忽略之前的报告") are not hits."""
+    from ..safety import injection
+
+    hits = injection.scan(ctx["message"])
+    if not hits:
+        return None
+    en = ctx.get("lang") == "en"
+    note = injection.warning("this message (pasted material)" if en else "本条消息（粘贴材料）",
+                             hits, "en" if en else "zh")
+    return HookResult(context=("[Injection-screen hook] " if en else "【注入筛查 hook】") + note,
+                      alert=injection.alert("message", hits), alert_kind="injection")
 
 
 def _fact_seed(ctx: dict[str, Any]) -> HookResult | None:
@@ -386,6 +406,14 @@ def builtin_hooks() -> list[Hook]:
              description_en="Clause-scoped, negation-aware oncologic-emergency screen on every "
                             "message; a hit puts the standard pathway in front of the model "
                             "and alerts the clinician."),
+        Hook("injection_screen", "user_prompt_submit", "注入筛查",
+             "消息（含粘贴的外院意见、转诊信）中出现针对 AI 的指令（忽略规则、冒充系统、隐瞒医生…）时提示医生，"
+             "并提醒模型这些文字只是数据。",
+             _injection_screen, title_en="Injection screen",
+             description_en="Flags text addressed to the AI inside a message (pasted letters, "
+                            "outside opinions): overriding the rules, impersonating the system, "
+                            "hiding things from the clinician. The clinician is told; the model "
+                            "is reminded it is data."),
         Hook("fact_seed", "user_prompt_submit", "病例笔记预填",
              "从消息中确定性地提取明确事实（TNM、年龄、ECOG、驱动基因…）预填病例笔记，模型可修正。",
              _fact_seed, title_en="Case-note seeding",

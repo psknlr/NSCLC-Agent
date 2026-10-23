@@ -882,13 +882,15 @@ _SITE_COUNT_ZH = {"single": "（单发）", "multiple": "（多发）"}
 #: What a patient is told about a caution on a released plan: the topic to
 #: raise with the treating team, never the rule text (clinicians get that).
 _PATIENT_CAUTION = {
-    "ICI_COMORBIDITY_CAUTION": "免疫治疗与您的其他疾病（如器官移植、自身免疫病、间质性肺病）之间的风险 / "
-                               "immunotherapy risk with another condition you have",
-    "PS_GATE": "以您目前的体力状况能否耐受该治疗 / whether your current fitness allows this treatment",
-    "ILD_PNEUMONITIS_RISK": "间质性肺病患者治疗后发生肺炎的风险 / pneumonitis risk with interstitial lung disease",
-    "PREGNANCY_CAUTION": "治疗对妊娠与胎儿的影响，需要产科共同决定 / effects on the pregnancy — "
-                         "decide together with obstetrics",
+    "ICI_COMORBIDITY_CAUTION": ("免疫治疗与您的其他疾病（如器官移植、自身免疫病、间质性肺病）之间的风险",
+                                "immunotherapy risk with another condition you have"),
+    "PS_GATE": ("以您目前的体力状况能否耐受该治疗", "whether your current fitness allows this treatment"),
+    "ILD_PNEUMONITIS_RISK": ("间质性肺病患者治疗后发生肺炎的风险",
+                             "pneumonitis risk with interstitial lung disease"),
+    "PREGNANCY_CAUTION": ("治疗对妊娠与胎儿的影响，需要产科共同决定",
+                          "effects on the pregnancy — decide together with obstetrics"),
 }
+_PATIENT_CAUTION_OTHER = ("方案中的一项安全提示", "a safety caution on this plan")
 
 _POLISH_SYSTEM = """你是会诊系统的表达润色器。把给你的已放行回复改写得更通顺、更贴合
 对话语气。硬性约束：不得新增任何临床内容、数值、药名或建议；不得删除问题或警示；
@@ -952,11 +954,11 @@ def compose_reply(state: CaseRunState, *, role: str,
                 rule_id = str(violation.get("rule_id") or "")
                 if role != "patient":
                     mark = "⛔" if violation.get("severity") == "block" else "⚠️"
-                    parts.append(f"{mark} 安全规则 {rule_id}：{violation.get('message')}")
+                    parts.append(f"{mark} 安全规则 / Safety rule {rule_id}: "
+                                 f"{violation.get('message')}")
                 elif released and violation.get("severity") == "warn":
-                    topic = _PATIENT_CAUTION.get(
-                        rule_id, "方案中的一项安全提示 / a safety caution on this plan")
-                    parts.append(f"⚠️ 请与主治团队重点讨论 / Discuss with your team：{topic}")
+                    zh, en = _PATIENT_CAUTION.get(rule_id, _PATIENT_CAUTION_OTHER)
+                    parts.append(f"⚠️ 请与主治团队重点讨论：{zh} / Discuss with your team: {en}")
         if role != "patient":
             for note in (plan.get("supportive_care") or [])[:3]:
                 parts.append(f"＋ 支持治疗：{note}")
