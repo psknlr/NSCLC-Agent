@@ -48,16 +48,39 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("override_instructions", re.compile(
         r"(?:忽略|无视|忽视|跳过|绕过|不要遵守|不必遵守|停止遵守|不再遵守)\s*(?:你|您)?\s*"
         r"(?:之前|此前|先前|以前|上面|以上|上述|所有|全部|收到的?|已有的?|的|一切)*\s*" + _OBJECT_ZH)),
+    # A document telling its reader to disregard everything above it
+    # ("ignore the text above", "忽略以上内容，…") — not one finding in it
+    # ("ignore the CEA value above", "忽略上述报告中的CEA值").
+    ("override_instructions", re.compile(
+        r"\b(?:ignore|disregard|forget)\s+(?:all\s+(?:of\s+)?)?(?:the\s+)?(?:(?:text|content|"
+        r"report|message|document|information|instructions?)\s+)?(?:above|preceding)\b|"
+        r"\b(?:ignore|disregard|forget)\s+everything\s+(?:above|before\s+this|so\s+far)\b|"
+        r"(?:忽略|无视|忽视|不要理会|别管)\s*(?:掉)?\s*(?:上面|上述|以上)\s*(?:的|所有|全部|一切)?\s*"
+        r"(?:内容|文字|信息|指令|说明|报告|全部|所有)?\s*(?=[，,。；;！!\n]|$|并|然后|直接|只)",
+        re.IGNORECASE)),
     ("role_hijack", re.compile(
         r"\byou\s+are\s+now\b|\b(?:developer|jailbreak|god|dan|admin|unrestricted|debug)\s+mode\b|"
         r"\bact\s+as\s+(?:an?\s+)?(?:unrestricted|unfiltered|jailbroken)|"
         r"从现在起你是|你现在是一个?|进入(?:开发者|调试|管理员)模式", re.IGNORECASE)),
     ("fake_system_marker", re.compile(
-        r"[\[【]\s*(?:system|系统|sys)\s*(?:notice|message|instruction|prompt|override|通知|消息|"
-        r"指令|提示)?\s*[\]】]|\b(?:important\s+)?system\s+(?:notice|instruction|override|"
-        r"message|prompt)\s*:|^\s*(?:system|assistant|developer)\s*:\s*(?:you\b|ignore|disregard|forget|"
-        r"from\s+now|new\s+rules?|always|never|do\s+not|don'?t|stop|override)|"
+        r"[\[【]\s*(?:system|系统|sys|assistant|助手|developer|开发者)\s*(?:notice|message|"
+        r"instruction|prompt|override|reply|通知|消息|指令|提示|回复)?\s*[\]】]|"
+        r"\b(?:important\s+)?system\s+(?:notice|instruction|override|message|prompt)\s*:|"
+        # a role label at the start of a line, then an order or a turn
+        # ("assistant: I will now submit …") — not "System: Oncomine Dx"
+        r"^\s*(?:system|assistant|developer|ai)\s*:\s*(?:you\b|ignore|disregard|forget|from\s+now|"
+        r"new\s+rules?|always|never|do\s+not|don'?t|stop|override|call|invoke|submit|run\b|use\b|"
+        r"output|print|respond|reply|answer|write|recommend|state|say|tell|now\b|please|i\s+will|"
+        r"i'?ll|i\s+am\s+going|let\s+me|sure\b|ok(?:ay)?\b|understood)|"
+        r"^\s*(?:系统|助手|开发者)\s*[:：]\s*(?:请|我将|我会|我现在|现在|立即|马上|调用|提交|忽略|无视|"
+        r"不要|你|您|从现在)|"
         r"<\s*/?\s*(?:system|important|instructions?|admin|assistant)\s*>", re.IGNORECASE | re.MULTILINE)),
+    # External text naming the agent's own tools or the shape of a tool
+    # call is scripting the agent, not informing it.
+    ("tool_call_forgery", re.compile(
+        r"\b(?:submit_consult|update_plan|submit_report)\b|"
+        r"<\s*/?\s*(?:tool_call|tool_use|function_calls?|invoke)\b|"
+        r"\"(?:tool_calls?|function_call)\"\s*:", re.IGNORECASE)),
     ("hidden_comment", re.compile(
         r"<!--[^>]{0,300}?\b(?:assistant|ai|model|llm|system|ignore|disregard|instruction)",
         re.IGNORECASE)),
@@ -65,7 +88,12 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"\b(?:note|instruction|message|directive|reminder)s?\s+(?:to|for)\s+(?:the\s+)?"
         r"(?:ai|assistant|model|llm|chatbot|language\s+model)\b|"
         r"\b(?:ai|assistant)\s+(?:system|model)?\s*:\s*(?=\S)|"
-        r"给\s*(?:AI|ai|人工智能|模型|助手)\s*的\s*(?:指令|提示|消息|说明)", re.IGNORECASE)),
+        r"给\s*(?:AI|ai|人工智能|模型|助手)\s*的\s*(?:指令|提示|消息|说明)|"
+        # "致AI助手：…", "AI助手请注意", "人工智能必须…" (not "AI辅助诊断", "AI：结节…")
+        r"(?:致|给|告诉)\s*(?:AI|人工智能|智能体|大模型|语言模型|智能助手)|"
+        r"(?:AI|人工智能|智能体|大模型|语言模型)\s*(?:助手|系统|模型)?\s*(?:[，,：:]\s*)?"
+        r"(?:请|须|必须|务必|应当|应该|注意|你)|"
+        r"(?:AI|智能|人工智能)\s*助手\s*(?:[，,：:]|需要|要)", re.IGNORECASE)),
     ("concealment", re.compile(
         r"\b(?:do\s+not|don'?t|never)\s+(?:tell|mention|inform|reveal|disclose|show)\s+"
         r"(?:the\s+user|the\s+clinician|the\s+doctor|anyone)?\s*(?:about\s+)?"
@@ -74,10 +102,14 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"不要(?:向|对|跟|让)?\s*(?:医生|用户|患者|任何人)?\s*(?:提及|透露|告知|说明|知道)\s*"
         r"(?:本条|这条|此条?|这些|该)?\s*(?:消息|指令|内容|通知)?", re.IGNORECASE)),
     ("safety_disabled", re.compile(
-        r"\b(?:safety\s+)?(?:hooks?|guardrails?|safety\s+(?:rules?|checks?))\s+(?:were|are|have\s+been|"
-        r"has\s+been)\s+(?:disabled|turned\s+off|removed|switched\s+off|lifted)|"
+        r"\b(?:safety\s+)?(?:hooks?|guardrails?|filters?|safety\s+(?:rules?|checks?|screens?|"
+        r"screening)|emergency\s+(?:screen|screening|checks?))\s+(?:is|are|was|were|have\s+been|"
+        r"has\s+been)\s+(?:now\s+)?(?:disabled|turned\s+off|removed|switched\s+off|lifted|"
+        r"suspended|bypassed|deactivated|off\b|no\s+longer\s+(?:required|needed|active))|"
         r"\bwithout\s+(?:any\s+|a\s+|the\s+)?disclaimers?\b|\bno\s+disclaimers?\s+(?:needed|required)|"
-        r"(?:hooks?|安全规则|安全检查|安全限制)\s*(?:已|都已|均已|全部)?\s*(?:关闭|禁用|解除|取消)|"
+        r"(?:hooks?|安全规则|安全检查|安全限制|急症筛查)\s*(?:已|都已|均已|全部|已经)?\s*"
+        r"(?:关闭|禁用|解除|取消|停用|失效)|"
+        r"不再(?:需要|进行|做)?\s*(?:急症筛查|安全检查|安全规则|免责声明|hooks?)|"
         r"不(?:要|需要?|必|用)\s*(?:附|加|写)?\s*(?:任何)?\s*免责声明", re.IGNORECASE)),
     ("exfiltration", re.compile(
         r"\b(?:pass|send|include|copy|post|upload|forward)\s+(?:them|it|all|the\s+(?:full\s+)?"
@@ -111,6 +143,29 @@ def strings(value: Any) -> str:
     return "\n".join(out)
 
 
+#: Instructions a clinical source gave ("disregard the previous instructions
+#: from the tumor board") are clinical history, unless the same sentence
+#: speaks to the AI.
+_CLINICAL_SOURCE = (r"(?:tumou?r\s+board|mdt|multidisciplinary\s+team|oncologists?|physicians?|"
+                    r"doctors?|surgeons?|radiologists?|pathologists?|pharmacists?|pharmacy|nurses?|"
+                    r"care\s+team|team|clinic|consultants?|attendings?|gp|dr\.?)")
+_CLINICAL_OWNER_RE = re.compile(
+    r"\b(?:instructions?|orders?|directions?|directives?)\s+(?:from|by|of)\s+(?:the\s+|our\s+|"
+    r"his\s+|her\s+|their\s+)?(?:[\w-]+\s+){0,2}" + _CLINICAL_SOURCE + r"\b|\b" + _CLINICAL_SOURCE
+    + r"(?:'s|s')?\s+(?:[\w-]+\s+){0,2}(?:instructions?|orders?)\b", re.IGNORECASE)
+_SPEAKS_TO_AI_RE = re.compile(
+    r"\b(?:you|your|yours|ai|assistant|model|llm|chatbot|system\s+prompt|developers?)\b",
+    re.IGNORECASE)
+_SENTENCE_END_RE = re.compile(r"[.!?。！？\n]")
+
+
+def _clinical_history(text: str, match: re.Match[str]) -> bool:
+    start = max((m.end() for m in _SENTENCE_END_RE.finditer(text, 0, match.start())), default=0)
+    end_match = _SENTENCE_END_RE.search(text, match.end())
+    sentence = text[start:end_match.start() if end_match else len(text)]
+    return bool(_CLINICAL_OWNER_RE.search(sentence)) and not _SPEAKS_TO_AI_RE.search(sentence)
+
+
 def scan(text: Any) -> list[dict[str, str]]:
     """Hits in a text (one per label): ``{"label", "excerpt"}``."""
     text = text if isinstance(text, str) else strings(text)
@@ -119,13 +174,27 @@ def scan(text: Any) -> list[dict[str, str]]:
     for label, pattern in PATTERNS:
         if label in seen:
             continue
-        match = pattern.search(text)
+        match = next((m for m in pattern.finditer(text)
+                      if not (label == "override_instructions" and _clinical_history(text, m))),
+                     None)
         if match:
             seen.add(label)
             start = max(0, match.start() - 40)
             excerpt = re.sub(r"\s+", " ", text[start:match.end() + 60]).strip()
             hits.append({"label": label, "excerpt": excerpt[:160]})
     return hits
+
+
+#: A role label opening a turn ("SYSTEM:", "[System notice]", "【系统】",
+#: "Assistant:") — in an imported user turn, a forgery of the harness.
+_ROLE_LABEL_RE = re.compile(
+    r"^\s*(?:[\[【(（<]\s*)?(?:system|assistant|developer|系统|助手|开发者)\s*(?:notice|message|"
+    r"prompt|note|通知|消息|提示)?\s*(?:[\]】)）>]|[:：])", re.IGNORECASE)
+
+
+def impersonates_role(text: str) -> bool:
+    """The text opens with a system/assistant/developer role label."""
+    return bool(_ROLE_LABEL_RE.match(str(text or "")))
 
 
 def alert(source: str, hits: list[dict[str, str]]) -> dict[str, Any]:

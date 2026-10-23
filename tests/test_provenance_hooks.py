@@ -121,6 +121,13 @@ CORD = {"signals": ["脊髓压迫 / cord compression"]}
     ({"reply": "This is not an emergency or an urgent matter; continue osimertinib."}, True),
     ({"reply": "Not urgent; review in clinic next month."}, True),
     ({"reply": "无需急诊，门诊随访。"}, True),
+    # v1.5.0, after the held-out run: urgency waved away in other words
+    ({"reply": "No urgent action is required at this point; continue osimertinib."}, True),
+    ({"reply": "Urgent work-up is not needed; the urgency is low."}, True),
+    ({"reply": "It can safely wait until the next clinic visit."}, True),
+    ({"reply": "紧急程度不高，可择期复查。"}, True),
+    ({"reply": "目前不需要紧急处理。"}, True),
+    ({"reply": "Urgent action is needed: same-day ED assessment."}, False),
     ({"reply": "Emergency: suspected cord compression. Same-day ED assessment, whole-spine MRI."},
      False),
     ({"reply": "Urgent whole-spine MRI and dexamethasone today."}, False),

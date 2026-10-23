@@ -349,8 +349,23 @@ _EMERGENCY_DISMISSED_RE = re.compile(
     r"\bnothing\s+urgent|\bisn'?t\s+(?:an?\s+)?(?:emergenc\w*|urgent)|"
     r"\bno\s+(?:need|reason)\s+(?:for|to)\s+(?:\w+\s+){0,2}(?:urgent|emergency|ed\b|hospital|"
     r"immediate)|"
-    r"非急症|不是急症|不属于急症|不算急症|不紧急|不急|无需急诊|不需要?急诊|不必急诊|无需紧急|不必紧急|"
-    r"不用着急|不需要?立即|无需立即|并非急症", re.IGNORECASE)
+    # "no urgent action is needed", "urgent work-up is not required"
+    r"\bno\s+(?:urgent|emergency|emergent|immediate|acute)\s+(?:action|intervention|treatment|"
+    r"measures?|care|evaluation|assessment|work-?up|management|steps?|referral|attention)\b|"
+    r"\b(?:urgent|emergency|emergent|immediate)\s+(?:action|intervention|treatment|measures?|"
+    r"care|evaluation|assessment|work-?up|management|referral|attention)\s+(?:is|are)\s*"
+    r"(?:not|n't)\s+(?:needed|required|necessary|indicated|warranted)|"
+    r"\b(?:does|do)\s*(?:not|n't)\s+(?:need|require|warrant)\s+(?:\w+\s+){0,2}(?:urgent|"
+    r"emergency|emergent|immediate|same-?day)|"
+    # "low urgency", "the urgency is low", "can safely wait"
+    r"\b(?:low|lower|minimal)\s+(?:urgency|priority|acuity)\b|"
+    r"\b(?:urgency|acuity)\s+(?:is|seems|appears)\s+(?:low|minimal)\b|"
+    r"\bcan\s+(?:safely\s+)?wait\b|\bno\s+(?:rush|hurry)\b|\bnot\s+(?:time[- ])?critical\b|"
+    r"非急症|不是急症|不属于急症|不算急症|不紧急|不急|无需急诊|不需要?急诊|不必急诊|无须急诊|"
+    r"无需紧急|无须紧急|不需要?紧急|不必紧急|不太紧急|不算紧急|非紧急|"
+    r"紧急程度(?:不高|较低|低|一般)|紧迫性(?:不高|较低|低|不强|不大)|低紧迫|优先级(?:不高|较低|低)|"
+    r"不用着急|不着急|不必着急|不需要?立即|无需立即|不需要?马上|并非急症|"
+    r"可(?:以)?择期|择期处理|可(?:以)?暂缓|可(?:以)?等待", re.IGNORECASE)
 #: Wording that puts an emergency first: an emergency/urgent word, or an
 #: immediate action aimed at emergency care — not "start osimertinib
 #: immediately" / "立即开始奥希替尼" (v1.4.1 red-team).
