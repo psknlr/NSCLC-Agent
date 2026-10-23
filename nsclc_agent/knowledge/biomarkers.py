@@ -40,7 +40,8 @@ _NEG_RE = re.compile(
     r"not\s+present|none\s+detected|\bno\b|\bwithout\b|absence\s+of|"
     r"\babsent\b|wild[\s-]?type|\bwt\b|\bfalse\b|^\s*\(?-\)?\s*$|\(-\)|"
     r"阴性|陰性|野生型|未检出|未检测到|未见|未发现|无突变|^\s*无\s*$|"
-    r"(?<!法)无(?=突变|融合|重排|扩增|改变|变异)",
+    r"(?<!法)无(?=突变|融合|重排|扩增|改变|变异)|"
+    r"无\s*(?=(?:egfr|alk|ros1|kras|braf|met|ret|her2|erbb2|ntrk|nrg1)(?![a-z]))",
     re.I)
 _FAIL_RE = re.compile(
     r"\bfailed\b|\bfailure\b|\bqns\b|insufficient|inadequate|equivocal|"

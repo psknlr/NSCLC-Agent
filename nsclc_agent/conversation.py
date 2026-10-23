@@ -196,6 +196,114 @@ _EGFR_CONTINUATION_RE = re.compile(
     r"^\s*(?:t\s*790\s*m|c\s*797\s*s|l\s*858\s*r|g\s*719|l\s*861|"
     r"s\s*768|ex(?:on)?\s*\d+|\d+\s*号?\s*外显子)", re.IGNORECASE)
 
+#: Negation written BEFORE the genes it covers: "No ALK rearrangement",
+#: "Negative for BRAF V600E", "Absence of MET exon 14 skipping", "未检出
+#: EGFR、ALK…", "无RET融合", "Driver panel negative (EGFR, …)". A gene's
+#: clause starts at its own name, so these cues were cut off and the rest
+#: ("ALK rearrangement") read POSITIVE — the planner then released
+#: lorlatinib, dabrafenib-trametinib or capmatinib for driver-negative
+#: patients (v1.4.1 red-team). Header cues (``negative (``, ``阴性：``)
+#: end in a bracket or colon.
+_PREFIX_NEG_RE = re.compile(
+    r"\b(?P<det>no(?:\s+evidence\s+of)?|none\s+of)\b|"
+    r"\b(?:negative|wild[\s-]?type)\s+for\b|\bwithout\b|\babsence\s+of\b|"
+    r"(?P<header>\b(?:negative|not\s+detected)\s*[(（:：]|阴性\s*[(（:：])|"
+    r"未检出|未检测到|未发现|未见|(?<![法])无(?=\s*(?:EGFR|ALK|ROS1|KRAS|BRAF|MET|RET|"
+    r"HER2|ERBB2|NTRK|NRG1))",
+    re.IGNORECASE)
+#: What may sit between a cue and the first gene it covers ("No evidence of
+#: an actionable EGFR …", "未发现明确的 EGFR …"); anything else ("No
+#: sufficient tissue for EGFR") means the cue is not about the gene.
+_PREFIX_GAP_RE = re.compile(
+    r"^(?:[\s(（:：,]|\b(?:an?|the|any|actionable|targetable|oncogenic|"
+    r"sensiti[sz]ing|activating|driver|pathogenic|detectable|known|clinically|"
+    r"significant|alterations?|mutations?|variants?|fusions?|rearrangements?|in|of)\b|"
+    r"明确的?|可靶向的?|驱动基因|的)*$", re.IGNORECASE)
+#: A negation scope ends at a sentence break or a contrast.
+_PREFIX_SCOPE_END_RE = re.compile(
+    r"[。；;\n]|\.(?=\s|$)|\b(?:but|however|whereas|while|although|except)\b|"
+    r"但是?|然而|除了", re.IGNORECASE)
+#: A list item that is about testing or treatment, not a result ("No EGFR
+#: testing", "no ALK inhibitor", "未见 EGFR 检测报告") — no reading.
+_NOT_A_RESULT_RE = re.compile(
+    r"\btest(?:ed|ing|s)?\b|\bresults?\b|\breports?\b|\bpending\b|\bordered\b|"
+    r"\bperformed\b|\bdone\b|\bavailable\b|\bsent\b|\bdata\b|\binfo(?:rmation)?\b|"
+    r"\bstatus\b|\btki\b|inhibitor|therap|treat|检测(?!到)|结果|报告|送检|待|未做|"
+    r"未行|信息|资料|靶向药|抑制剂|治疗", re.IGNORECASE)
+_STRONG_POSITIVE_RE = re.compile(r"\bpositive\b|阳性|\(\s*\+\s*\)|（\s*\+\s*）", re.I)
+_WEAK_POSITIVE_RE = re.compile(
+    r"\b(?:detected|identified|found|present|seen)\b|(?<!未)检出|(?<!未)检测到", re.I)
+#: Resistance / secondary variants and copy-number or expression results:
+#: a negative about one of these says nothing about the gene's primary
+#: driver ("EGFR T790M not detected" is not "EGFR negative"; "no MET
+#: amplification" is not "no MET exon 14 skipping").
+_SECONDARY_VARIANT_RE = re.compile(
+    r"t\s*790\s*m|c\s*797\s*[sg]|g\s*1202\s*r|l\s*1196\s*m|i\s*1171|g\s*2032\s*r|"
+    r"d\s*1203|l\s*1198|g\s*1269|amplif|扩增|copy\s*number|overexpress|过表达|\bihc\b",
+    re.IGNORECASE)
+_PRIMARY_VARIANT_RE = re.compile(
+    r"l\s*858\s*r|ex(?:on)?\s*_?(?:19|20|21|14)|19\s*del|\d+\s*号?\s*外显子|g\s*719|"
+    r"l\s*861|s\s*768|g\s*12|v\s*600|fusion|rearrang|融合|重排|跳跃|skip|sensiti|敏感",
+    re.IGNORECASE)
+_LIST_TAIL_RE = re.compile(r"(?:[\s,，、/&)）\]]|\b(?:and|or|nor)\b|和|及|与|或)+$", re.I)
+
+
+def _gene_word(text: str, mention: re.Match) -> bool:
+    """A gene name, not letters inside a word ("metastases", "walk");
+    "METex14" still counts."""
+    before = text[mention.start() - 1:mention.start()]
+    after = text[mention.end():mention.end() + 2]
+    return not re.match(r"[A-Za-z]", before) and (
+        not re.match(r"[A-Za-z]", after) or after.lower() == "ex")
+
+
+def _secondary_only(snippet: str) -> bool:
+    return bool(_SECONDARY_VARIANT_RE.search(snippet)) and not \
+        _PRIMARY_VARIANT_RE.search(snippet)
+
+
+def _prefix_negations(text: str, mentions: list[re.Match]) -> dict[int, str | None]:
+    """Gene mentions covered by a negation written before them: mention
+    index → the negative reading to record, or None (the mention states
+    no result — testing/treatment wording, or a secondary variant only).
+
+    A cue covers the genes listed after it up to a sentence break or a
+    contrast. A gene carrying its own positive result ("…, KRAS G12C
+    positive") ends the scope and is read normally; so does a weak
+    "detected" except as the closing verb of an English "No …
+    detected" list ("No EGFR, ALK or MET exon 14 alterations detected")."""
+    out: dict[int, str | None] = {}
+    for cue in _PREFIX_NEG_RE.finditer(text):
+        end_match = _PREFIX_SCOPE_END_RE.search(text, cue.end())
+        scope_end = end_match.start() if end_match else len(text)
+        covered = [k for k, m in enumerate(mentions)
+                   if cue.end() <= m.start() < scope_end and k not in out
+                   and _gene_word(text, m)]
+        if not covered or not _PREFIX_GAP_RE.match(
+                text[cue.end():mentions[covered[0]].start()]):
+            continue
+        cue_text = re.sub(r"\s*[(（:：]\s*$", "", cue.group(0)).strip()
+        for n, k in enumerate(covered):
+            m = mentions[k]
+            nxt = mentions[covered[n + 1]].start() if n + 1 < len(covered) else scope_end
+            label = text[m.end():nxt]
+            again = _PREFIX_NEG_RE.search(label)
+            label = _LIST_TAIL_RE.sub("", label[:again.start()] if again else label).strip()[:40]
+            if _NOT_A_RESULT_RE.search(label):
+                out[k] = None
+                continue
+            if _STRONG_POSITIVE_RE.search(label):
+                break  # a new, positive statement: read it normally
+            if _WEAK_POSITIVE_RE.search(label) and not (
+                    cue.group("det") and n + 1 == len(covered)):
+                break
+            gene = m.group(1) + (" " + label if label else "")
+            if _secondary_only(gene):
+                out[k] = None
+                continue
+            out[k] = f"{gene} {cue_text}" if cue.group("header") else f"{cue_text} {gene}"
+    return out
+
 
 def _extract_drivers(text: str) -> dict[str, str]:
     """Each gene's result = its clause (up to a clause break or the next
@@ -210,11 +318,17 @@ def _extract_drivers(text: str) -> dict[str, str]:
     five POSITIVE drivers). A list item carrying its own variant label is
     ambiguous ("EGFR L858R、ALK阴性") unless a list-header colon or "均 /
     all" makes the result cover every item; ambiguous items are left
-    unrecorded rather than guessed."""
+    unrecorded rather than guessed.
+
+    A negation written before the genes ("No ALK rearrangement", "未检出
+    EGFR、ALK…") is read by :func:`_prefix_negations` and replaces the
+    gene's forward reading; a negative about a resistance variant alone
+    ("EGFR T790M not detected") records nothing about the gene."""
     from .knowledge.biomarkers import driver_status
 
-    drivers: dict[str, str] = {}
     mentions = list(_GENE_MENTION_RE.finditer(text))
+    negated = _prefix_negations(text, mentions)
+    readings: list[tuple[int, str, str]] = []
     i = 0
     while i < len(mentions):
         # The enumerated list starting at gene i: genes joined by "、" "/"
@@ -250,23 +364,32 @@ def _extract_drivers(text: str) -> dict[str, str]:
         shared = tail[start.start():].strip() if start else ""
         covers_all = bool(_RESULT_COVERS_ALL_RE.search(shared)) or bool(
             start and _RESULT_COVERS_ALL_RE.search(tail[:start.start()]))
-        snippets = []
         if shared:
             joint = shared if shared.startswith(("：", ":")) else " " + shared
             for k, label in enumerate(labels):
                 gene_text = mentions[i + k].group(1)
                 if label and not covers_all:
                     continue  # its own label + a later result: ambiguous
-                snippets.append((gene_text,
+                readings.append((i + k, gene_text,
                                  f"{gene_text}{' ' + label if label else ''}{joint}"))
-        snippets.append((last.group(1), last_snippet))
-        for gene_text, snippet in snippets:
-            snippet = snippet.strip()
-            if _PENDING_RE.search(snippet):
-                continue
-            if driver_status(snippet) in ("positive", "negative"):
-                drivers.setdefault(_gene_key(gene_text), snippet[:120])
+        readings.append((j, last.group(1), last_snippet))
         i = j + 1
+    forward = {index for index, _gene, _snippet in readings}
+    readings = [(index, gene, negated.get(index, snippet)) for index, gene, snippet in readings]
+    readings += [(index, mentions[index].group(1), snippet)
+                 for index, snippet in negated.items() if index not in forward]
+    drivers: dict[str, str] = {}
+    for _index, gene_text, snippet in sorted(readings, key=lambda r: r[0]):
+        if snippet is None:
+            continue
+        snippet = snippet.strip()
+        if _PENDING_RE.search(snippet):
+            continue
+        status = driver_status(snippet)
+        if status == "negative" and _secondary_only(snippet):
+            continue
+        if status in ("positive", "negative"):
+            drivers.setdefault(_gene_key(gene_text), snippet[:120])
     return drivers
 
 
