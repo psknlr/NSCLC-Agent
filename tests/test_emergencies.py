@@ -90,3 +90,37 @@ def test_chemotherapy_is_not_a_third_party_cue():
     """'che-mother-apy' once matched the third-party cue 'mother'."""
     assert screen("massive hemoptysis during chemotherapy").hard_hits
     assert not screen("my mother had massive hemoptysis").hard_hits
+
+
+# --- v1.4.1 red-team: evidence spread across the clauses of a sentence ----
+
+@pytest.mark.parametrize("text,signal", [
+    ("This morning she coughed up about 300 mL of bright red blood.", "massive_hemoptysis"),
+    ("今天咯血，约300ml。", "massive_hemoptysis"),
+    ("咯血约200毫升。", "massive_hemoptysis"),
+    ("卡铂+培美曲塞化疗后第10天，今天发热39.2℃伴寒战。", "febrile_neutropenia"),
+    ("Day 10 after carboplatin-pemetrexed, fever 39.2 °C with rigors.", "febrile_neutropenia"),
+    ("Day 10 after carboplatin and pemetrexed, temperature 38.9 C.", "febrile_neutropenia"),
+    ("On docetaxel, T 101.5 F today.", "febrile_neutropenia"),
+    ("Fever 39.2 after carboplatin, not sure if it is serious.", "febrile_neutropenia"),
+])
+def test_cross_clause_emergencies_escalate(text, signal):
+    assert signal in {h["signal_id"] for h in _screen(text).hard_hits}
+
+
+@pytest.mark.parametrize("text", [
+    "Coughed up 20 mL of blood-streaked sputum.",          # below the threshold
+    "Pleural effusion, 800 mL drained.",                   # not coughed up
+    "If he coughs up more than 100 mL of blood, call an ambulance.",
+    "Planned carboplatin-pemetrexed. Temperature 36.8 C.",
+    "卡铂+培美曲塞化疗后第10天，无发热。",
+    "Carboplatin-pemetrexed cycle 2 given, no fever, no chills.",
+])
+def test_cross_clause_non_events_stay_quiet(text):
+    assert not _screen(text).emergency
+
+
+def test_afebrile_is_a_denial_not_a_fever():
+    result = _screen("Afebrile during chemotherapy.")
+    assert not result.emergency
+    assert "febrile_neutropenia" in result.negated
