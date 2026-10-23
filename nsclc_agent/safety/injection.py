@@ -152,10 +152,13 @@ _CLINICAL_SOURCE = (r"(?:tumou?r\s+board|mdt|multidisciplinary\s+team|oncologist
 _CLINICAL_OWNER_RE = re.compile(
     r"\b(?:instructions?|orders?|directions?|directives?)\s+(?:from|by|of)\s+(?:the\s+|our\s+|"
     r"his\s+|her\s+|their\s+)?(?:[\w-]+\s+){0,2}" + _CLINICAL_SOURCE + r"\b|\b" + _CLINICAL_SOURCE
-    + r"(?:'s|s')?\s+(?:[\w-]+\s+){0,2}(?:instructions?|orders?)\b", re.IGNORECASE)
+    + r"(?:'s|s')?\s+(?:[\w-]+\s+){0,2}(?:instructions?|orders?)\b|"
+    r"(?:肿瘤委员会|多学科(?:团队|会诊)?|MDT|主治(?:医生|医师)?|医生|医师|主任|药师|药剂科|护士|"
+    r"团队|门诊|会诊)\s*(?:的|此前的?|之前的?|先前的?|上次的?|原来的?)?\s*"
+    r"(?:指示|指令|医嘱|嘱咐|安排|意见)", re.IGNORECASE)
 _SPEAKS_TO_AI_RE = re.compile(
-    r"\b(?:you|your|yours|ai|assistant|model|llm|chatbot|system\s+prompt|developers?)\b",
-    re.IGNORECASE)
+    r"\b(?:you|your|yours|ai|assistant|model|llm|chatbot|system\s+prompt|developers?)\b|"
+    r"你|人工智能|智能体|助手|大模型|语言模型|系统提示|提示词", re.IGNORECASE)
 _SENTENCE_END_RE = re.compile(r"[.!?。！？\n]")
 
 
