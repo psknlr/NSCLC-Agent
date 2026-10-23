@@ -11,6 +11,7 @@ Subcommands:
   batch      Run every ``*.json`` case in a directory.
   selftest   Validate the staging engine (stage table + refusal table).
   eval       Run the golden-case evaluation suite.
+  bench      Run the gold cases through a model-led consult (agent mode).
   llm-check  Show which model/vision backends are configured.
 """
 
@@ -752,6 +753,89 @@ def cmd_redteam(args) -> int:
     return 1 if (args.strict and failed) else 0
 
 
+def cmd_bench(args) -> int:
+    """Agent-mode benchmark: each gold case through a model-led consult,
+    graded by the gold expectations, with the independent audit beside it."""
+    from .eval import agent_bench as bench
+
+    try:
+        cases, digest = bench.load_gold(args.golden)
+        cases = bench.select(cases, args.case, args.limit)
+    except (ValueError, OSError) as exc:
+        print(f"benchmark refused: {exc}", file=sys.stderr)
+        return 2
+    cfg = bench.BenchConfig(autonomy=args.autonomy or "full", language=args.lang or "zh",
+                            max_steps=args.max_steps or 24, subagents=not args.no_subagents,
+                            repeats=max(1, args.repeats), jobs=max(1, args.jobs))
+    if args.agent == "reference":
+        llm, llm_for = None, bench.ReferenceAgentLLM
+    else:
+        def make():
+            return build_client(args.llm_provider or None, model=args.llm_model or None)
+
+        try:
+            llm = make()
+        except LLMError as exc:
+            print(f"LLM configuration error: {exc}", file=sys.stderr)
+            return 2
+        if not getattr(llm, "available", False):
+            print("the benchmark needs a model: set NSCLC_LLM_PROVIDER (anthropic, poe, "
+                  "minimax, azure, litellm or mock) or pass --llm-provider; "
+                  "--agent reference checks the harness without one", file=sys.stderr)
+            return 2
+
+        def llm_for(_entry):
+            return make()  # a fresh client per consult: no state crosses cases
+    meta = bench.bench_meta(agent=args.agent, llm=llm, cfg=cfg, golden_sha256=digest,
+                            cases=cases)
+    out = Path(args.out) if args.out else Path("bench-runs") / bench.run_slug(meta)
+    print(f"{len(cases)} gold cases × {cfg.repeats} · {meta['provider']} / {meta['model']} · "
+          f"autonomy {cfg.autonomy} · {cfg.language} → {out}", file=sys.stderr)
+
+    def progress(event: dict) -> None:
+        if args.quiet:
+            return
+        if event["type"] == "start":
+            if event["kept"]:
+                print(f"resuming: {event['kept']} completed run(s) kept, "
+                      f"{event['todo']} to run", file=sys.stderr)
+            return
+        record = event["record"]
+        status = ("PASS" if record.get("passed") else "REFUSED" if record.get("refusal")
+                  else "ERROR" if record.get("error") or record.get("harness_error")
+                  else "FAIL")
+        detail = "; ".join(f["taxonomy"] for f in record.get("failures") or []) or \
+            str(record.get("error") or record.get("harness_error") or "")[:120]
+        print(f"[{event['finished']}/{event['todo']}] {record['id']} #{record['repeat']} "
+              f"{status}" + (f" ({detail})" if detail and status != "PASS" else "")
+              + f" · {record.get('llm_calls', 0)} calls · {record.get('duration_s', 0):.1f}s",
+              file=sys.stderr)
+
+    try:
+        report = bench.run_bench(llm_for, cases, cfg, meta=meta, out_dir=out,
+                                 progress=progress)
+    except ValueError as exc:
+        print(f"benchmark refused: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print(f"\nstopped; completed runs are kept in {out} and the same command "
+              f"resumes", file=sys.stderr)
+        return 130
+    summary = report["summary"]
+    print(json.dumps(summary, ensure_ascii=False, indent=2) if args.json
+          else bench.render_markdown(summary))
+    process = summary["process"]
+    if process["api_errors"] or process["harness_errors"]:
+        print(f"{process['api_errors']} API error(s), {process['harness_errors']} harness "
+              f"error(s); the same command runs those again", file=sys.stderr)
+        return 1
+    min_pass = args.min_pass if args.min_pass is not None else (
+        1.0 if args.agent == "reference" else None)
+    if min_pass is not None and (summary["pass"]["rate"] or 0.0) < min_pass:
+        return 1
+    return 0
+
+
 def cmd_llm_check(args) -> int:
     try:
         llm = build_client(args.llm_provider or None, model=args.llm_model or None)
@@ -849,7 +933,7 @@ def cmd_agent(args) -> int:
         print(f"LLM configuration error: {exc}", file=sys.stderr)
         return 2
     if not getattr(llm, "available", False):
-        print("agent mode needs a model: set NSCLC_LLM_PROVIDER (poe, "
+        print("agent mode needs a model: set NSCLC_LLM_PROVIDER (anthropic, poe, "
               "minimax, azure, litellm or mock) or pass --llm-provider",
               file=sys.stderr)
         return 2
@@ -1012,7 +1096,7 @@ def cmd_agent(args) -> int:
 
 
 def _add_llm_flags(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--llm-provider", help="azure|poe|minimax|litellm|mock")
+    parser.add_argument("--llm-provider", help="anthropic|azure|poe|minimax|litellm|mock")
     parser.add_argument("--llm-model")
     parser.add_argument("--vision-provider",
                         help="film-reading backend (mock|poe|azure|…)")
@@ -1272,6 +1356,38 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mcp", action="append", metavar="[NAME=]URL",
                    help="MCP server (Streamable HTTP); repeatable")
     p.set_defaults(func=cmd_agent)
+
+    p = sub.add_parser(
+        "bench",
+        help="Agent-mode benchmark: the gold cases through a model-led consult, "
+             "graded by the gold expectations plus the independent audit")
+    p.add_argument("--llm-provider", help="anthropic|azure|poe|minimax|litellm|mock")
+    p.add_argument("--llm-model")
+    p.add_argument("--agent", choices=["model", "reference"], default="model",
+                   help="model (the configured provider, default) or reference "
+                        "(the governed pipeline's decisions through the real loop: "
+                        "checks the harness offline, must pass every case)")
+    p.add_argument("--case", action="append", metavar="ID",
+                   help="only this gold case (repeatable)")
+    p.add_argument("--limit", type=int, help="only the first N cases")
+    p.add_argument("--repeats", type=int, default=1,
+                   help="consults per case, for consistency (default 1)")
+    p.add_argument("--jobs", type=int, default=1,
+                   help="consults run in parallel (mind the provider's rate limits)")
+    p.add_argument("--lang", choices=["zh", "en"], help="consult language (default zh)")
+    p.add_argument("--autonomy", choices=["full", "assisted"],
+                   help="full (default, the model decides) or assisted")
+    p.add_argument("--max-steps", type=int, help="lead-agent step budget (default 24)")
+    p.add_argument("--no-subagents", action="store_true",
+                   help="do not offer MDT specialist sub-agents")
+    p.add_argument("--golden", help="Golden case directory")
+    p.add_argument("--out", help="run directory (default bench-runs/<configuration>); "
+                                 "the same directory resumes")
+    p.add_argument("--min-pass", type=float,
+                   help="exit 1 below this pass rate (reference agent: 1.0)")
+    p.add_argument("--json", action="store_true", help="print the summary as JSON")
+    p.add_argument("--quiet", action="store_true", help="no per-run progress lines")
+    p.set_defaults(func=cmd_bench)
 
     p = sub.add_parser("llm-check", help="Show configured backends")
     _add_llm_flags(p)

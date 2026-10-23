@@ -92,6 +92,7 @@ The harness runs in one of two modes.
 | Concurrency | Threads natively (parallel tools and specialists, thread-safe usage accounting, serialised stream-json output); strictly serial in Pyodide (`platform_caps.THREADS_AVAILABLE`). |
 | Interruption | CLI: Ctrl-C ends the turn (`KeyboardInterrupt` → cancelled, history repaired). Web: the page terminates and restarts the worker; the case resumes from its last exported session. |
 | Authority | Role and runtime configuration come from the surface; a session file (format `nsclc-agent-session/2`, `/1` still readable) supplies data only: facts and checkpoint facts are re-validated, the system prompt is rebuilt, inconsistent checkpoints are dropped. |
+| Providers (v1.7) | The loop keeps one OpenAI-shaped history. OpenAI-compatible providers receive it without the harness's own keys (`wire_messages` drops every key that starts with `_`). The native Anthropic client (`llm/anthropic_provider.py`, official SDK, optional) converts it to Messages API blocks and returns the model's own blocks (thinking with its signature, tool calls); the loop keeps them on the assistant message as `_provider_content` and the client replays them verbatim on the next call. An imported session file never supplies them. |
 
 ### 2.1a Decision mode (v1.3)
 
@@ -646,4 +647,12 @@ failed-closed run stays failed closed.
   101/101) and a held-out test split frozen by SHA-256 before any fix and
   run only to report (`eval/golden/redteam/RESULTS.md`: 37 → 93/101).
 
-All 1,044 tests run fully offline (including the adversarial-review regression suite in test_hardening.py).
+- `eval/agent_bench.py` — the agent-mode benchmark (v1.7, `nsclc-agent
+  bench`, `docs/AGENT_BENCH.md`): the 58 gold pipeline cases through a
+  model-led consult, graded on the expectations that have a model-led
+  reading, with the independent audit beside the grade. Its reference agent
+  submits the governed pipeline's decisions through the real loop and must
+  pass 58/58; five deliberately wrong agents must each fail
+  (`test_agent_bench.py`).
+
+All 1,119 tests run fully offline (including the adversarial-review regression suite in test_hardening.py).

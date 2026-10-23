@@ -1,8 +1,11 @@
-"""Concrete provider adapters: Azure OpenAI, Poe, MiniMax, LiteLLM.
+"""Concrete provider adapters: Azure OpenAI, Poe, MiniMax, LiteLLM, and the
+builder that also reaches the native Anthropic provider.
 
-All four share the OpenAI wire shape. Azure carries the deployment in the URL
-with an ``api-key`` header; MiniMax has region-split endpoints; Poe bots are
-addressed by bot name; LiteLLM (optional dependency) unifies 100+ providers.
+The first four share the OpenAI wire shape. Azure carries the deployment in
+the URL with an ``api-key`` header; MiniMax has region-split endpoints; Poe
+bots are addressed by bot name; LiteLLM (optional dependency) unifies 100+
+providers. The Anthropic provider (:mod:`.anthropic_provider`, optional
+dependency) speaks the Messages API through the official SDK.
 """
 
 from __future__ import annotations
@@ -10,7 +13,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .base import LLMError, LLMResponse, ToolCall, ToolSpec
+from .base import LLMError, LLMResponse, ToolCall, ToolSpec, wire_messages
 from .openai_compatible import OpenAICompatibleClient, _RetryableProviderError
 
 AZURE_DEFAULT_API_VERSION = "2024-10-21"
@@ -167,7 +170,7 @@ class LiteLLMClient:
         import litellm
 
         kwargs: dict[str, Any] = {
-            "model": self.model, "messages": messages,
+            "model": self.model, "messages": wire_messages(messages),
             "temperature": temperature, "max_tokens": max_tokens,
         }
         if self.api_key:
@@ -211,6 +214,16 @@ class LiteLLMClient:
 
 def _env(name: str) -> str:
     return os.environ.get(name, "").strip()
+
+
+def _int_env(name: str) -> int | None:
+    value = _env(name)
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise LLMError(f"{name} must be a whole number, got {value!r}") from exc
 
 
 def build_client(provider: str | None = None, *, model: str | None = None) -> Any:
@@ -269,12 +282,25 @@ def build_client(provider: str | None = None, *, model: str | None = None) -> An
             api_base=_env("LITELLM_BASE_URL") or None,
             supports_vision=_env("NSCLC_LLM_VISION") == "1",
         )
+    if provider == "anthropic":
+        # Credentials and the base URL are the SDK's own: ANTHROPIC_API_KEY
+        # (or ANTHROPIC_AUTH_TOKEN, or an `ant auth login` profile) and
+        # ANTHROPIC_BASE_URL.
+        from .anthropic_provider import DEFAULT_MODEL, AnthropicClient
+
+        return AnthropicClient(
+            "anthropic", model or _env("ANTHROPIC_MODEL") or DEFAULT_MODEL,
+            effort=_env("ANTHROPIC_EFFORT") or None,
+            thinking=_env("ANTHROPIC_THINKING") or "adaptive",
+            min_output_tokens=_int_env("ANTHROPIC_MIN_OUTPUT_TOKENS"),
+        )
     if provider == "mock":
         from .mock import MockLLMClient
 
         return MockLLMClient()
     raise LLMError(
-        f"unknown provider {provider!r}: expected azure|poe|minimax|litellm|mock"
+        f"unknown provider {provider!r}: expected "
+        f"anthropic|azure|poe|minimax|litellm|mock"
     )
 
 
@@ -400,4 +426,7 @@ def describe_client(client: Any) -> dict[str, Any]:
     }
     if getattr(client, "auto_selected", False):
         info["auto_selected"] = True
+    settings = getattr(client, "settings", None)
+    if isinstance(settings, dict):
+        info["settings"] = dict(settings)
     return info

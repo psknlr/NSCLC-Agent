@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from .base import LLMError, LLMResponse, ToolCall, ToolSpec
+from .base import LLMError, LLMResponse, ToolCall, ToolSpec, wire_messages
 
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
@@ -134,7 +134,7 @@ class OpenAICompatibleClient:
         response_format_json: bool,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
-            "messages": messages,
+            "messages": wire_messages(messages),
             "temperature": temperature,
             "max_tokens": max_tokens,
         }

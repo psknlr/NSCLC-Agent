@@ -75,6 +75,18 @@ class LLMResponse:
     #: means the reply was truncated — a run must flag that, never swallow it.
     finish_reason: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
+    #: Prompt tokens served from / written to the provider's prompt cache
+    #: (both already counted in ``prompt_tokens``).
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    #: The model's reasoning as the provider returns it separately from the
+    #: answer (a summary on providers that summarise it).
+    reasoning: str = ""
+    #: The provider's own content blocks, for a provider that needs them
+    #: sent back verbatim on the next request (Anthropic: signed thinking
+    #: blocks). The agent loop carries them on the assistant message as
+    #: ``_provider_content``; providers strip ``_`` keys before sending.
+    provider_content: dict[str, Any] | None = None
 
     @property
     def total_tokens(self) -> int:
@@ -124,6 +136,19 @@ class LLMResponse:
             provider=str(payload.get("provider") or "journal"),
             finish_reason=str(payload.get("finish_reason") or ""),
         )
+
+
+#: How a provider words an error when the model itself declined the request,
+#: so a harness can tell a refusal (the model's answer) from a failed call.
+DECLINED = "the model declined this request"
+
+
+def wire_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The history as an OpenAI-shaped provider receives it: keys that start
+    with ``_`` belong to the harness (``_provider_content``) and are never
+    sent."""
+    return [{k: v for k, v in m.items() if not str(k).startswith("_")}
+            if isinstance(m, dict) else m for m in messages]
 
 
 class LLMClient(Protocol):
