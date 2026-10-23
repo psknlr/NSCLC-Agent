@@ -215,7 +215,7 @@ class AgentSession:
         self.memory = MemoryNotes(language=self.config.language)
         self.plan.language = self.config.language
         self.state: dict[str, Any] = {"evidence_seen": set(), "dosing_seen": set(),
-                                      "emergency": None}
+                                      "numbers_seen": set(), "emergency": None}
         self.usage = {"turns": 0, "calls": 0, "prompt": 0, "completion": 0,
                       "subagent_calls": 0}
         self.checkpoints: list[dict[str, Any]] = []
@@ -487,7 +487,8 @@ class AgentSession:
                     "error": "submit_consult needs a non-empty reply"}, False
         state.submission = consult
         ctx = {"consult": consult, "facts": self.toolbox.facts, "toolbox": self.toolbox,
-               "state": self.state, "role": self.role, "lang": self.lang}
+               "state": self.state, "role": self.role, "lang": self.lang,
+               "narrative": "\n".join(self.narrative)}
         findings: list[dict[str, Any]] = []
         seen: set[str] = set()
         for hook, outcome in self.hooks.run("stop", ctx):
@@ -636,6 +637,7 @@ class AgentSession:
             "plan": copy.deepcopy(self.plan.items),
             "evidence_seen": sorted(self.state["evidence_seen"]),
             "dosing_seen": sorted(self.state["dosing_seen"]),
+            "numbers_seen": sorted(self.state["numbers_seen"]),
             "proposals": len(self.memory.proposals),
         })
 
@@ -661,7 +663,8 @@ class AgentSession:
         self.toolbox.facts.update(copy.deepcopy(point["facts"]))
         self.plan.items = copy.deepcopy(point["plan"])
         self.state = {"evidence_seen": set(point["evidence_seen"]),
-                      "dosing_seen": set(point["dosing_seen"]), "emergency": None}
+                      "dosing_seen": set(point["dosing_seen"]),
+                      "numbers_seen": set(point.get("numbers_seen") or ()), "emergency": None}
         del self.memory.proposals[point["proposals"]:]
         self.checkpoints = [c for c in self.checkpoints if c["turn"] < point["turn"]]
         self._emit({"type": "rewind", "turn": point["turn"]})
@@ -796,7 +799,8 @@ class AgentSession:
                 "turns": self.turns, "messages": self.messages[1:],
                 "plan": self.plan.items,
                 "ledger": {"evidence_seen": sorted(self.state["evidence_seen"]),
-                           "dosing_seen": sorted(self.state["dosing_seen"])},
+                           "dosing_seen": sorted(self.state["dosing_seen"]),
+                           "numbers_seen": sorted(self.state["numbers_seen"])},
                 "checkpoints": self.checkpoints, "usage": self.usage,
                 "compactions": self.compactions}
 
@@ -819,7 +823,7 @@ class AgentSession:
         session.plan.items = Plan(data.get("plan") if isinstance(data.get("plan"), list)
                                   else []).items
         ledger = data.get("ledger") if isinstance(data.get("ledger"), dict) else {}
-        for key in ("evidence_seen", "dosing_seen"):
+        for key in ("evidence_seen", "dosing_seen", "numbers_seen"):
             session.state[key] = {str(x) for x in ledger.get(key) or []}
         usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
         for key in session.usage:
@@ -854,6 +858,7 @@ def _clean_checkpoints(raw: Any, session: AgentSession) -> list[dict[str, Any]]:
                      "plan": Plan(item.get("plan") or []).items,
                      "evidence_seen": [str(x) for x in item.get("evidence_seen") or []],
                      "dosing_seen": [str(x) for x in item.get("dosing_seen") or []],
+                     "numbers_seen": [str(x) for x in item.get("numbers_seen") or []],
                      "proposals": 0}
             if not (0 <= point["turn"] < len(session.turns) + 1
                     and 1 <= point["messages"] <= len(session.messages)
