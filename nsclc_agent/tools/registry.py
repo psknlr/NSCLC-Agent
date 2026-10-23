@@ -9,6 +9,7 @@ journal supplies data, never permission.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 from ..knowledge import interactions as ddi
@@ -618,6 +619,43 @@ class ToolRegistry:
                         ("pass", "BRAF V600E on record")
                         if _BRAF_V600_RE.search(positive_evidence(value))
                         else ("fail", "BRAF positive but not V600"))
+            elif gate == "kras_g12c_positive":
+                from ..knowledge.biomarkers import (
+                    _KRAS_G12C_RE, _normalized_drivers, positive_evidence,
+                )
+
+                kras = gene_status(facts, "kras")
+                value = _normalized_drivers(facts).get("kras")
+                text = positive_evidence(value) if value is not None else ""
+                if kras == "positive" and _KRAS_G12C_RE.search(text):
+                    status, note = "pass", "KRAS G12C on record"
+                elif kras == "positive" and re.search(
+                        r"(?<![a-z0-9])(?:p\.)?[a-z]\d{2,3}[a-z](?![a-z0-9])",
+                        text, re.I):
+                    status, note = "fail", f"KRAS variant on record ({text[:40]}) is not G12C"
+                elif kras == "positive":
+                    status, note = "unverified", (
+                        "KRAS positive but the variant is not reported — "
+                        "G12C must be confirmed before dosing")
+                elif kras == "negative":
+                    status, note = "fail", "KRAS negative on record"
+            elif gate == "erbb2_tkd_confirmed":
+                from ..knowledge.biomarkers import her2_class
+
+                variant = her2_class(facts)
+                if variant == "tkd":
+                    status, note = "pass", "HER2 TKD mutation on record"
+                elif variant == "non_tkd":
+                    status, note = "fail", (
+                        "HER2 alteration on record is not a TKD mutation "
+                        "(amplification/overexpression/non-TKD variant)")
+                elif variant == "unclassified":
+                    status, note = "unverified", (
+                        "HER2 positive but TKD vs non-TKD is not reported — "
+                        "the approvals cover TKD mutations only")
+                elif any(gene_status(facts, g) == "negative"
+                         for g in ("erbb2", "her2")):
+                    status, note = "fail", "HER2 negative on record"
             elif gate.endswith("_positive") and gate[:-9] in (
                     "alk", "ros1", "ret", "ntrk", "erbb2", "kras"):
                 gene = gate[:-9]
@@ -649,9 +687,13 @@ class ToolRegistry:
                 if isinstance(ecog, int):
                     status, note = ("pass", f"ECOG {ecog}") if ecog <= 2 else ("fail", f"ECOG {ecog}")
             elif gate == "nonsquamous":
+                from ..knowledge.kg_eligibility import _classify_histology
+
                 hist = str(facts.get("histologic_category") or "").lower()
                 if hist:
-                    ok_hist = "squamous" not in hist or "adeno" in hist
+                    # "non-squamous" names the gate's own population; a
+                    # substring test read it as squamous.
+                    ok_hist = _classify_histology(hist) != "squamous"
                     status, note = ("pass", hist) if ok_hist else ("fail", hist)
             results.append({"gate": gate, "status": status, "note": note})
 

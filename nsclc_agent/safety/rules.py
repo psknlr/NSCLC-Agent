@@ -565,9 +565,13 @@ _TARGETED_FIRST_LINE = frozenset({
     "osimertinib_first_line", "osimertinib_chemo_first_line",
     "amivantamab_lazertinib", "amivantamab_chemo_first_line",
     "afatinib_uncommon_first_line", "lorlatinib_first_line",
-    "repotrectinib_first_line", "selpercatinib_first_line",
-    "capmatinib_first_line", "dabrafenib_trametinib_first_line",
-    "larotrectinib_first_line",
+    "alectinib_first_line", "brigatinib_first_line",
+    "repotrectinib_first_line", "taletrectinib_first_line",
+    "entrectinib_ros1_first_line", "crizotinib_ros1_first_line",
+    "selpercatinib_first_line", "pralsetinib_first_line",
+    "capmatinib_first_line", "tepotinib_first_line",
+    "dabrafenib_trametinib_first_line", "encorafenib_binimetinib_first_line",
+    "larotrectinib_first_line", "entrectinib_ntrk_first_line",
 })
 
 
@@ -751,11 +755,9 @@ _DRUG_SUFFIX_RE = re.compile(
     r"^[a-z]+(?:mab|nib|platin|trexed|taxel|poside|rasib|tecan|bine)$")
 _EXTRA_DRUGS = (
     "gefitinib", "erlotinib", "dacomitinib", "icotinib", "aumolertinib",
-    "furmonertinib", "crizotinib", "brigatinib", "ceritinib", "ensartinib",
-    "entrectinib", "taletrectinib", "pralsetinib", "savolitinib",
-    "encorafenib", "binimetinib", "adagrasib", "cemiplimab", "tislelizumab",
-    "sintilimab", "camrelizumab", "toripalimab", "bevacizumab",
-    "gemcitabine", "irinotecan",
+    "furmonertinib", "ceritinib", "ensartinib", "savolitinib",
+    "tislelizumab", "sintilimab", "camrelizumab", "toripalimab",
+    "bevacizumab", "gemcitabine", "irinotecan",
 )
 _CHINESE_DRUGS = {
     "替雷利珠": "tislelizumab", "信迪利": "sintilimab",
@@ -893,7 +895,9 @@ def _rule_ici_comorbidity(ctx: PlanContext) -> list[Violation]:
             f"transplant recipient — graft rejection is a recognized risk and "
             f"transplant recipients were excluded from the registration trials; "
             f"decide with the transplant team and consider chemotherapy without "
-            f"a checkpoint inhibitor.",
+            f"a checkpoint inhibitor (pemetrexed_platinum_first_line for "
+            f"non-squamous, carbo_nab_paclitaxel_first_line for squamous "
+            f"disease).",
         ))
     return out
 
@@ -903,10 +907,14 @@ _CYTOTOXIC_RE = re.compile(
     r"platin|pemetrexed|taxel|etoposide|gemcitabine|vinorelbine|chemotherapy|"
     r"doublet|deruxtecan", re.IGNORECASE)
 #: Components with a recognized pneumonitis / ILD risk beyond checkpoint
-#: inhibitors (those are covered by ICI_COMORBIDITY_CAUTION).
+#: inhibitors (those are covered by ICI_COMORBIDITY_CAUTION): an ILD /
+#: pneumonitis warning in the label, or thoracic radiotherapy.
 _PNEUMONITIS_RE = re.compile(
     r"osimertinib|gefitinib|erlotinib|afatinib|dacomitinib|lazertinib|"
-    r"amivantamab|brigatinib|deruxtecan|radiotherapy|\bsbrt\b", re.IGNORECASE)
+    r"amivantamab|brigatinib|alectinib|lorlatinib|crizotinib|repotrectinib|"
+    r"taletrectinib|pralsetinib|capmatinib|tepotinib|binimetinib|sotorasib|"
+    r"adagrasib|zongertinib|sevabertinib|deruxtecan|radiotherapy|\bsbrt\b",
+    re.IGNORECASE)
 
 
 def _components(rid: str) -> list[str]:
@@ -948,10 +956,11 @@ def _rule_ps_gate(ctx: PlanContext) -> list[Violation]:
 
 
 def _rule_ild_pneumonitis(ctx: PlanContext) -> list[Violation]:
-    """ILD on record with an EGFR TKI, amivantamab, an ADC, brigatinib or
-    thoracic radiotherapy: pneumonitis risk is higher and patients with an
-    ILD history were excluded from the registration trials (v1.4.1
-    red-team: ILD + osimertinib released with no finding)."""
+    """ILD on record with an EGFR TKI, amivantamab, an ADC, another TKI
+    whose label warns of ILD/pneumonitis, or thoracic radiotherapy:
+    pneumonitis risk is higher and patients with an ILD history were
+    excluded from the registration trials (v1.4.1 red-team: ILD +
+    osimertinib released with no finding)."""
     if ((ctx.facts.get("comorbidities") or {}).get("ild")) is not True:
         return []
     risky = [rid for rid in ctx.regimen_ids
@@ -1000,7 +1009,9 @@ def _rule_biomarker_before_systemic(ctx: PlanContext) -> list[Violation]:
     )
     if not planned_systemic:
         return []
-    if histology and "squamous" in histology and "adeno" not in histology:
+    from ..knowledge.kg_eligibility import _classify_histology
+
+    if _classify_histology(histology) == "squamous":
         return []  # pure squamous: EGFR/ALK testing optional per guideline
     missing = [g for g in ("egfr", "alk") if not ctx.driver_status_known(g)]
     if missing:

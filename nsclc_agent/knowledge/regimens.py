@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-LIBRARY_VERSION = "2026-08"
+LIBRARY_VERSION = "2026-10"
 
 
 @dataclass(frozen=True)
@@ -240,11 +240,54 @@ REGIMENS: tuple[Regimen, ...] = (
         label_note="Metastatic ALK+; strong CYP3A4 inducers contraindicated (hepatotoxicity)",
     ),
     Regimen(
+        "alectinib_first_line", "First-line alectinib (ALEX)", "first_line",
+        (_C("alectinib", "600 mg", route="PO", schedule="twice daily with food",
+            duration="until progression"),),
+        trial_ids=("ALEX",),
+        monitoring=("LFTs q2w × 3 months then monthly", "CPK", "bradycardia",
+                    "ILD/pneumonitis symptoms"),
+        dose_gates=("alk_positive",),
+        label_note="Metastatic ALK+, CNS-active; the label needs no dose "
+                   "change with CYP3A inducers (the active metabolite "
+                   "offsets the loss) — monitor response",
+    ),
+    Regimen(
+        "brigatinib_first_line", "First-line brigatinib (ALTA-1L)", "first_line",
+        (_C("brigatinib", "90 mg × 7 days, then 180 mg", route="PO",
+            schedule="once daily", duration="until progression"),),
+        trial_ids=("ALTA1L",),
+        monitoring=("new or worsening respiratory symptoms, above all in the "
+                    "first week", "blood pressure and heart rate", "CPK",
+                    "lipase/amylase", "blood glucose", "visual symptoms"),
+        dose_gates=("alk_positive", "no_strong_cyp3a4_inducer"),
+        label_note="Metastatic ALK+, CNS-active; avoid strong or moderate "
+                   "CYP3A inducers (label)",
+    ),
+    Regimen(
         "pembro_monotherapy", "Pembrolizumab monotherapy (KEYNOTE-024)", "first_line",
         (_C("pembrolizumab", "200 mg q3w or 400 mg q6w", duration="up to 2 years"),),
         trial_ids=("KEYNOTE024",), contains_ici=True,
         dose_gates=("pd_l1_tps_ge_50", "egfr_alk_negative", "autoimmune_screen"),
         label_note="Metastatic PD-L1 TPS≥50% without EGFR/ALK",
+    ),
+    Regimen(
+        "cemiplimab_monotherapy", "Cemiplimab monotherapy (EMPOWER-Lung 1)", "first_line",
+        (_C("cemiplimab", "350 mg", schedule="q3w"),),
+        trial_ids=("EMPOWER_LUNG1",), contains_ici=True,
+        monitoring=("irAE screen",),
+        dose_gates=("pd_l1_tps_ge_50", "egfr_alk_negative", "autoimmune_screen"),
+        label_note="Metastatic PD-L1 TPS≥50% without EGFR/ALK/ROS1 — an "
+                   "alternative to pembrolizumab monotherapy, not an addition",
+    ),
+    Regimen(
+        "atezolizumab_monotherapy", "Atezolizumab monotherapy (IMpower110)", "first_line",
+        (_C("atezolizumab", "1200 mg", schedule="q3w"),),
+        trial_ids=("IMPOWER110",), contains_ici=True,
+        monitoring=("irAE screen",),
+        dose_gates=("pd_l1_tps_ge_50", "egfr_alk_negative", "autoimmune_screen"),
+        label_note="Metastatic high PD-L1 (TC≥50%; the label's immune-cell "
+                   "route, IC≥10%, is not modeled) without EGFR/ALK — an "
+                   "alternative to pembrolizumab monotherapy",
     ),
     Regimen(
         "pembro_pemetrexed_platinum", "Pembrolizumab + pemetrexed-platinum (KEYNOTE-189)", "first_line",
@@ -281,6 +324,43 @@ REGIMENS: tuple[Regimen, ...] = (
         dose_gates=("egfr_alk_negative", "autoimmune_screen"),
         label_note="Metastatic NSCLC without EGFR/ALK",
     ),
+    # Chemotherapy without a checkpoint inhibitor: for the patient whose
+    # record rules immunotherapy out (organ transplant, active autoimmune
+    # disease) — the planner offers these first in that case, beside the
+    # chemo-IO standard, and the critic still warns on the ICI.
+    Regimen(
+        "pemetrexed_platinum_first_line",
+        "Platinum-pemetrexed without a checkpoint inhibitor (JMDB/PARAMOUNT)",
+        "first_line",
+        (
+            _C("pemetrexed", "500 mg/m²", schedule="day 1 q3w × 4–6, then maintenance"),
+            _C("cisplatin or carboplatin", "75 mg/m² / AUC 5", schedule="day 1 q3w × 4–6"),
+        ),
+        trial_ids=("JMDB", "PARAMOUNT"),
+        monitoring=("renal function before each cycle (pemetrexed)", "cytopenias",
+                    "folic acid/B12 and corticosteroid premedication"),
+        dose_gates=("egfr_alk_negative", "nonsquamous", "renal_function",
+                    "b12_folate_started"),
+        label_note="Metastatic nonsquamous without a first-line actionable "
+                   "driver, when a checkpoint inhibitor cannot be given; JMDB "
+                   "used cisplatin — carboplatin substitution is an "
+                   "MDT/pharmacist decision",
+    ),
+    Regimen(
+        "carbo_nab_paclitaxel_first_line",
+        "Carboplatin + nab-paclitaxel without a checkpoint inhibitor (CA031)",
+        "first_line",
+        (
+            _C("nab-paclitaxel", "100 mg/m²", schedule="days 1, 8, 15 q3w"),
+            _C("carboplatin", "AUC 6", schedule="day 1 q3w"),
+        ),
+        trial_ids=("CA031",),
+        monitoring=("blood counts before each weekly dose", "peripheral neuropathy"),
+        dose_gates=("egfr_alk_negative",),
+        label_note="Metastatic NSCLC, any histology — the chemotherapy-only "
+                   "option for squamous disease when a checkpoint inhibitor "
+                   "cannot be given",
+    ),
     # -------------------------------------------------------- local therapy
     Regimen(
         "sbrt_definitive", "Definitive SBRT/SABR (medically inoperable stage I)", "definitive_rt",
@@ -298,10 +378,10 @@ REGIMENS: tuple[Regimen, ...] = (
         label_note="≤3 sites, controlled on first-line systemic therapy, MDT decision",
     ),
     # ---------------------- driver-directed pathways beyond EGFR/ALK.
-    # Dosing for these entries is deliberately NOT encoded (weight tiers /
-    # complex ramp-ups): the dose channel serves "per label" and the gate
-    # stays unverified until a pharmacist encodes it — honest absence over
-    # invented numerics.
+    # A fixed adult label dose is encoded; weight tiers and ramp-ups are
+    # deliberately NOT ("per label (... not encoded)"): the dose channel
+    # serves that string until a pharmacist encodes it — honest absence
+    # over invented numerics.
     Regimen(
         "amivantamab_chemo_first_line",
         "Amivantamab + carboplatin-pemetrexed (PAPILLON)", "first_line",
@@ -339,6 +419,44 @@ REGIMENS: tuple[Regimen, ...] = (
                    "taletrectinib are alternatives",
     ),
     Regimen(
+        "taletrectinib_first_line", "Taletrectinib (TRUST-I/TRUST-II)", "first_line",
+        (_C("taletrectinib", "600 mg", route="PO",
+            schedule="once daily on an empty stomach (no food 2 hours before "
+                     "and 2 hours after)",
+            duration="until progression"),),
+        trial_ids=("TRUST",),
+        monitoring=("LFTs (hepatotoxicity)", "QTc and electrolytes",
+                    "ILD/pneumonitis symptoms", "uric acid", "CPK (myalgia)"),
+        dose_gates=("ros1_positive",),
+        label_note="ROS1 fusion+ advanced NSCLC; studied TKI-naive and after "
+                   "one prior ROS1 TKI",
+    ),
+    Regimen(
+        "entrectinib_ros1_first_line", "Entrectinib, ROS1 fusion (STARTRK-2 pooled)",
+        "first_line",
+        (_C("entrectinib", "600 mg", route="PO", schedule="once daily",
+            duration="until progression"),),
+        trial_ids=("STARTRK2",),
+        monitoring=("QTc and electrolytes", "LVEF if heart-failure symptoms or "
+                    "risk factors", "CNS effects (cognition, mood, dizziness)",
+                    "LFTs", "uric acid", "vision changes"),
+        dose_gates=("ros1_positive",),
+        label_note="ROS1 fusion+ metastatic NSCLC, CNS-active; little "
+                   "activity after crizotinib",
+    ),
+    Regimen(
+        "crizotinib_ros1_first_line", "Crizotinib, ROS1 fusion (PROFILE 1001)",
+        "first_line",
+        (_C("crizotinib", "250 mg", route="PO", schedule="twice daily",
+            duration="until progression"),),
+        trial_ids=("PROFILE1001",),
+        monitoring=("LFTs (hepatotoxicity)", "QTc and heart rate (bradycardia)",
+                    "ILD/pneumonitis symptoms", "vision changes"),
+        dose_gates=("ros1_positive",),
+        label_note="ROS1+ metastatic NSCLC; limited CNS activity compared "
+                   "with entrectinib, repotrectinib or taletrectinib",
+    ),
+    Regimen(
         "selpercatinib_first_line", "Selpercatinib (LIBRETTO-431)", "first_line",
         (_C("selpercatinib", "per label (weight-tiered — not encoded)",
             route="PO", schedule="twice daily"),),
@@ -349,12 +467,35 @@ REGIMENS: tuple[Regimen, ...] = (
                    "PD-L1 level does not redirect to ICI",
     ),
     Regimen(
+        "pralsetinib_first_line", "Pralsetinib (ARROW)", "first_line",
+        (_C("pralsetinib", "400 mg", route="PO",
+            schedule="once daily on an empty stomach (no food 2 hours before, "
+                     "1 hour after)",
+            duration="until progression"),),
+        trial_ids=("ARROW",),
+        monitoring=("ILD/pneumonitis symptoms", "blood pressure", "LFTs",
+                    "bleeding", "wound healing around surgery"),
+        dose_gates=("ret_positive",),
+        label_note="RET fusion+ metastatic NSCLC; single-arm evidence "
+                   "(selpercatinib has the randomized LIBRETTO-431 data)",
+    ),
+    Regimen(
         "capmatinib_first_line", "Capmatinib (GEOMETRY mono-1)", "first_line",
         (_C("capmatinib", "400 mg", route="PO", schedule="twice daily"),),
         trial_ids=("GEOMETRY",),
         monitoring=("Peripheral edema", "hepatic function", "ILD symptoms"),
         dose_gates=("met_ex14_confirmed",),
         label_note="MET exon 14 skipping only (tepotinib is the "
+                   "alternative); amplification is a different question",
+    ),
+    Regimen(
+        "tepotinib_first_line", "Tepotinib (VISION)", "first_line",
+        (_C("tepotinib", "450 mg", route="PO", schedule="once daily with food",
+            duration="until progression"),),
+        trial_ids=("VISION",),
+        monitoring=("Peripheral edema", "LFTs", "ILD/pneumonitis symptoms"),
+        dose_gates=("met_ex14_confirmed",),
+        label_note="MET exon 14 skipping only (capmatinib is the "
                    "alternative); amplification is a different question",
     ),
     Regimen(
@@ -371,6 +512,22 @@ REGIMENS: tuple[Regimen, ...] = (
                    "indication",
     ),
     Regimen(
+        "encorafenib_binimetinib_first_line",
+        "Encorafenib + binimetinib (PHAROS)", "first_line",
+        (
+            _C("encorafenib", "450 mg", route="PO", schedule="once daily"),
+            _C("binimetinib", "45 mg", route="PO", schedule="twice daily"),
+        ),
+        trial_ids=("PHAROS",),
+        monitoring=("LVEF before starting, at 1 month, then every 2–3 months",
+                    "QTc and electrolytes", "LFTs", "eye examination (uveitis, "
+                    "serous retinopathy)", "skin examination (new primary "
+                    "malignancies)", "bleeding"),
+        dose_gates=("braf_v600e_confirmed",),
+        label_note="BRAF V600E only (dabrafenib + trametinib is the "
+                   "alternative); non-V600 alterations are not an indication",
+    ),
+    Regimen(
         "larotrectinib_first_line", "Larotrectinib (NAVIGATE)", "first_line",
         (_C("larotrectinib", "100 mg", route="PO", schedule="twice daily"),),
         trial_ids=("NAVIGATE",),
@@ -378,6 +535,47 @@ REGIMENS: tuple[Regimen, ...] = (
         dose_gates=("ntrk_positive",),
         label_note="NTRK fusion+ (tumor-agnostic); entrectinib is the "
                    "CNS-active alternative",
+    ),
+    Regimen(
+        "entrectinib_ntrk_first_line", "Entrectinib, NTRK fusion (STARTRK-2 pooled)",
+        "first_line",
+        (_C("entrectinib", "600 mg", route="PO", schedule="once daily",
+            duration="until progression"),),
+        trial_ids=("STARTRK2",),
+        monitoring=("QTc and electrolytes", "LVEF if heart-failure symptoms or "
+                    "risk factors", "CNS effects (cognition, mood, dizziness)",
+                    "LFTs", "uric acid", "vision changes"),
+        dose_gates=("ntrk_positive",),
+        label_note="NTRK fusion+ solid tumors (tumor-agnostic, accelerated "
+                   "approval); larotrectinib is the alternative",
+    ),
+    Regimen(
+        "zongertinib_her2_tkd", "Zongertinib, HER2 TKD mutation (Beamion LUNG-1)",
+        "first_line",
+        (_C("zongertinib", "per label (weight-tiered — not encoded)", route="PO",
+            schedule="once daily", duration="until progression"),),
+        trial_ids=("BEAMION_LUNG1",),
+        monitoring=("LFTs (hepatotoxicity)", "LVEF before starting and on "
+                    "treatment", "ILD/pneumonitis symptoms"),
+        dose_gates=("erbb2_tkd_confirmed", "nonsquamous"),
+        label_note="Non-squamous NSCLC with a HER2 tyrosine-kinase-domain "
+                   "mutation, first line or previously treated (accelerated "
+                   "approval); HER2 amplification or overexpression does not "
+                   "qualify",
+    ),
+    Regimen(
+        "sevabertinib_her2_tkd", "Sevabertinib, HER2 TKD mutation (SOHO-01)",
+        "first_line",
+        (_C("sevabertinib", "per label (not encoded)", route="PO",
+            duration="until progression"),),
+        trial_ids=("SOHO01",),
+        monitoring=("Diarrhea (the most common adverse event)", "LFTs",
+                    "ILD/pneumonitis symptoms", "LVEF"),
+        dose_gates=("erbb2_tkd_confirmed", "nonsquamous"),
+        label_note="Non-squamous NSCLC with a HER2 tyrosine-kinase-domain "
+                   "mutation, first line or previously treated (accelerated "
+                   "approval); HER2 amplification or overexpression does not "
+                   "qualify",
     ),
     Regimen(
         "tdxd_subsequent_line",
@@ -532,6 +730,20 @@ REGIMENS: tuple[Regimen, ...] = (
         dose_gates=("kras_g12c_positive", "prior_systemic_therapy"),
         label_note="KRAS G12C, previously treated — NOT a first-line "
                    "regimen (first line remains chemo±IO); adagrasib is "
+                   "the alternative",
+    ),
+    Regimen(
+        "adagrasib_subsequent_line",
+        "Adagrasib (KRAS G12C, KRYSTAL-1/KRYSTAL-12)", "subsequent",
+        (_C("adagrasib", "600 mg", route="PO", schedule="twice daily",
+            duration="until progression"),),
+        trial_ids=("KRYSTAL1", "KRYSTAL12"),
+        monitoring=("QTc and electrolytes", "LFTs", "nausea, vomiting and "
+                    "diarrhea", "ILD/pneumonitis symptoms",
+                    "CYP3A4 and QT-prolonging co-medications"),
+        dose_gates=("kras_g12c_positive", "prior_systemic_therapy"),
+        label_note="KRAS G12C, previously treated — NOT a first-line "
+                   "regimen (first line remains chemo±IO); sotorasib is "
                    "the alternative",
     ),
 )

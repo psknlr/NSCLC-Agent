@@ -2373,6 +2373,1283 @@
           }
         ]
       }
+    },
+    {
+      "id": "iv_alk_strong_cyp3a4_inducer_alectinib",
+      "_comment": "Rifampicin on the medication list: lorlatinib is contraindicated with strong CYP3A inducers and brigatinib's label says to avoid them; alectinib needs no dose adjustment with CYP3A inducers (label) — the ALK pathway stays open instead of ending at the MDT.",
+      "case": {
+        "t": "T1c",
+        "n": "N2b",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, multiple hepatic metastases (single organ system). Brain MRI negative. EML4-ALK fusion. On rifampicin and isoniazid for pulmonary tuberculosis. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "EML4-ALK fusion",
+            "ros1": "negative",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "negative"
+          },
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "medications": [
+            "rifampicin",
+            "isoniazid"
+          ]
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "alectinib_first_line"
+        ],
+        "regimens_none": [
+          "lorlatinib_first_line",
+          "brigatinib_first_line"
+        ],
+        "trial_refs_any": [
+          "ALEX"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
+    },
+    {
+      "id": "iv_alk_second_generation_alternatives",
+      "_comment": "ALK+ first line: lorlatinib (CROWN) leads; alectinib (ALEX) and brigatinib (ALTA-1L) are approved first-line alternatives.",
+      "case": {
+        "t": "T2a",
+        "n": "N2a",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, single adrenal metastasis. Brain MRI negative. ALK fusion positive. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "ALK fusion positive",
+            "ros1": "negative",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "negative"
+          },
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "medications": []
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "lorlatinib_first_line"
+        ],
+        "regimens_any_2": [
+          "alectinib_first_line",
+          "brigatinib_first_line"
+        ],
+        "trial_refs_any": [
+          "ALEX",
+          "ALTA1L"
+        ],
+        "regimens_none": [
+          "pembro_pemetrexed_platinum",
+          "nivo_ipi_chemo"
+        ]
+      }
+    },
+    {
+      "id": "iv_ros1_next_generation_alternatives",
+      "_comment": "ROS1 fusion first line: repotrectinib and taletrectinib (TRUST-I/II, FDA 2025-06) are both listed; ICI is not a substitute.",
+      "case": {
+        "t": "T2a",
+        "n": "N2b",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, bone metastasis, brain MRI negative. NGS: CD74-ROS1 fusion. PD-L1 TPS 60. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "CD74-ROS1 fusion",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "negative"
+          },
+          "pd_l1": {
+            "tps": 60
+          },
+          "ngs_done": true,
+          "ecog_ps": 1
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "repotrectinib_first_line"
+        ],
+        "regimens_any_2": [
+          "taletrectinib_first_line"
+        ],
+        "trial_refs_any": [
+          "TRUST"
+        ],
+        "regimens_none": [
+          "pembro_monotherapy",
+          "cemiplimab_monotherapy",
+          "atezolizumab_monotherapy"
+        ],
+        "no_violations": [
+          "DRIVER_FIRST_LINE"
+        ]
+      }
+    },
+    {
+      "id": "iv_ros1_post_crizotinib_next_generation_tki",
+      "_comment": "Progression on crizotinib in ROS1+ disease: repotrectinib and taletrectinib have TKI-pretreated response data (TRIDENT-1, TRUST); crizotinib is not re-proposed.",
+      "case": {
+        "t": "T2a",
+        "n": "N1",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, ROS1 fusion, progression on crizotinib with new liver metastases. Brain MRI negative. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "SLC34A2-ROS1 fusion",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "negative"
+          },
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "progression_ngs_done": true,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "crizotinib"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "二线选择？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "repotrectinib_first_line",
+          "taletrectinib_first_line"
+        ],
+        "regimens_none": [
+          "crizotinib_ros1_first_line"
+        ],
+        "violations_forbidden": [
+          "PROGRESSION_SAME_DRUG"
+        ]
+      }
+    },
+    {
+      "id": "iv_ret_pralsetinib_alternative",
+      "_comment": "RET fusion first line: selpercatinib (LIBRETTO-431) leads; pralsetinib (ARROW, regular approval 2023-08) is the alternative.",
+      "case": {
+        "t": "T2a",
+        "n": "N2a",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, bone metastasis. Brain MRI negative. NGS: KIF5B-RET fusion. PD-L1 TPS 70. ECOG 0. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "negative",
+            "ret": "KIF5B-RET fusion",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "negative"
+          },
+          "pd_l1": {
+            "tps": 70
+          },
+          "ngs_done": true,
+          "ecog_ps": 0
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "selpercatinib_first_line"
+        ],
+        "regimens_any_2": [
+          "pralsetinib_first_line"
+        ],
+        "trial_refs_any": [
+          "ARROW"
+        ],
+        "regimens_none": [
+          "pembro_monotherapy"
+        ]
+      }
+    },
+    {
+      "id": "iv_met_ex14_tepotinib_alternative",
+      "_comment": "MET exon 14 skipping: capmatinib (GEOMETRY) and tepotinib (VISION, traditional approval 2024-02).",
+      "case": {
+        "t": "T2a",
+        "n": "N1",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, adrenal metastasis. Brain MRI negative. NGS: MET exon 14 skipping. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "negative",
+            "ret": "negative",
+            "met": "MET exon 14 skipping",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "negative"
+          },
+          "pd_l1": {
+            "tps": 15
+          },
+          "ngs_done": true,
+          "ecog_ps": 1
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "capmatinib_first_line"
+        ],
+        "regimens_any_2": [
+          "tepotinib_first_line"
+        ],
+        "trial_refs_any": [
+          "VISION"
+        ]
+      }
+    },
+    {
+      "id": "iv_braf_v600e_encorafenib_binimetinib_alternative",
+      "_comment": "BRAF V600E: dabrafenib + trametinib (BRF113928) and encorafenib + binimetinib (PHAROS, FDA 2023-10).",
+      "case": {
+        "t": "T2b",
+        "n": "N2a",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, bone metastasis. Brain MRI negative. NGS: BRAF V600E. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "negative",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "BRAF V600E",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "negative"
+          },
+          "pd_l1": {
+            "tps": 40
+          },
+          "ngs_done": true,
+          "ecog_ps": 1
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "dabrafenib_trametinib_first_line"
+        ],
+        "regimens_any_2": [
+          "encorafenib_binimetinib_first_line"
+        ],
+        "trial_refs_any": [
+          "PHAROS"
+        ]
+      }
+    },
+    {
+      "id": "iv_ntrk_entrectinib_alternative",
+      "_comment": "NTRK fusion: larotrectinib and entrectinib (integrated ALKA-372-001/STARTRK-1/STARTRK-2 analysis, FDA 2019-08).",
+      "case": {
+        "t": "T2a",
+        "n": "N2a",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, bone metastasis. Brain MRI negative. NGS: ETV6-NTRK3 fusion. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "negative",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "ETV6-NTRK3 fusion",
+            "kras": "negative",
+            "erbb2": "negative"
+          },
+          "pd_l1": {
+            "tps": 10
+          },
+          "ngs_done": true,
+          "ecog_ps": 1
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "larotrectinib_first_line"
+        ],
+        "regimens_any_2": [
+          "entrectinib_ntrk_first_line"
+        ],
+        "trial_refs_any": [
+          "STARTRK2"
+        ]
+      }
+    },
+    {
+      "id": "iv_her2_tkd_first_line_tki_alongside_chemo_io",
+      "_comment": "HER2 (ERBB2) TKD activating mutation, non-squamous, treatment-naive: zongertinib (FDA 2026-02) and sevabertinib (FDA 2026-09) hold first-line accelerated approvals on single-arm response data; chemo-IO stays on the plan as the randomized-evidence standard and HER2 does not veto it.",
+      "case": {
+        "t": "T2a",
+        "n": "N2a",
+        "m": "M1b",
+        "presentation": "Adenocarcinoma, single adrenal metastasis. Brain MRI negative. NGS: ERBB2 A775_G776insYVMA. PD-L1 TPS 5. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "negative",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "A775_G776insYVMA (exon 20 insertion)"
+          },
+          "pd_l1": {
+            "tps": 5
+          },
+          "ngs_done": true,
+          "ecog_ps": 1
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVA",
+        "regimens_any": [
+          "zongertinib_her2_tkd",
+          "sevabertinib_her2_tkd"
+        ],
+        "regimens_any_2": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "regimens_none": [
+          "tdxd_subsequent_line"
+        ],
+        "trial_refs_any": [
+          "BEAMION_LUNG1",
+          "SOHO01"
+        ],
+        "no_violations": [
+          "DRIVER_FIRST_LINE"
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
+    },
+    {
+      "id": "iv_her2_amplification_not_a_tkd_mutation",
+      "_comment": "ERBB2 amplification is not a HER2 TKD activating mutation: the HER2 TKI approvals do not apply and first line follows the driver-negative table.",
+      "case": {
+        "t": "T2a",
+        "n": "N1",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, multiple liver metastases. Brain MRI negative. NGS: ERBB2 amplification, no ERBB2 mutation. PD-L1 TPS 30. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "negative",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "ERBB2 amplification"
+          },
+          "pd_l1": {
+            "tps": 30
+          },
+          "ngs_done": true,
+          "ecog_ps": 1
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "pembro_pemetrexed_platinum"
+        ],
+        "regimens_none": [
+          "zongertinib_her2_tkd",
+          "sevabertinib_her2_tkd",
+          "tdxd_subsequent_line"
+        ]
+      }
+    },
+    {
+      "id": "ivb_her2_tkd_squamous_no_her2_tki",
+      "_comment": "Both HER2 TKI approvals are for non-squamous NSCLC: in squamous disease the plan stays on the squamous chemo-IO standard.",
+      "case": {
+        "t": "T3",
+        "n": "N2b",
+        "m": "M1c2",
+        "presentation": "Squamous cell carcinoma, bone and liver metastases. Brain MRI negative. NGS: ERBB2 exon 20 insertion (YVMA). PD-L1 TPS 20. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "squamous",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "negative",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "ERBB2 exon 20 insertion (YVMA)"
+          },
+          "pd_l1": {
+            "tps": 20
+          },
+          "ngs_done": true,
+          "ecog_ps": 1
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "pembro_carbo_taxane"
+        ],
+        "regimens_none": [
+          "zongertinib_her2_tkd",
+          "sevabertinib_her2_tkd"
+        ]
+      }
+    },
+    {
+      "id": "ivb_post_chemoio_her2_tkd_her2_tki",
+      "_comment": "Previously treated HER2 TKD-mutant NSCLC: zongertinib and sevabertinib (previously-treated accelerated approvals) join trastuzumab deruxtecan (DESTINY-Lung02).",
+      "case": {
+        "t": "T3",
+        "n": "N2b",
+        "m": "M1c2",
+        "presentation": "Adenocarcinoma, progression after pembrolizumab + pemetrexed-carboplatin. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "negative",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "ERBB2 G776delinsVC"
+          },
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "pembrolizumab",
+                "pemetrexed",
+                "carboplatin"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "二线选择？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "zongertinib_her2_tkd",
+          "sevabertinib_her2_tkd"
+        ],
+        "regimens_any_2": [
+          "tdxd_subsequent_line"
+        ],
+        "violations_forbidden": [
+          "PROGRESSION_SAME_DRUG"
+        ]
+      }
+    },
+    {
+      "id": "ivb_post_chemoio_her2_amplification_no_tdxd",
+      "_comment": "HER2 amplification without a mutation, after chemo-IO: DESTINY-Lung02 enrolled HER2-mutant NSCLC and the HER2 TKIs need a TKD mutation, so neither is proposed; docetaxel-based second line, and the plan names the IHC 3+ question (T-DXd's tumor-agnostic approval is not encoded).",
+      "case": {
+        "t": "T3",
+        "n": "N2b",
+        "m": "M1c2",
+        "presentation": "Adenocarcinoma, progression after pembrolizumab + pemetrexed-carboplatin. NGS: ERBB2 amplification, no ERBB2 mutation. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "negative",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "ERBB2 amplification"
+          },
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "pembrolizumab",
+                "pemetrexed",
+                "carboplatin"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "二线选择？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "docetaxel_ramucirumab_second_line",
+          "docetaxel_second_line"
+        ],
+        "regimens_none": [
+          "tdxd_subsequent_line",
+          "zongertinib_her2_tkd",
+          "sevabertinib_her2_tkd"
+        ],
+        "plan_mentions": [
+          "IHC 3+"
+        ],
+        "violations_forbidden": [
+          "PROGRESSION_SAME_DRUG"
+        ]
+      }
+    },
+    {
+      "id": "ivb_post_chemoio_kras_g12c_adagrasib",
+      "_comment": "KRAS G12C after chemo-IO: adagrasib (KRYSTAL-12, PFS benefit over docetaxel) alongside sotorasib.",
+      "case": {
+        "t": "T2b",
+        "n": "N2b",
+        "m": "M1c2",
+        "presentation": "Adenocarcinoma, progression after pembrolizumab + pemetrexed-carboplatin. Brain MRI negative. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "negative",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "KRAS G12C",
+            "erbb2": "negative"
+          },
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "treatment_history": [
+            {
+              "line": 1,
+              "agents": [
+                "pembrolizumab",
+                "pemetrexed",
+                "carboplatin"
+              ],
+              "status": "progression"
+            }
+          ]
+        },
+        "question": "二线选择？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "adagrasib_subsequent_line"
+        ],
+        "regimens_any_2": [
+          "sotorasib_subsequent_line"
+        ],
+        "trial_refs_any": [
+          "KRYSTAL12",
+          "KRYSTAL1"
+        ],
+        "violations_forbidden": [
+          "PROGRESSION_SAME_DRUG"
+        ]
+      }
+    },
+    {
+      "id": "audit_cemiplimab_tps_80_must_not_block",
+      "_comment": "Control: cemiplimab monotherapy is a declared alternative to pembrolizumab at PD-L1 TPS ≥50%, driver-negative (EMPOWER-Lung 1); the deterministic plan names pembrolizumab only, so the library entry is graded here.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "negative",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "negative",
+          "ntrk": "negative",
+          "kras": "negative",
+          "erbb2": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "pd_l1": {
+          "tps": 80
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "cemiplimab_monotherapy"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_forbidden": [
+          "INDICATION_PREDICATE",
+          "INDICATION_UNDECLARED",
+          "DRIVER_FIRST_LINE"
+        ]
+      }
+    },
+    {
+      "id": "audit_atezolizumab_tps_80_must_not_block",
+      "_comment": "Control: atezolizumab monotherapy is a declared alternative to pembrolizumab at PD-L1 TPS ≥50%, driver-negative (IMpower110); the deterministic plan names pembrolizumab only, so the library entry is graded here.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "negative",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "negative",
+          "ntrk": "negative",
+          "kras": "negative",
+          "erbb2": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "pd_l1": {
+          "tps": 80
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "atezolizumab_monotherapy"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_forbidden": [
+          "INDICATION_PREDICATE",
+          "INDICATION_UNDECLARED",
+          "DRIVER_FIRST_LINE"
+        ]
+      }
+    },
+    {
+      "id": "audit_atezolizumab_egfr_positive_must_block",
+      "_comment": "IMpower110 and EMPOWER-Lung 1 excluded EGFR/ALK-positive disease: single-agent PD-L1 blockade on an EGFR L858R record is a driver-first-line violation even at TPS 80.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative",
+          "ros1": "negative",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "negative",
+          "ntrk": "negative",
+          "kras": "negative",
+          "erbb2": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "pd_l1": {
+          "tps": 80
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "atezolizumab_monotherapy"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "DRIVER_FIRST_LINE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "iv_transplant_recipient_chemo_without_ici",
+      "_comment": "Kidney-transplant recipient on immunosuppression: checkpoint blockade risks graft rejection and transplant recipients were excluded from the ICI trials — the table lists platinum-pemetrexed without a checkpoint inhibitor (JMDB/PARAMOUNT) first, even at PD-L1 TPS 60; the ICI option stays for the transplant team to weigh and the critic must warn on it.",
+      "case": {
+        "t": "T2a",
+        "n": "N1",
+        "m": "M1c1",
+        "presentation": "Adenocarcinoma, multiple liver metastases. Brain MRI negative. Kidney transplant 2019 on tacrolimus and mycophenolate. PD-L1 TPS 60. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "adenocarcinoma",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative",
+            "ros1": "negative",
+            "ret": "negative",
+            "met": "negative",
+            "braf": "negative",
+            "ntrk": "negative",
+            "kras": "negative",
+            "erbb2": "negative"
+          },
+          "pd_l1": {
+            "tps": 60
+          },
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "comorbidities": {
+            "organ_transplant": true
+          },
+          "medications": [
+            "tacrolimus",
+            "mycophenolate"
+          ]
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "pemetrexed_platinum_first_line"
+        ],
+        "trial_refs_any": [
+          "JMDB"
+        ],
+        "violations_required": [
+          {
+            "rule_id": "ICI_COMORBIDITY_CAUTION",
+            "severity": "warn"
+          }
+        ],
+        "release_status": [
+          "treatment_recommendation"
+        ]
+      }
+    },
+    {
+      "id": "ivb_squamous_active_autoimmune_chemo_without_ici",
+      "_comment": "Active autoimmune disease on systemic therapy, squamous histology: carboplatin + nab-paclitaxel without a checkpoint inhibitor (CA031) is listed first; the chemo-IO option stays for rheumatology / MDT review and the critic must warn on it.",
+      "case": {
+        "t": "T3",
+        "n": "N2b",
+        "m": "M1c2",
+        "presentation": "Squamous cell carcinoma, bone and liver metastases. Brain MRI negative. Active rheumatoid arthritis on methotrexate. PD-L1 TPS 20. ECOG 1. No hemoptysis, no leg weakness, no fever.",
+        "facts": {
+          "histologic_category": "squamous",
+          "driver_mutations": {
+            "egfr": "negative",
+            "alk": "negative"
+          },
+          "pd_l1": {
+            "tps": 20
+          },
+          "ngs_done": true,
+          "ecog_ps": 1,
+          "comorbidities": {
+            "active_autoimmune": true
+          },
+          "medications": [
+            "methotrexate"
+          ]
+        },
+        "question": "一线方案？"
+      },
+      "expect": {
+        "stage_group": "IVB",
+        "regimens_any": [
+          "carbo_nab_paclitaxel_first_line"
+        ],
+        "trial_refs_any": [
+          "CA031"
+        ],
+        "violations_required": [
+          {
+            "rule_id": "ICI_COMORBIDITY_CAUTION",
+            "severity": "warn"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_zongertinib_her2_amplification_must_block",
+      "_comment": "A HER2 TKI on ERBB2 amplification: not a TKD activating mutation.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "negative",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "negative",
+          "ntrk": "negative",
+          "kras": "negative",
+          "erbb2": "ERBB2 amplification"
+        },
+        "histologic_category": "adenocarcinoma"
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "zongertinib_her2_tkd"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_tdxd_her2_amplification_must_block",
+      "_comment": "Trastuzumab deruxtecan after chemo-IO on ERBB2 amplification without a mutation: DESTINY-Lung02 enrolled HER2-mutant disease only.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "negative",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "negative",
+          "ntrk": "negative",
+          "kras": "negative",
+          "erbb2": "ERBB2 amplification"
+        },
+        "histologic_category": "adenocarcinoma",
+        "treatment_history": [
+          {
+            "line": 1,
+            "agents": [
+              "pembrolizumab",
+              "pemetrexed",
+              "carboplatin"
+            ],
+            "status": "progression"
+          }
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "tdxd_subsequent_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_sevabertinib_squamous_must_block",
+      "_comment": "Sevabertinib's approval is for non-squamous NSCLC.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "negative",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "negative",
+          "ntrk": "negative",
+          "kras": "negative",
+          "erbb2": "ERBB2 exon 20 insertion (YVMA)"
+        },
+        "histologic_category": "squamous"
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "sevabertinib_her2_tkd"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_brigatinib_rifampicin_must_block",
+      "_comment": "Brigatinib with a strong CYP3A inducer on the medication list.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "EML4-ALK fusion",
+          "ros1": "negative",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "negative",
+          "ntrk": "negative",
+          "kras": "negative",
+          "erbb2": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "medications": [
+          "rifampicin"
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "brigatinib_first_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "ORGAN_FUNCTION_GATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_alectinib_rifampicin_must_not_block",
+      "_comment": "Alectinib needs no dose adjustment with CYP3A inducers (label): the inducer gate must not fire.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "EML4-ALK fusion",
+          "ros1": "negative",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "negative",
+          "ntrk": "negative",
+          "kras": "negative",
+          "erbb2": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "medications": [
+          "rifampicin"
+        ]
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "alectinib_first_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_forbidden": [
+          "ORGAN_FUNCTION_GATE",
+          "INDICATION_PREDICATE"
+        ]
+      }
+    },
+    {
+      "id": "audit_entrectinib_qtc_520_must_block",
+      "_comment": "Entrectinib's label assesses QT before starting; QTc 520 ms is past the interruption threshold at baseline.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "CD74-ROS1 fusion",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "negative",
+          "ntrk": "negative",
+          "kras": "negative",
+          "erbb2": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "organ_function": {
+          "qtc": {
+            "qtc_ms": 520
+          }
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "entrectinib_ros1_first_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "ORGAN_FUNCTION_GATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_binimetinib_lvef_40_must_block",
+      "_comment": "Binimetinib: safety not established below LVEF 50% (label).",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "negative",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "BRAF V600E",
+          "ntrk": "negative",
+          "kras": "negative",
+          "erbb2": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "organ_function": {
+          "cardiac": {
+            "lvef_pct": 40
+          }
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "encorafenib_binimetinib_first_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "ORGAN_FUNCTION_GATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_cemiplimab_tps_30_must_block",
+      "_comment": "Cemiplimab monotherapy needs PD-L1 ≥50%.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "negative",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "negative",
+          "ntrk": "negative",
+          "kras": "negative",
+          "erbb2": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "pd_l1": {
+          "tps": 30
+        }
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "cemiplimab_monotherapy"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_adagrasib_first_line_must_block",
+      "_comment": "Adagrasib is approved after prior systemic therapy — never first line.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "negative",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "negative",
+          "ntrk": "negative",
+          "kras": "KRAS G12C",
+          "erbb2": "negative"
+        },
+        "histologic_category": "adenocarcinoma",
+        "prior_systemic_therapy": false
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "adagrasib_subsequent_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_chemo_without_ici_on_egfr_first_line_must_block",
+      "_comment": "Chemotherapy alone as first line for EGFR L858R skips the TKI.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "L858R",
+          "alk": "negative"
+        },
+        "histologic_category": "adenocarcinoma"
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pemetrexed_platinum_first_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
+    },
+    {
+      "id": "audit_pralsetinib_on_ros1_must_block",
+      "_comment": "Pralsetinib is a RET inhibitor; a ROS1 fusion is outside its population.",
+      "audit_staging": {
+        "stage_group": "IVB"
+      },
+      "audit_facts": {
+        "driver_mutations": {
+          "egfr": "negative",
+          "alk": "negative",
+          "ros1": "CD74-ROS1 fusion",
+          "ret": "negative",
+          "met": "negative",
+          "braf": "negative",
+          "ntrk": "negative",
+          "kras": "negative",
+          "erbb2": "negative"
+        },
+        "histologic_category": "adenocarcinoma"
+      },
+      "audit_plan": {
+        "regimen_ids": [
+          "pralsetinib_first_line"
+        ],
+        "options": []
+      },
+      "expect": {
+        "violations_required": [
+          {
+            "rule_id": "INDICATION_PREDICATE",
+            "severity": "block"
+          }
+        ]
+      }
     }
   ]
 }

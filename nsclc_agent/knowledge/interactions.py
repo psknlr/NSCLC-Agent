@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-PACK_VERSION = "2026-08"
+PACK_VERSION = "2026-10"
 
 #: Severity ladder: contraindicated > major > moderate > monitor
 SEVERITIES = ("contraindicated", "major", "moderate", "monitor")
@@ -45,12 +45,38 @@ RULES: tuple[InteractionRule, ...] = (
         "Avoid; if unavoidable, increase osimertinib per label and monitor response",
     ),
     InteractionRule(
+        "brigatinib_cyp3a4_inducer",
+        ("brigatinib", "布格替尼"),
+        ("rifampin", "rifampicin", "carbamazepine", "phenytoin", "st john", "利福平", "卡马西平", "苯妥英"),
+        "major",
+        "CYP3A induction lowers brigatinib exposure (rifampin: AUC about 80% lower) — loss of efficacy",
+        "Avoid strong or moderate CYP3A inducers (label); switch the inducer before starting brigatinib",
+    ),
+    InteractionRule(
+        "alectinib_cyp3a4_inducer",
+        ("alectinib", "阿来替尼"),
+        ("rifampin", "rifampicin", "carbamazepine", "phenytoin", "st john", "利福平", "卡马西平", "苯妥英"),
+        "monitor",
+        "Rifampin lowers alectinib but raises its active metabolite M4; combined exposure falls about 18%",
+        "No dose adjustment per label; monitor response, and prefer a non-inducer where one exists",
+    ),
+    InteractionRule(
         "osimertinib_qt",
         ("osimertinib", "奥希替尼"),
         ("citalopram", "escitalopram", "amiodarone", "sotalol", "moxifloxacin", "ondansetron",
          "西酞普兰", "胺碘酮", "莫西沙星", "昂丹司琼"),
         "moderate",
         "Additive QTc prolongation",
+        "Baseline and periodic ECG + electrolytes; prefer non-QT alternatives",
+    ),
+    InteractionRule(
+        "qt_prolonging_tki",
+        ("selpercatinib", "entrectinib", "crizotinib", "taletrectinib", "encorafenib", "adagrasib",
+         "塞普替尼", "恩曲替尼", "克唑替尼", "他雷替尼", "康奈非尼", "阿达格拉西布"),
+        ("citalopram", "escitalopram", "amiodarone", "sotalol", "moxifloxacin", "ondansetron",
+         "西酞普兰", "胺碘酮", "莫西沙星", "昂丹司琼"),
+        "moderate",
+        "Additive QTc prolongation (QTc prolongation is a label warning for this TKI)",
         "Baseline and periodic ECG + electrolytes; prefer non-QT alternatives",
     ),
     InteractionRule(
@@ -71,8 +97,8 @@ RULES: tuple[InteractionRule, ...] = (
     ),
     InteractionRule(
         "ici_systemic_steroid",
-        ("pembrolizumab", "nivolumab", "durvalumab", "atezolizumab", "ipilimumab",
-         "帕博利珠", "纳武利尤", "度伐利尤", "阿替利珠", "伊匹木"),
+        ("pembrolizumab", "nivolumab", "durvalumab", "atezolizumab", "ipilimumab", "cemiplimab",
+         "帕博利珠", "纳武利尤", "度伐利尤", "阿替利珠", "伊匹木", "西米普利"),
         ("prednisone", "prednisolone", "methylprednisolone", "dexamethasone",
          "泼尼松", "甲泼尼龙", "地塞米松"),
         "monitor",
@@ -81,7 +107,7 @@ RULES: tuple[InteractionRule, ...] = (
     ),
     InteractionRule(
         "ici_live_vaccine",
-        ("pembrolizumab", "nivolumab", "durvalumab", "atezolizumab", "ipilimumab"),
+        ("pembrolizumab", "nivolumab", "durvalumab", "atezolizumab", "ipilimumab", "cemiplimab"),
         ("live vaccine", "mmr", "varicella", "yellow fever", "减毒活疫苗"),
         "major",
         "Live vaccines on checkpoint blockade carry disseminated-infection and irAE risk",

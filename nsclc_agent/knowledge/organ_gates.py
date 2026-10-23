@@ -166,7 +166,8 @@ def _eval_lvef(facts: dict[str, Any]) -> dict[str, str]:
         if lvef < 50:
             return _gate("lvef_baseline", "fail",
                          f"LVEF {lvef:g}% < 50% — outside the trial populations of this "
-                         f"cardiotoxic component (trastuzumab deruxtecan / trametinib)")
+                         f"cardiotoxic component (trastuzumab deruxtecan, trametinib, "
+                         f"binimetinib)")
         return _gate("lvef_baseline", "pass", f"LVEF {lvef:g}% ≥ 50%")
     if nyha is not None and nyha >= 3:
         return _gate("lvef_baseline", "fail",
@@ -176,8 +177,28 @@ def _eval_lvef(facts: dict[str, Any]) -> dict[str, str]:
         return _gate("lvef_baseline", "unverified",
                      "heart failure on record without an LVEF — echocardiogram/MUGA first")
     return _gate("lvef_baseline", "unverified",
-                 "no baseline LVEF on record — echocardiogram/MUGA before "
-                 "trastuzumab deruxtecan or trametinib")
+                 "no baseline LVEF on record — echocardiogram/MUGA before a "
+                 "cardiotoxic component (trastuzumab deruxtecan, trametinib, "
+                 "binimetinib)")
+
+
+def _eval_lvef_monitoring(facts: dict[str, Any]) -> dict[str, str]:
+    """LVEF before a HER2 TKI (zongertinib, sevabertinib): the labels warn
+    of left-ventricular dysfunction and ask for a baseline LVEF, but the
+    library does not encode an exclusion threshold from those trials — a
+    low LVEF asks for cardiology review, it never fails the regimen."""
+    raw = _organ(facts, "cardiac")
+    lvef = _num(raw.get("lvef_pct")) if isinstance(raw, dict) else _num(raw)
+    if lvef is not None:
+        if lvef < 50:
+            return _gate("lvef_monitoring", "unverified",
+                         f"LVEF {lvef:g}% < 50% — cardiology review before starting; "
+                         f"the label warns of left-ventricular dysfunction")
+        return _gate("lvef_monitoring", "pass",
+                     f"LVEF {lvef:g}% ≥ 50% — repeat on treatment as the label advises")
+    return _gate("lvef_monitoring", "unverified",
+                 "no baseline LVEF on record — the label asks for one before "
+                 "starting a HER2 TKI (left-ventricular dysfunction warning)")
 
 
 def _ratio(raw: dict[str, Any], key: str) -> tuple[Optional[float], bool]:
@@ -399,6 +420,7 @@ _EVALUATORS = {
     "renal_cisplatin": _eval_renal_cisplatin,
     "hematologic_baseline": _eval_hematologic,
     "lvef_baseline": _eval_lvef,
+    "lvef_monitoring": _eval_lvef_monitoring,
     "hepatic_baseline": _eval_hepatic,
     "qtc_baseline": _eval_qtc,
     "ild_history": _eval_ild,
@@ -424,9 +446,20 @@ _COMPONENT_GATES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ramucirumab", ("bleeding_risk",)),
     ("osimertinib", ("qtc_baseline",)),
     ("lorlatinib", ("no_strong_cyp3a4_inducer",)),
+    ("brigatinib", ("no_strong_cyp3a4_inducer",)),
     ("deruxtecan", ("ild_history",)),
     ("trastuzumab", ("lvef_baseline",)),
     ("trametinib", ("lvef_baseline",)),
+    ("binimetinib", ("lvef_baseline",)),
+    # QTc prolongation is a label warning for each of these TKIs.
+    ("selpercatinib", ("qtc_baseline",)),
+    ("entrectinib", ("qtc_baseline",)),
+    ("crizotinib", ("qtc_baseline",)),
+    ("taletrectinib", ("qtc_baseline",)),
+    ("encorafenib", ("qtc_baseline",)),
+    ("adagrasib", ("qtc_baseline",)),
+    ("zongertinib", ("lvef_monitoring",)),
+    ("sevabertinib", ("lvef_monitoring",)),
 )
 
 #: Gates every alternative of a conditional component shares ("cisplatin or

@@ -212,5 +212,6 @@ def test_population_signature_normalization():
     sig = population_signature({"driver_mutations": {
         "EGFR": "L858R + C797S", "alk": "negative", "MET": "exon 14 skipping",
         "BRAF": "V600E", "KRAS": "not tested", "HER2": "YVMA insertion"}})
+    # HER2 carries its variant class: a YVMA insertion is a TKD mutation.
     assert sig == {"egfr": ["c797s", "l858r"], "met": ["ex14_skipping"],
-                   "braf": ["v600e"], "erbb2": []}
+                   "braf": ["v600e"], "erbb2": ["tkd"]}
