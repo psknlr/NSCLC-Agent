@@ -530,6 +530,27 @@ matches third-party and hypothetical cues on word boundaries.
     a module Pyodide does not ship (`ssl`, `sqlite3`…) at module level
     — a test runs the package with those imports poisoned.
 
+29. **Alternatives are one decision; a class is read, never guessed.**
+    (v1.6.0.) An option may list several regimen ids for one decision
+    (which ALK TKI, which ROS1 TKI). Each passes the indication and organ
+    gates on its own; a dropped one leaves the option's name and its
+    rationale clause (a dict rationale keys one clause per id), so
+    `OPTION_DRUG_UNBOUND` has nothing to catch, and the MDT workup item is
+    raised only when no alternative survives. Variant classes that decide
+    eligibility are parsed from positive clauses: HER2 is a TKD mutation,
+    non-TKD (amplification, overexpression, extracellular/transmembrane
+    variants) or unclassified — zongertinib/sevabertinib need TKD in
+    non-squamous disease, trastuzumab deruxtecan needs a mutation, never
+    amplification alone — and KRAS needs G12C. A positive report naming no
+    class keeps the option provisional with the question in the workup.
+    Histology is classified once (`kg_eligibility._classify_histology`):
+    "non-squamous" is never read as squamous. A record that rules
+    checkpoint blockade out (solid-organ transplant, active autoimmune
+    disease) puts chemotherapy without an ICI first; the ICI options stay
+    for the specialist, and the critic's caution stays on them. The
+    library's evidence check, its corrections and what it could not
+    confirm are in `docs/EVIDENCE_AUDIT.md`.
+
 ## 4. LLM containment table (governed mode)
 
 | Capability | Model may | Model may not |
@@ -563,6 +584,10 @@ regimen) are new. Comorbidities are read with list-scoped negation ("No
 history of ILD, autoimmune disease or organ transplant"), never from family
 history or "suspected"; a warn on a released plan is shown in the chat
 reply (the rule text to clinicians, the topic to discuss to patients).
+Since v1.6: the transplant caution names the chemotherapy-only regimens;
+`ILD_PNEUMONITIS_RISK` covers every library TKI whose label warns of
+ILD/pneumonitis; `BIOMARKER_GAP` reads the histology class, so
+"non-squamous" no longer passes as pure squamous.
 
 These are the rules the v0.1 prompts stated in prose and hoped for; here the
 critic executes them on every run, including the deterministic path's own
@@ -609,8 +634,10 @@ failed-closed run stays failed closed.
   plan shape tolerance + wholesale rejection.
 - `test_runner.py` — end-to-end: rule mode, mock-agentic mode, emergency
   short-circuit, dose gating, checkpoint/resume, journal replay divergence.
-- `eval/` — 16 golden decision cases with machine-checkable expectations;
-  the same expectations grade any configured real model.
+- `eval/` — 100 golden decision cases (58 pipeline cases and 42 audit
+  probes that feed a crafted plan straight to the rule engine) with
+  machine-checkable expectations; the same expectations grade any
+  configured real model.
 
 - `eval/redteam.py` — the red-team benchmark (v1.5): 202 attack/control
   probes over six tracks (agent consult hooks, prompt injection, the
@@ -619,4 +646,4 @@ failed-closed run stays failed closed.
   101/101) and a held-out test split frozen by SHA-256 before any fix and
   run only to report (`eval/golden/redteam/RESULTS.md`: 37 → 93/101).
 
-All 1,018 tests run fully offline (including the adversarial-review regression suite in test_hardening.py).
+All 1,044 tests run fully offline (including the adversarial-review regression suite in test_hardening.py).
