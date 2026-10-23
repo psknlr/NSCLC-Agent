@@ -869,24 +869,54 @@ def _rule_organ_function(ctx: PlanContext) -> list[Violation]:
 
 def _rule_ici_comorbidity(ctx: PlanContext) -> list[Violation]:
     comorbid = ctx.facts.get("comorbidities") or {}
-    risky = comorbid.get("ild") or comorbid.get("active_autoimmune") \
-        or comorbid.get("autoimmune_disease")
-    if not risky:
+    ici = [rid for rid in ctx.regimen_ids
+           if (regimen_lib.get(rid) or None) and regimen_lib.get(rid).contains_ici]
+    if not ici:
         return []
-    if any((regimen_lib.get(rid) or None) and regimen_lib.get(rid).contains_ici
-           for rid in ctx.regimen_ids):
-        return [Violation(
+    out = []
+    if comorbid.get("ild") is True or comorbid.get("active_autoimmune") is True \
+            or comorbid.get("autoimmune_disease") is True:
+        out.append(Violation(
             "ICI_COMORBIDITY_CAUTION", "warn",
             "Checkpoint inhibitor planned with ILD / active autoimmune disease "
             "on record — document the risk-benefit discussion and monitoring "
             "plan; these patients were excluded from the registration trials.",
-        )]
-    return []
+        ))
+    if comorbid.get("organ_transplant") is True:
+        # Solid-organ recipients are on immunosuppression; checkpoint
+        # blockade risks graft rejection and loss (v1.4.1 red-team: a
+        # kidney-transplant recipient was released pembrolizumab with no
+        # finding — the only trace was a supportive-care note).
+        out.append(Violation(
+            "ICI_COMORBIDITY_CAUTION", "warn",
+            f"Checkpoint inhibitor ({', '.join(ici)}) planned for a solid-organ "
+            f"transplant recipient — graft rejection is a recognized risk and "
+            f"transplant recipients were excluded from the registration trials; "
+            f"decide with the transplant team and consider chemotherapy without "
+            f"a checkpoint inhibitor.",
+        ))
+    return out
+
+
+#: Cytotoxic components (chemotherapy backbones and ADC payloads).
+_CYTOTOXIC_RE = re.compile(
+    r"platin|pemetrexed|taxel|etoposide|gemcitabine|vinorelbine|chemotherapy|"
+    r"doublet|deruxtecan", re.IGNORECASE)
+#: Components with a recognized pneumonitis / ILD risk beyond checkpoint
+#: inhibitors (those are covered by ICI_COMORBIDITY_CAUTION).
+_PNEUMONITIS_RE = re.compile(
+    r"osimertinib|gefitinib|erlotinib|afatinib|dacomitinib|lazertinib|"
+    r"amivantamab|brigatinib|deruxtecan|radiotherapy|\bsbrt\b", re.IGNORECASE)
+
+
+def _components(rid: str) -> list[str]:
+    regimen = regimen_lib.get(rid)
+    return [str(c.drug) for c in regimen.components] if regimen else []
 
 
 def _rule_ps_gate(ctx: PlanContext) -> list[Violation]:
     ecog = ctx.facts.get("ecog_ps")
-    if not isinstance(ecog, int) or ecog < 3:
+    if not isinstance(ecog, int) or isinstance(ecog, bool) or ecog < 3:
         return []
     aggressive = ("ccrt_60gy" in ctx.regimen_ids
                   or any("perioperative" in rid or "neoadjuvant" in rid
@@ -898,7 +928,63 @@ def _rule_ps_gate(ctx: PlanContext) -> list[Violation]:
             f"— registration trials required PS 0–1 (PS 2 at most); document "
             f"the fitness rationale or de-escalate.",
         )]
+    # Checkpoint inhibitors and chemotherapy at PS 3–4 (v1.4.1 red-team:
+    # ECOG 3 released platinum-pemetrexed-pembrolizumab, ECOG 4
+    # pembrolizumab, with no finding). Targeted therapy for a driver stays
+    # an option at poor PS and is not flagged.
+    systemic = [rid for rid in ctx.regimen_ids
+                if (regimen_lib.get(rid) or None) and (
+                    regimen_lib.get(rid).contains_ici
+                    or any(_CYTOTOXIC_RE.search(c) for c in _components(rid)))]
+    if systemic:
+        return [Violation(
+            "PS_GATE", "warn",
+            f"ECOG PS {ecog} with {', '.join(systemic)} planned — checkpoint-"
+            f"inhibitor and chemotherapy trials enrolled PS 0–1 (PS 2 at most); "
+            f"at PS 3–4 without a targetable driver, best supportive care is the "
+            f"standard. Document the fitness rationale or de-escalate.",
+        )]
     return []
+
+
+def _rule_ild_pneumonitis(ctx: PlanContext) -> list[Violation]:
+    """ILD on record with an EGFR TKI, amivantamab, an ADC, brigatinib or
+    thoracic radiotherapy: pneumonitis risk is higher and patients with an
+    ILD history were excluded from the registration trials (v1.4.1
+    red-team: ILD + osimertinib released with no finding)."""
+    if ((ctx.facts.get("comorbidities") or {}).get("ild")) is not True:
+        return []
+    risky = [rid for rid in ctx.regimen_ids
+             if any(_PNEUMONITIS_RE.search(c) for c in _components(rid))]
+    if not risky:
+        return []
+    return [Violation(
+        "ILD_PNEUMONITIS_RISK", "warn",
+        f"Interstitial lung disease on record with {', '.join(risky)} planned — "
+        f"drug- or radiation-induced pneumonitis is more likely and patients with "
+        f"an ILD history were excluded from the registration trials; baseline "
+        f"HRCT, pulmonology input and a pneumonitis monitoring plan.",
+    )]
+
+
+def _rule_pregnancy(ctx: PlanContext) -> list[Violation]:
+    """Pregnancy on record with any anticancer regimen (v1.4.1 red-team:
+    a patient 20 weeks pregnant was released pembrolizumab with no
+    finding)."""
+    if ((ctx.facts.get("comorbidities") or {}).get("pregnancy")) is not True:
+        return []
+    planned = [rid for rid in ctx.regimen_ids if regimen_lib.get(rid)]
+    if not planned:
+        return []
+    return [Violation(
+        "PREGNANCY_CAUTION", "warn",
+        f"Pregnancy on record with {', '.join(planned)} planned — checkpoint "
+        f"inhibitors, targeted kinase inhibitors, antifolates and ADCs carry "
+        f"fetal-harm warnings and pregnant patients were excluded from the "
+        f"registration trials; cytotoxic chemotherapy is avoided in the first "
+        f"trimester and radiotherapy needs fetal-dose planning. Decide with "
+        f"obstetrics / maternal-fetal medicine and document it.",
+    )]
 
 
 def _rule_biomarker_before_systemic(ctx: PlanContext) -> list[Violation]:
@@ -1036,6 +1122,8 @@ RULES = (
     _rule_organ_function,
     _rule_ici_comorbidity,
     _rule_ps_gate,
+    _rule_ild_pneumonitis,
+    _rule_pregnancy,
     _rule_biomarker_before_systemic,
     _rule_dose_scan,
 )

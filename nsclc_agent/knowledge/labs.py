@@ -76,7 +76,7 @@ COMORBIDITIES: dict[str, str] = {
     "peripheral_neuropathy": "周围神经病变", "hearing_loss": "听力下降",
     "hbv": "乙肝（HBsAg+）", "hcv": "丙肝", "hiv": "HIV", "tuberculosis": "结核",
     "organ_transplant": "器官移植", "chronic_kidney_disease": "慢性肾病",
-    "cirrhosis": "肝硬化",
+    "cirrhosis": "肝硬化", "pregnancy": "妊娠（目前）",
 }
 
 #: Default upper limits of normal, used only when a value comes without
@@ -263,8 +263,28 @@ def _convert(block: str, key: str, value: float, unit: str) -> tuple[str, float]
     return key, value
 
 
-_NEGATED_RE = re.compile(r"(?:无|否认|没有|未见|未发现|不伴|\bno\b|\bdenies\b|\bwithout\b|negative\s+for)"
-                         r"[^。；;，,\n]{0,8}$", re.I)
+#: Negation cues for a comorbidity named after them.
+_NEG_CUE_RE = re.compile(r"无|否认|没有|未见|未发现|不伴|\bno\b|\bdenies\b|\bdenied\b|\bwithout\b|"
+                         r"negative\s+for|\bnever\b", re.I)
+#: "(any) (known / prior …) history of (a)" between the cue and the condition.
+_HISTORY_OF_RE = re.compile(r"^\s*(?:any\s+)?(?:(?:known|prior|previous|past|significant|personal|"
+                            r"relevant|medical)\s+)*(?:history|hx)\s+of\s+(?:an?\s+)?", re.I)
+#: Where a negation's scope ends: a sentence, a semicolon, a full-width
+#: comma (a Chinese clause: "无高血压，糖尿病10年").
+_CLAUSE_END_RE = re.compile(r"[。；;\n，]|\.(?=\s|$)")
+#: Separators of a negated list ("No history of ILD, autoimmune disease or
+#: organ transplant"; "无间质性肺病、自身免疫病及器官移植史").
+_LIST_SEP_RE = re.compile(r"[,、/]|\b(?:or|and|nor)\b|及|和|或|与", re.I)
+#: Words that assert something inside or after a list item, ending the
+#: negation's scope ("No ILD, kidney transplant 2015, on tacrolimus").
+_ASSERTING_RE = re.compile(
+    r"\b(?:but|however|although|except|apart\s+from|other\s+than|has|have|had|with|on|since|"
+    r"for|diagnosed|treated|controlled|status\s+post|s/p|recipient|underwent|received|"
+    r"(?:19|20)\d\d)\b|但|然而|除|有(?!无)|伴|合并|确诊|诊断|服用|使用|治疗|控制|\d", re.I)
+#: The condition belongs to someone else or is not established.
+_NOT_THE_PATIENTS_RE = re.compile(
+    r"可疑|疑似|待排|家族史|家族|\bfamily\b|\b(?:mother|father|sister|brother|sibling|parent|"
+    r"son|daughter)s?\b|\bsuspected\b|\bpossible\b|\bprobable\b|\brule\s+out\b|\br/o\b", re.I)
 _COMORBID_RE: dict[str, re.Pattern[str]] = {
     "ild": re.compile(r"间质性肺(?:病|炎|疾病)|肺间质纤维化|特发性肺纤维化|\bILD\b|interstitial\s+lung\s+disease|"
                       r"pulmonary\s+fibrosis", re.I),
@@ -297,18 +317,104 @@ _NEUROPATHY_GRADE_RE = re.compile(r"(?:([1-4])\s*级|grade\s*([1-4])|G([1-4]))[^
                                   r"神经病变[^。；;，,\n]{0,6}(?:([1-4])\s*级|grade\s*([1-4])|G([1-4]))", re.I)
 
 
+def _negated(text: str, start: int, end: int) -> bool:
+    """Whether a negation cue earlier in the clause covers ``text[start:end]``:
+    a few characters before it ("无高血压", "no ILD"), after "(no known)
+    history of", or across a list of conditions that asserts nothing
+    (v1.4.1: "No history of ILD, autoimmune disease or organ transplant"
+    read as a transplant recipient)."""
+    clause = max((m.end() for m in _CLAUSE_END_RE.finditer(text, 0, start)), default=0)
+    before = text[clause:start]
+    cues = list(_NEG_CUE_RE.finditer(before))
+    if not cues:
+        return False
+    gap = before[cues[-1].end():]
+    gap = gap[_HISTORY_OF_RE.match(gap).end():] if _HISTORY_OF_RE.match(gap) else gap
+    if len(gap) <= 8 and not _LIST_SEP_RE.search(gap):
+        return True
+    if not _LIST_SEP_RE.search(gap) or _ASSERTING_RE.search(gap):
+        return False
+    if any(len(item.strip()) > 40 for item in _LIST_SEP_RE.split(gap)):
+        return False
+    tail_end = _CLAUSE_END_RE.search(text, end)
+    tail = text[end:tail_end.start() if tail_end else len(text)]
+    tail = _LIST_SEP_RE.split(tail, maxsplit=1)[0]
+    return not _ASSERTING_RE.search(tail)
+
+
 def _comorbidity_value(text: str, pattern: re.Pattern[str]) -> Optional[bool]:
     readings: list[bool] = []
     for match in pattern.finditer(text):
         clause_start = max(text.rfind(ch, 0, match.start()) for ch in "。；;\n,，")
         before = text[clause_start + 1:match.start()]
         after = text[match.end():]
-        if _NEGATED_RE.search(before) or _EXPLICIT_NEGATIVE_AFTER_RE.search(after):
-            readings.append(False)
-        elif re.search(r"可疑|疑似|待排|家族史|家族", before):
+        if _NOT_THE_PATIENTS_RE.search(before):
             continue
+        if _negated(text, match.start(), match.end()) or _EXPLICIT_NEGATIVE_AFTER_RE.search(after):
+            readings.append(False)
         else:
             readings.append(True)
+    if not readings:
+        return None
+    return True if True in readings else False
+
+
+#: Current pregnancy. Gestational diabetes / hypertension, "pregnancies"
+#: (obstetric history) and contraception counselling do not match or are
+#: skipped below.
+_PREGNANCY_RE = re.compile(
+    r"\bpregnan(?:t|cy)\b|\bgestation(?:al\s+age)?\b|怀孕|妊娠|孕\s*\d{1,2}(?:\s*\+\s*\d)?\s*周|"
+    r"早孕|中孕|晚孕|孕期|孕妇", re.I)
+_PREGNANCY_TEST_AFTER_RE = re.compile(r"^\s*(?:test|screen)|^试验", re.I)
+_PREGNANCY_NEG_BEFORE_RE = re.compile(
+    r"(?:\bnot|\bnon|\bnever|\bno|\bdenies|\bdenied|未|非|否认|无|没有|不是|未曾)[\s\-]*"
+    r"(?:(?:currently|presently|known\s+to\s+be|been|be|a)\s+)*$", re.I)
+_PREGNANCY_NEG_AFTER_RE = re.compile(r"^\s*[:：]\s*(?:no\b|none\b|negative\b|denied\b|否|无|阴性)", re.I)
+_PREGNANCY_NOT_CURRENT_RE = re.compile(
+    r"\b(?:history|hx|previous|prior|past|former|future|plan(?:s|ned|ning)?|wish(?:es)?|"
+    r"desire[sd]?|avoid(?:s|ing)?|prevent(?:s|ing|ion)?|contracepti\w*|counsel+(?:ed|ing)?|"
+    r"risk|before|after|rule\s+out|exclude[sd]?|possible|suspected|unknown|whether|if)\b|"
+    r"既往|曾|以前|上次|计划|备孕|避孕|产后|排除|待排|可疑|疑似|是否|post-?partum|\?|？", re.I)
+_PREGNANCY_NOT_CURRENT_AFTER_RE = re.compile(
+    r"^\s*(?:[-‐]?\s*(?:induced|related|associated)|loss|terminat|complicat|in\s+(?:19|20)\d\d|"
+    r"status\s+(?:unknown|unclear|not)|(?:is\s+)?(?:unknown|unclear|pending|not\s+(?:known|tested|"
+    r"assessed|checked))|\?)|^期?(?:糖尿病|高血压)|^(?:史|情况不详|状态不详|待查)|^\s*？", re.I)
+_PREGNANCY_TEST_RESULT_RE = re.compile(
+    r"(?P<neg>negative|阴性|\(\s*[-−]\s*\)|（\s*[-−]\s*）|\bneg\b)|"
+    r"(?P<pos>positive|阳性|\(\s*\+\s*\)|（\s*\+\s*）|\bpos\b)", re.I)
+_PREGNANCY_NEG_TEST_BEFORE_RE = re.compile(r"negative\s+(?:(?:urine|serum|blood)\s+)?$", re.I)
+_HCG_NEGATIVE_RE = re.compile(
+    r"(?:β|beta)?[\s-]*h?CG[^。；;，,\n]{0,12}?(?:阴性|negative|\(\s*[-−]\s*\)|（\s*[-−]\s*）)", re.I)
+
+
+def _pregnancy_value(text: str) -> Optional[bool]:
+    """Pregnancy now: True for a stated current pregnancy, False for an
+    explicit "not pregnant" or a negative pregnancy test, None otherwise
+    (history, planning, contraception, an unanswered question)."""
+    readings: list[bool] = []
+    for match in _PREGNANCY_RE.finditer(text):
+        clause = max((m.end() for m in _CLAUSE_END_RE.finditer(text, 0, match.start())),
+                     default=0)
+        before = text[clause:match.start()]
+        tail_end = _CLAUSE_END_RE.search(text, match.end())
+        after = text[match.end():tail_end.start() if tail_end else len(text)]
+        if _PREGNANCY_TEST_AFTER_RE.search(after) or _PREGNANCY_NEG_TEST_BEFORE_RE.search(before):
+            if _PREGNANCY_NEG_TEST_BEFORE_RE.search(before):
+                readings.append(False)
+                continue
+            result = _PREGNANCY_TEST_RESULT_RE.search(after[:40])
+            if result:
+                readings.append(result.group("pos") is not None)
+            continue
+        if _PREGNANCY_NEG_BEFORE_RE.search(before) or _PREGNANCY_NEG_AFTER_RE.search(after):
+            readings.append(False)
+            continue
+        if _NOT_THE_PATIENTS_RE.search(before) or _PREGNANCY_NOT_CURRENT_RE.search(before) \
+                or _PREGNANCY_NOT_CURRENT_AFTER_RE.search(after):
+            continue
+        readings.append(True)
+    if not readings and _HCG_NEGATIVE_RE.search(text):
+        return False
     if not readings:
         return None
     return True if True in readings else False
@@ -361,6 +467,9 @@ def extract_labs(text: str) -> dict[str, Any]:
             comorbid[key] = value
     if "hbv" not in comorbid and _HBV_NEGATIVE_RE.search(text):
         comorbid["hbv"] = False
+    pregnancy = _pregnancy_value(text)
+    if pregnancy is not None:
+        comorbid["pregnancy"] = pregnancy
     m = _NEUROPATHY_GRADE_RE.search(text)
     if m and comorbid.get("peripheral_neuropathy") is not False:
         comorbid["peripheral_neuropathy"] = int(next(g for g in m.groups() if g))
