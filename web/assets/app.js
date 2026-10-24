@@ -1001,7 +1001,8 @@ const TOOL_ICON = { stage_tnm: "staging", guideline_search: "kg", rule_review: "
 const AGENT_TITLE = { radiology: "影像科医师", pathology: "病理与分子病理科医师", thoracic_surgery: "胸外科医师", radiation_oncology: "放疗科医师",
   medical_oncology: "肿瘤内科医师", pharmacy: "临床药师", evidence: "循证医学研究员" };
 const HOOK_TITLE = { emergency_screen: "急症筛查", fact_seed: "病例笔记预填", evidence_ledger: "证据台账", rule_review: "规则引擎",
-  stage_consistency: "分期一致性", citation_provenance: "引用溯源", dose_provenance: "剂量溯源", emergency_addressed: "急症优先" };
+  stage_consistency: "分期一致性", citation_provenance: "引用溯源", dose_provenance: "剂量溯源", number_provenance: "数字溯源",
+  emergency_addressed: "急症优先", injection_screen: "注入筛查" };
 const CONF = { high: ["ok", "把握度 高"], moderate: ["", "把握度 中"], low: ["warn", "把握度 低"] };
 function agentTitle(name) {
   const a = AgentCfg.catalog && (AgentCfg.catalog.agents || []).find((x) => x.name === name);
@@ -1110,8 +1111,11 @@ function stepItem(step, live) {
       h("div", { class: "sb" }, h("div", { class: "sl" }, step.kind === "submit" ? "提交结论 · Hooks 复核" : "Hooks 复核"),
         h("div", { class: "st" }, n ? `${n} 条参考意见${step.unanswered ? `，${step.unanswered} 条交回模型判断` : ""}` : "无复核意见")));
   }
+  if (step.kind === "alert" && step.injection) {
+    return h("div", { class: "step s-alert" }, h("span", { class: "si" }, icon("alert")), h("div", { class: "sb" }, h("div", { class: "sl" }, "疑似提示注入（按不可信数据处理）"), h("div", { class: "st" }, raw(`${step.injection.source || ""} — ${step.injection.excerpt || ""}`))));
+  }
   if (step.kind === "alert") {
-    return h("div", { class: "step s-alert" }, h("span", { class: "si" }, icon("siren")), h("div", { class: "sb" }, h("div", { class: "sl" }, "急症筛查命中"), h("div", { class: "st" }, (step.emergency.signals || []).join("、"))));
+    return h("div", { class: "step s-alert" }, h("span", { class: "si" }, icon("siren")), h("div", { class: "sb" }, h("div", { class: "sl" }, "急症筛查命中"), h("div", { class: "st" }, ((step.emergency || {}).signals || []).join("、"))));
   }
   if (step.kind === "compact" || step.kind === "info") {
     return h("div", { class: "step s-note" }, h("span", { class: "si" }, icon("info")), h("div", { class: "sb" }, h("div", { class: "st muted" }, step.text)));
@@ -1136,7 +1140,7 @@ function reviewPanel(review) {
   if (!findings.length) {
     /* Name only the stop hooks that ran (older sessions carry no list). */
     const ran = (review && review.checked) || null;
-    const what = ran ? (ran.length ? `${ran.map((x) => HOOK_TITLE[x] || x).join("、")}已核对` : "未启用提交时的 Hooks") : "规则引擎、分期一致性、引用与剂量溯源已核对";
+    const what = ran ? (ran.length ? `${ran.map((x) => HOOK_TITLE[x] || x).join("、")}已核对` : "未启用提交时的 Hooks") : "规则引擎、分期一致性、引用、剂量与数字溯源已核对";
     return h("div", { class: "rx-sec" }, h("div", { class: "lbl" }, "Hooks 复核"), h("div", { class: "metrics" }, h("span", { class: "metric ok" }, icon("lab"), `无复核意见 · ${what}`)));
   }
   const answers = Object.fromEntries((review.responses || []).filter((r) => r && r.rule_id).map((r) => [r.rule_id, r]));
@@ -1526,7 +1530,7 @@ const Workspace = {
       if (ev.plan) L.plan = ev.plan;
     } else if (ev.type === "review") steps.push({ kind: "review", findings: ev.findings, unanswered: ev.unanswered });
     else if (ev.type === "hook") steps.push({ kind: "hook", name: ev.name, title: ev.title, text: ev.text });
-    else if (ev.type === "alert") steps.push({ kind: "alert", emergency: ev.emergency });
+    else if (ev.type === "alert") steps.push({ kind: "alert", emergency: ev.emergency, injection: ev.injection });
     else if (ev.type === "compact_start") steps.push({ kind: "info", text: `正在压缩 ${ev.turns} 轮早期会诊…` });
     else if (ev.type === "compact") steps.push({ kind: "info", text: `上下文已压缩（${ev.by_model ? "模型撰写摘要" : "确定性摘要"}）：${ev.before} → ${ev.after} tokens` });
     else if (ev.type === "mcp") for (const sv of ev.servers || []) steps.push(sv.ok ? { kind: "info", text: `MCP ${sv.name}：已连接，${(sv.tools || []).length} 个工具` } : { kind: "error", message: `MCP ${sv.name} 连接失败：${sv.error}` });
@@ -2409,7 +2413,7 @@ VIEWS.agent = () => {
         h("button", { type: "button", class: full ? "on" : "", onclick: () => setAutonomy("full") }, "模型完全自主"),
         h("button", { type: "button", class: full ? "" : "on", onclick: () => setAutonomy("assisted") }, "内核辅助")))),
     h("p", { class: "muted", style: { margin: 0 } }, full
-      ? "当前：模型完全自主（默认）。分期、治疗意图与方案全部由模型判断；不提供分期引擎、适应证与器官功能核对、后线序贯、规则复核、受治理参考等确定性决策工具；Hooks 只保留急症提醒与引用、剂量溯源。"
+      ? "当前：模型完全自主（默认）。分期、治疗意图与方案全部由模型判断；不提供分期引擎、适应证与器官功能核对、后线序贯、规则复核、受治理参考等确定性决策工具；Hooks 只保留急症与提示注入提醒，以及引用、剂量与数字溯源。"
       : "当前：内核辅助。模型仍主导会诊，但可以调用确定性内核工具（分期引擎、适应证与器官功能核对、后线序贯、规则复核、受治理参考），Hooks 也会对照分期与安全规则提出参考意见。")));
 
   /* --- specialists */

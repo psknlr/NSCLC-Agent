@@ -34,6 +34,10 @@ class Tool:
     terminal: bool = False
     #: Short label for timelines (UI); falls back to the name.
     label: str = ""
+    #: The result carries text from outside the deterministic kernel (an
+    #: MCP server, a document transcription, a literature search): the loop
+    #: fences it as untrusted data and screens it for prompt injection.
+    untrusted: bool = False
 
     def spec(self) -> ToolSpec:
         return ToolSpec(self.name, self.description, self.parameters)

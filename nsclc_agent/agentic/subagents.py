@@ -245,7 +245,8 @@ class SubAgentRunner:
                 max_tokens=self.max_tokens, parallel=self.parallel,
                 cancelled=self.cancelled,
                 nudge="请调用 submit_report 提交你的专科意见。",
-                post_tool=self.post_tool, base_event={"depth": 1})
+                post_tool=self.post_tool, base_event={"depth": 1},
+                language=self.language)
         except Cancelled:
             raise
         except Exception as exc:  # noqa: BLE001 - a failed specialist is an observation

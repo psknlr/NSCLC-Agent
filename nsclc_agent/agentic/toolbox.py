@@ -5,7 +5,7 @@ In agent mode the model is the clinician-in-the-loop's reasoning partner and
 it LEADS: it decides what to look up, what to compute and what to recommend.
 The deterministic kernel is still here — staging engine, trial registry,
 regimen library, indication predicates, organ gates, CNS and later-line
-modules, guideline KG, the 20-rule safety engine, even the whole governed
+modules, guideline KG, the 22-rule safety engine, even the whole governed
 pipeline — but as instruments and second opinions the model consults, never
 as gates it must pass. Nothing in this module blocks, rewrites or releases.
 
@@ -183,7 +183,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ),
     ToolSpec(
         "rule_review",
-        "Run the deterministic 20-rule safety engine over a draft plan and "
+        "Run the deterministic 22-rule safety engine over a draft plan and "
         "get its findings. ADVISORY: the findings are a second opinion you "
         "weigh — accept and revise, or keep your plan and give the clinical "
         "reason.",
@@ -240,6 +240,10 @@ KERNEL_TOOLS = frozenset({
     "check_organ_function", "cns_assessment", "later_line_options",
     "rule_review", "governed_reference",
 })
+
+#: Tools whose results carry text from outside the kernel — an uploaded
+#: document's transcription, PubMed records — fenced as untrusted data.
+EXTERNAL_TOOLS = frozenset({"read_attachment", "pubmed_search", "citation_verify"})
 
 #: The lead agent's terminal tool (intercepted by the loop).
 SUBMIT_SPEC = ToolSpec(
@@ -402,7 +406,8 @@ class AgentToolbox:
             out.append(Tool(spec.name, spec.description, spec.parameters,
                             handler=self._impl[spec.name], category="clinical",
                             parallel_safe=spec.name not in _STATEFUL,
-                            label=(LABELS_EN if lang == "en" else LABELS).get(spec.name, spec.name)))
+                            label=(LABELS_EN if lang == "en" else LABELS).get(spec.name, spec.name),
+                            untrusted=spec.name in EXTERNAL_TOOLS))
         return out
 
     def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:

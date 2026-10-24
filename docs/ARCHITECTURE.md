@@ -51,7 +51,8 @@ The harness runs in one of two modes.
 ### 2.1 Agent runtime (v1.0)
 
 ```
-            user message ──► user_prompt_submit hooks (emergency screen, note seeding)
+            user message ──► user_prompt_submit hooks (emergency screen, injection
+                             screen, note seeding)
                                    │  context for the model · alerts for the clinician
                                    ▼
  ┌────────────────────────── lead agent (run_loop) ──────────────────────────┐
@@ -67,7 +68,7 @@ The harness runs in one of two modes.
  │            ├─ remember (memory proposal → clinician decides)               │
  │            ├─ mcp__<server>__<tool> (Streamable HTTP MCP servers)          │
  │            └─ submit_consult (terminal) ──► stop hooks: rule engine, stage  │
- │                consistency, citation provenance, dose provenance,           │
+ │                consistency, citation / dose / number provenance,           │
  │                emergency addressed ─► findings back to the model once:      │
  │                revise, or answer each in rule_responses                     │
  └─────────────────────────────────────────────────────────────────────────────┘
@@ -82,7 +83,8 @@ The harness runs in one of two modes.
 | Loop | One `run_loop` for the lead and every specialist: reasoning capture (`reasoning_content`, `<think>`), concurrent read-only calls, ordered writers, terminal tool last, one nudge for plain-text answers (a plain answer is still an answer), truncation continue, `Cancelled` with `repair_history` so the transcript stays valid for every provider; the trace keeps call order whatever order tools finished in. |
 | Planning | `update_plan` — a checklist that survives turns and is put in front of the model each turn. |
 | Sub-agents | `delegate` runs a specialist with its own system prompt, a fresh context (task + case notes) and an allow-listed read-only toolset; it cannot write notes, delegate or submit. Only its structured report enters the lead's context; its full trace is kept as `children` of the delegate step. Custom specialists are front-matter Markdown files. |
-| Hooks | `user_prompt_submit` / `post_tool_use` / `stop`, each individually switchable. Every hook is advisory; a crashing hook becomes a `HOOK_ERROR` finding. |
+| Hooks | `user_prompt_submit` / `post_tool_use` / `stop`, each individually switchable. Every hook is advisory; a crashing hook becomes a `HOOK_ERROR` finding. The provenance hooks read every free-text field of the consult (reply, assessment, rationales, options, warnings, rule responses), not only the structured lists (v1.5). |
+| Trust boundary (v1.5) | Results of MCP tools and of `read_attachment`, `pubmed_search` and `citation_verify` are external text: the observation carries `trust: untrusted-external` and a note that it is data, and `safety/injection.py` screens it (and MCP tool descriptions, pasted messages and imported session files) for text addressed to an AI. A hit is an `alert` event for the clinician and a warning next to the text for the model; an MCP tool whose description carries one has the description withheld; an imported user turn that opens with a role label, or any imported turn that addresses the AI, is fenced as a record. Nothing is blocked or rewritten. |
 | Memory & context | Instruction files in every system prompt; `remember` only proposes. Provider-neutral token estimate; compaction summarises older turns with the model (deterministic fallback) and drops checkpoints before the cut. |
 | Checkpoints | Taken before every turn; `rewind(turn)` restores messages, notes, plan, ledger and memory proposals, and returns the rewound message for the composer. |
 | Commands | One definition for CLI and web: prompt commands expand to an instruction for the agent, local commands run in the session (`local_command`). |
@@ -101,7 +103,7 @@ The harness runs in one of two modes.
 | Kernel decision tools (`stage_tnm`, `assess_biomarkers`, `check_indication`, `check_organ_function`, `cns_assessment`, `later_line_options`, `rule_review`, `governed_reference`, `screen_emergency`) | not offered (lead and specialists) | offered |
 | Information tools (trial registry, regimen library and reference doses, guideline KB, clinical pathways, PubMed, citations, prognosis cohorts, interactions, attachments) | offered | offered |
 | Kernel hooks (`fact_seed`, `stage_consistency`, `rule_review`) | off by default | on |
-| Safety and provenance hooks (`emergency_screen`, `evidence_ledger`, `citation_provenance`, `dose_provenance`, `emergency_addressed`) | on | on |
+| Safety and provenance hooks (`emergency_screen`, `injection_screen`, `evidence_ledger`, `citation_provenance`, `dose_provenance`, `number_provenance`, `emergency_addressed`) | on | on |
 | Engine stage in the case notes / turn result | never | shown next to the model's stage |
 | Tools' default stage | the `stage_group` the model recorded | the engine's staging of the notes |
 | Independent audit (`agentic/audit.py`, `/audit`) | after the consult, for the clinician and evaluation; never returned to the model | same |
@@ -115,7 +117,7 @@ The harness runs in one of two modes.
 The independent audit (v1.4.1) re-reads the case with the kernel after the
 consult — the model's notes, gaps filled from the narrative without
 overwriting them — and compares stage (engine), M (metastatic sites),
-biomarker category (marker-level classifier), the 20 safety rules and
+biomarker category (marker-level classifier), the 22 safety rules and
 emergency-first. It is shown to the clinician (`/audit`) and used by
 `paper/analysis.py`; it never returns to the model. Explicit hook settings always win over the
 autonomy defaults. Surfaces: web settings 「决策方式」, CLI `--autonomy`.
@@ -218,7 +220,11 @@ matches third-party and hypothetical cues on word boundaries.
     survives the conversation, not just one run. The emergency screen runs
     on the full narrative each turn and its script is never rephrased; the
     outgoing reply is dose-scanned unconditionally, and a polish pass that
-    introduces a dose numeric is discarded wholesale.
+    introduces a dose numeric — or changes any other content: a drug, a
+    reference, a number, threshold, test result or stage, a treatment
+    modality, a directive, or a protected line (cautions, work-up gaps,
+    questions, status line, disclaimer) — is discarded wholesale, with the
+    reason recorded (`safety/rewrite.py`, v1.5).
 14. **Plan reuse is fingerprinted, re-anchored and re-audited.** A
     pure-question turn (no changed decision facts, no new attachments) hands
     the previous plan to the TreatmentAgent with a byte-stable fingerprint of
@@ -536,19 +542,27 @@ matches third-party and hypothetical cues on word boundaries.
 | Panel | reason in a speciality view; raise urgency; dissent | reach dose tools; lower another member's urgency; write release status |
 | Vision | propose descriptors within the engine vocabulary | assign a stage; propose refused descriptors (rejected at ingestion); stand in for the radiologist (`requires_confirmation` schema-pinned true) |
 | Critique | add issues | remove or downgrade any rule-engine finding |
-| Chat | extract allowlisted facts from a turn; polish a released reply | set sign-off/guard keys; overwrite the record from free text; rephrase the emergency script; introduce dose numerics (polish discarded); add clinical content |
+| Chat | extract allowlisted facts from a turn; reword a released reply | set sign-off/guard keys; overwrite the record from free text; rephrase the emergency script; introduce dose numerics; add, drop or change clinical content or a protected line (polish discarded) |
 | Doses | nothing | anything |
 
 ## 5. The safety rule engine
 
-Twelve deterministic rules run over (engine staging, structured facts, parsed
-plan): `N3_NO_SURGERY`, `DRIVER_EXCLUDES_PERIOP_IO`, `EGFR_III_CONSOLIDATION`
+Twenty-two deterministic rule functions (`safety/rules.py::RULES`) run over
+(engine staging, structured facts, parsed plan). The original twelve: `N3_NO_SURGERY`, `DRIVER_EXCLUDES_PERIOP_IO`, `EGFR_III_CONSOLIDATION`
 (LAURA vs PACIFIC), `NO_CONCURRENT_DURVALUMAB` (PACIFIC-2),
 `NO_RT_DOSE_ESCALATION` (RTOG 0617), `TRIAL_STAGE_BOUNDARY` (data-driven from
 the trial registry; a *declared* extrapolation downgrades to a warn),
 `STAGE0_NO_SYSTEMIC`, `DRIVER_FIRST_LINE`, `ICI_COMORBIDITY_CAUTION`,
 `PS_GATE`, `BIOMARKER_GAP`, `DOSE_IN_MODEL_OUTPUT`. Block-severity violations
-set `release_status = blocked` and issue bounded repair requests.
+set `release_status = blocked` and issue bounded repair requests. Since v1.5:
+`ICI_COMORBIDITY_CAUTION` also covers solid-organ transplant recipients;
+`PS_GATE` warns on chemotherapy or a checkpoint inhibitor at ECOG 3–4
+(targeted therapy exempt); `ILD_PNEUMONITIS_RISK` (ILD with a regimen that
+can cause pneumonitis) and `PREGNANCY_CAUTION` (pregnancy with any library
+regimen) are new. Comorbidities are read with list-scoped negation ("No
+history of ILD, autoimmune disease or organ transplant"), never from family
+history or "suspected"; a warn on a released plan is shown in the chat
+reply (the rule text to clinicians, the topic to discuss to patients).
 
 These are the rules the v0.1 prompts stated in prose and hoped for; here the
 critic executes them on every run, including the deterministic path's own
@@ -598,4 +612,11 @@ failed-closed run stays failed closed.
 - `eval/` — 16 golden decision cases with machine-checkable expectations;
   the same expectations grade any configured real model.
 
-All 271 tests run fully offline (including the adversarial-review regression suite in test_hardening.py).
+- `eval/redteam.py` — the red-team benchmark (v1.5): 202 attack/control
+  probes over six tracks (agent consult hooks, prompt injection, the
+  independent audit, the governed polish, the governed pipeline, chat),
+  split into dev (fixes are developed against it; a test keeps it at
+  101/101) and a held-out test split frozen by SHA-256 before any fix and
+  run only to report (`eval/golden/redteam/RESULTS.md`: 37 → 93/101).
+
+All 1,018 tests run fully offline (including the adversarial-review regression suite in test_hardening.py).

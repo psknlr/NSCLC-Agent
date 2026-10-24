@@ -16,7 +16,7 @@ What is compared:
 * biomarker category — the model's NSCL codes against the marker-level
   classifier, including a PD-L1 category assigned while actionable markers
   are still untested;
-* the plan — the 20 safety rules (driver-directed first line, indication
+* the plan — the 22 safety rules (driver-directed first line, indication
   predicates, organ gates, N3 surgery, dose scan …);
 * emergencies — a screened emergency the conclusion does not put first.
 

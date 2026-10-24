@@ -71,6 +71,8 @@ _AGENT_ALIASES = {
     "索托拉西布": "sotorasib", "阿达格拉西布": "adagrasib",
     "格索雷塞": "garsorasib", "氟泽雷塞": "fulzerasib", "戈来雷塞": "glecirasib",
 }
+#: Public name for the alias table (the agent's dose-provenance hook reads it).
+AGENT_ALIASES = _AGENT_ALIASES
 
 #: KRAS G12C inhibitors. Progression on the class ("KRAS G12C抑制剂",
 #: "G12C inhibitor") counts as progression on every member: there is no

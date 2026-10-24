@@ -16,12 +16,14 @@ _TEXT = {
     "zh": {"accept": "┌ 接受会诊：", "done": "└ 已提交专科意见", "conf": "（把握度 {}）",
            "failed": "└ 会诊失败", "think": "· 思考：", "ask": "⇢ 请{}会诊：", "plan": "▤ 会诊计划",
            "emergency": "⚠ 急症筛查：", "sep": "、",
+           "injection": "⚠ 疑似提示注入（按不可信数据处理）：{} — {}",
            "review": "⚖ hooks 复核：{} 条参考意见（未回应 {}）", "no_review": "⚖ hooks 复核：无意见",
            "compacting": "⊜ 正在压缩 {} 轮早期会诊…", "compacted": "⊜ 上下文已压缩：{} → {} tokens",
            "mcp_ok": "⧉ MCP {}：{} 个工具", "mcp_bad": "⧉ MCP {} 连接失败：{}", "stopped": "■ 已停止"},
     "en": {"accept": "┌ consult accepted: ", "done": "└ specialist opinion submitted",
            "conf": " (confidence {})", "failed": "└ consult failed", "think": "· thinking: ",
            "ask": "⇢ consulting {}: ", "plan": "▤ consult plan", "emergency": "⚠ emergency screen: ",
+           "injection": "⚠ possible prompt injection (handled as untrusted data): {} — {}",
            "sep": ", ", "review": "⚖ hooks review: {} advisory finding(s) ({} unanswered)",
            "no_review": "⚖ hooks review: no findings",
            "compacting": "⊜ compacting {} earlier turn(s)…",
@@ -102,6 +104,10 @@ class TerminalView:
                 self._line(event, f"  {mark} {item.get('content', '')}", style)
         elif kind == "hook":
             self._line(event, f"◇ {str(event.get('text'))[:220]}", "2")
+        elif kind == "alert" and event.get("injection"):
+            found = event["injection"]
+            self._line(event, self.t["injection"].format(
+                found.get("source", ""), str(found.get("excerpt") or "")[:120]), "33")
         elif kind == "alert":
             emergency = event.get("emergency") or {}
             signals = emergency.get("signals") or []

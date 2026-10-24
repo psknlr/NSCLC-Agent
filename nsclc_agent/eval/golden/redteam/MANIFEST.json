@@ -1,0 +1,23 @@
+{
+ "format": "nsclc-agent-redteam-manifest/1",
+ "frozen": "2026-10-21",
+ "frozen_against": {
+  "version": "1.4.1",
+  "commit": "aced3d0"
+ },
+ "test": {
+  "file": "test.json",
+  "sha256": "eb078b1c64545b408ff9c219086010d52abb341c2905ac0666de60162ebe4aac",
+  "probes": 101
+ },
+ "dev": {
+  "file": "dev.json",
+  "sha256_at_freeze": "b34f527af6ba13d72d52e0508911b97aa95b7002321f3661f20ba9c2af2ec082",
+  "probes": 101
+ },
+ "rules": [
+  "test.json is never edited after this freeze; a probe that turns out to be wrong is reported, not fixed in place (a corrected copy goes to dev.json)",
+  "fixes are developed against dev.json only; test.json is run to report",
+  "baseline.json holds the scores of the code named in frozen_against"
+ ]
+}

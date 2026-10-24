@@ -7,7 +7,7 @@
 > 内容寻址的记录/重放日志，以及模型驱动的规划、ReAct 工具循环、主动问诊与
 > 多学科会诊。
 
-**两种会诊模式（v1.4.1 · 中文 / English）**
+**两种会诊模式（v1.5.0 · 中文 / English）**
 
 * **模型主导（agent，接入模型后的默认）**：一个按主流智能体架构（Claude Code / Grok CLI /
   Codex / OpenAI Agents SDK）构建的**智能体运行时**——主诊智能体自主思考、用 `update_plan`
@@ -15,8 +15,8 @@
   方案库与参考剂量、适应证/器官功能核对、脑转移分层、后线序贯、临床路径、指南知识库、预后、
   相互作用、读片读报告……）、用 `delegate` **并行邀请 7 位专科子智能体**（影像、病理与分子
   病理、胸外、放疗、肿瘤内科、临床药师、循证医学，各有独立上下文与工具集），综合后给出自己的
-  临床判断。确定性内核的全部安全网改由 **Hooks** 承载（急症筛查、证据台账、规则引擎、分期
-  一致性、引用溯源、剂量溯源、急症优先），意见交回模型逐条「采纳并修改」或「保留并写明理由」，
+  临床判断。确定性内核的全部安全网改由 **Hooks** 承载（急症筛查、注入筛查、证据台账、规则引擎、
+  分期一致性、引用溯源、剂量溯源、数字溯源、急症优先），意见交回模型逐条「采纳并修改」或「保留并写明理由」，
   **不拦截、不改写、不扣留**。另有记忆（NSCLC.md）、上下文压缩、逐轮检查点与回退、斜杠命令、
   MCP 外部工具与 stream-json 输出——详见下文「智能体运行时（v1.0.0）」。
 * **受治理（governed，未接入模型时唯一可用，接入后可选）**：模型只能提案，确定性
@@ -32,7 +32,7 @@
 **在线使用：<https://psknlr.github.io/NSCLC-Agent/>**（GitHub Pages，零服务器）
 
 整个智能体以 WebAssembly（Pyodide）在访问者的浏览器里运行——**与命令行完全
-相同的 Python 代码**，不是 JavaScript 重写，所以分期权威、20 条安全规则、终审、
+相同的 Python 代码**，不是 JavaScript 重写，所以分期权威、22 条安全规则、终审、
 放行状态机、剂量通道在网页里一条不少（金标准评测 70/70 在浏览器内跑绿）。
 病例数据不离开本机；接入模型时请求从浏览器直接发往您选择的服务商。
 
@@ -88,7 +88,7 @@ Source 选 "GitHub Actions"**。它取代了 Jekyll 渲染 README 的工作流�
  ToolLoop       ReAct 取证 → CapabilityBroker（角色/技能/熔断/预算）  分期 → 协议模块路由
  InterviewLoop  组织追问   → AdequacyJudge（必答轴规则判定，blocked    试验注册表（分期边界机器可查）
                              永不可被模型/轮次上限豁免）              方案库（剂量只在确定性通道）
- PerceptionAgent 读片提议  → 描述符词表校验 + 归一化交叉核对          安全规则引擎（20条确定性规则）
+ PerceptionAgent 读片提议  → 描述符词表校验 + 归一化交叉核对          安全规则引擎（22条确定性规则）
  MDT Panel      专科子体   → 最保守合成（最高紧急度，非多数票）        肿瘤急症筛查（子句级否定）
  CriticAgent    终审追加   → finally 无条件执行 + 引用核验            证据台账（工具自declare等级）
 ```
@@ -765,6 +765,28 @@ tools: prognosis, check_organ_function, interaction_check
 图表规格：183 mm 双栏，文字 5–7 pt，Okabe–Ito 色盲安全配色，矢量 PDF 保留可编辑文字。
 当前环境没有 Arial，图中字体用的是度量完全一致的 Liberation Sans；在装有 Arial 的机器上重跑 `make_figures.py` 即会自动换成 Arial。
 
+### 红队加固（v1.5.0）
+
+**红队基准（`python -m nsclc_agent redteam`）。** 新增 202 个对抗探针，覆盖六条通道：智能体会诊 hooks、提示注入、独立核对、受治理润色、受治理流水线与多轮对话；每条通道都有攻击（安全网必须拦住）与对照（必须不误报）。探针分为 dev（101 个，修复时使用）与 held-out test（101 个）：test 在任何修复之前冻结，SHA-256 记在 `MANIFEST.json`，测试会校验它没有被改动；v1.4.1 的成绩同时冻结在 `baseline.json`。
+
+| | v1.4.1 基线 | v1.5.0 |
+|---|---|---|
+| dev（修复时使用） | 39/101 | 101/101 |
+| held-out test（全部修复完成后只跑一次） | 37/101 | **93/101** |
+
+held-out 的 8 个未通过项集中在两类：换一种说法淡化急症（“no urgent action is needed”“紧急程度不高”）没有被识别为否认急症；部分注入写法（中文直接对 AI 下指令、伪造的助手回合、“忽略以上报告”、导入会话中伪造的 “SYSTEM:” 回合）只被标记为不可信、没有提醒医生；另有 1 个对照误报。之后按这两类做了修复，只依据探针标题和自己写的单元测试；复跑 test 只作回归检查：原先通过的 93 个没有退步，未通过的 8 个中 7 个通过——这已不是 held-out 成绩，对外请引用 93/101。局限：两个划分出自同一作者，held-out 成绩偏乐观；驱动基因否定与 “No history of …” 两类写法来自冻结前同一份审计清单，这两类尤其偏乐观；智能体通道使用脚本化模型，衡量的是安全网拦不拦得住，不是真实模型会不会犯错；下一轮应由他人编写新的 held-out 划分。详见 `nsclc_agent/eval/golden/redteam/RESULTS.md`。
+
+**修复内容。**
+
+- **驱动基因否定。** 写在基因前面的否定（“No ALK rearrangement”“Negative for BRAF V600E”“未检出 EGFR、ALK…”）过去被读成阳性，受治理对话因此会给驱动基因阴性的患者放行洛拉替尼、达拉非尼+曲美替尼或卡马替尼。现在按否定词覆盖其后列出的基因；“No EGFR testing”“no ALK inhibitor”等说检测或用药的写法不记录结果。
+- **合并症、体能与妊娠。** 安全规则由 20 条增至 22 条：新增 `ILD_PNEUMONITIS_RISK`（间质性肺病 + 可致肺炎的方案）与 `PREGNANCY_CAUTION`（妊娠期任何抗肿瘤方案）；`ICI_COMORBIDITY_CAUTION` 覆盖器官移植受者，`PS_GATE` 覆盖 ECOG 3–4 使用化疗或免疫治疗（靶向治疗除外）。“No history of ILD, autoimmune disease or organ transplant” 这类列举式否定、家族史和“疑似”不再被读成患者本人的合并症；病历中的妊娠（“孕24周”“β-hCG 阴性”等）可以识别。警示随方案出现在回复中：医生看到规则编号与原文，患者看到需要与主治团队讨论的话题。
+- **急症筛查。** 分散在同一句中的证据（咳血量 ≥100 mL、点名化疗药物后的发热 ≥38.0 ℃）现在能识别；“afebrile” 不再触发粒缺发热。
+- **智能体 hooks。** 引用溯源与剂量溯源覆盖会诊结论的全部文本字段，剂量逐个方案核对；新增数字溯源（`number_provenance`：结局统计数字须能在工具结果、病历或已记录事实中找到）；“这不是急症”“无需紧急处理”“立即开始奥希替尼”不再算作急症优先。
+- **提示注入。** MCP 结果与工具描述、上传文档的转录、文献检索结果标记为不可信外部数据（`trust: untrusted-external`），并筛查其中对 AI 的指令：命中时提醒医生、在模型上下文中注明；含注入的 MCP 工具描述被隐去；导入会话中伪造的系统或助手回合被隔离标注；新增 `injection_screen` hook 检查粘贴的文本。只标注和提醒，不拦截、不改写；“以本次病理为准，之前的报告作废”“Disregard the previous instructions from the tumor board” 这类临床措辞不会被误判。
+- **受治理润色。** 润色只允许改措辞：改写若增删或替换药名、试验引用、数值、阈值、检测结果、分期或治疗方式，新增指令、安慰或预后判断，或删改受保护的行（安全提示、待完善项、问题、状态行、免责声明），整段弃用，回到确定性文本并记录原因（`nsclc_agent/safety/rewrite.py`）。
+
+金标准 70/70 不变；测试 1,018 个，全离线。
+
 ### 独立核对与论文改版（v1.4.1）
 
 **独立核对（`/audit`）。** 模型完全自主时，会诊过程中没有任何确定性程序替模型作决定。会诊结束后，可以在输入框（网页或命令行）输入 `/audit`，由确定性内核独立重读同一病例，并逐项对照模型的结论：
@@ -1000,7 +1022,8 @@ nsclc_agent/
   staging/     tnm.py 分期引擎(9版表+拒绝表) · router.py · selftest.py
   knowledge/   trials.py 39项试验注册表(分期边界/驱动限制机器可查)
                regimens.py 方案库(摘要无剂量/详情即剂量通道) · interactions.py
-  safety/      emergencies.py 急症筛查(子句级否定) · rules.py 20条规则引擎
+  safety/      emergencies.py 急症筛查(子句级否定) · rules.py 22条规则引擎
+               injection.py 注入筛查(外部文本不可信) · rewrite.py 润色内容守卫
   interview/   axes.py 17条NSCLC问诊轴(VOI层) · adequacy.py · loop.py
   perception/  imaging.py 读片(词表校验/归一化交叉核对/拒绝文本模型)
   tools/       base.py Broker+熔断 · registry.py 11个工具 · retrieval.py 实连检索
@@ -1018,8 +1041,9 @@ nsclc_agent/
   knowledge/prognosis.py 分期队列生存表+方向性预后因素(试验锚定/不做个体预测)
   knowledge/data/guideline_kg.json.gz 六部指南2,960条推荐+147跨区域聚类
   eval/run_eval.py 错误分类学评测 · eval/adjudication.py 双医师裁定台账
+  eval/redteam.py 红队基准(dev/held-out，test 冻结并校验 SHA-256)
   schemas.py · skills.py · case.py · cli.py
-tests/         674 个用例，全离线    eval/       70 例金标准 + 指标
+tests/         1,018 个用例，全离线  eval/       70 例金标准 + 202 个红队探针
 docs/ARCHITECTURE.md                 examples/   病例样例
 paper/       论文图表：analysis.py → make_figures.py / make_tables.py / qc.py
 ```
@@ -1028,10 +1052,12 @@ paper/       论文图表：analysis.py → make_figures.py / make_tables.py / q
 
 ```bash
 pip install pytest
-python -m pytest -q            # 700 passed，全离线
+python -m pytest -q            # 1018 passed，全离线
 python -m nsclc_agent selftest # 分期引擎 47/47
 python -m nsclc_agent eval     # 金标准 70/70：分期40/40 路由11/11 方案35/35
                                # 安全42/42 · unsafe_release_rate 0/35 · 分类学全零
+python -m nsclc_agent redteam --split dev --strict   # 红队 dev 101/101（测试套件内也有这条下限）
+python -m nsclc_agent redteam --split test           # held-out：只在发版时跑，用来报告，不用来修
 ```
 
 ## 仍未完成（诚实清单）
@@ -1076,8 +1102,12 @@ CNS 分层（v0.4.0）是教学规模的策略分层——SRS/WBRT 选择、分�
 审计型探针只审规则引擎这一层（planner 的独立防线由流水线病例与单元测试
 覆盖）；图内并发只覆盖 Treatment∥Panel 波与会诊成员（其余
 任务串行）；内置试验注册表
-与 DDI 规则包是教学语料，须经本机构药师/医师复核后使用；大规模对抗性安全
-评测未做（v0.7.1 做过一轮四路全库对抗审计，但那是一次审计，不是持续评测）；网页端（v0.8.0）的实连检索（PubMed/CT.gov/openFDA）、记录/重放日志与 LiteLLM 只在命令行可用，Azure 在浏览器内需服务端开启 CORS，运行时从 jsDelivr CDN 加载（首次约 10 MB，信任该 CDN 的完整性），线上的 Poe/MiniMax 真实补全需要访问者自己的密钥——本仓库的验证覆盖目录、鉴权错误、跨域与带内错误，不含付费补全本身。**本项目不能对外宣称为临床可用系统。**
+与 DDI 规则包是教学语料，须经本机构药师/医师复核后使用；对抗性安全评测
+规模仍小：v1.5.0 的红队基准只有 202 个探针，dev 与 held-out 出自同一作者（held-out
+成绩偏乐观，且已用于两类修复），智能体通道只用脚本化模型，不能说明真实模型的出错率；
+注入筛查是关键词与句式规则，换一种没见过的写法仍可能漏报（外部文本始终标为不可信，
+但提醒医生依赖筛查命中）；润色守卫按词表与数值比对，同义改写可能被保守地弃用，
+词表之外的新内容只受长度上限约束；网页端（v0.8.0）的实连检索（PubMed/CT.gov/openFDA）、记录/重放日志与 LiteLLM 只在命令行可用，Azure 在浏览器内需服务端开启 CORS，运行时从 jsDelivr CDN 加载（首次约 10 MB，信任该 CDN 的完整性），线上的 Poe/MiniMax 真实补全需要访问者自己的密钥——本仓库的验证覆盖目录、鉴权错误、跨域与带内错误，不含付费补全本身。**本项目不能对外宣称为临床可用系统。**
 
 ## License
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nsclc-agent"
-version = "1.4.1"
+version = "1.5.0"
 description = "Evidence-governed, stage-verified NSCLC agent harness: deterministic AJCC-9 staging + a control plane the model cannot bypass (educational use only)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -38,7 +38,7 @@ packages = [
 [tool.setuptools.package-data]
 "nsclc_agent.prompts" = ["*.md"]
 "nsclc_agent.i18n" = ["*.json"]
-"nsclc_agent.eval" = ["golden/*.json"]
+"nsclc_agent.eval" = ["golden/*.json", "golden/redteam/*.json"]
 "nsclc_agent.knowledge" = ["data/*.json.gz", "data/curation.jsonl"]
 
 [tool.pytest.ini_options]

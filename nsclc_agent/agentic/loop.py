@@ -27,6 +27,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..safety import injection
 from .tools import Toolset
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
@@ -138,10 +139,12 @@ def run_loop(
     post_tool: Callable[[str, dict[str, Any], dict[str, Any]], str | None] | None = None,
     base_event: dict[str, Any] | None = None,
     result: LoopResult | None = None,
+    language: str = "zh",
 ) -> LoopResult:
     """Run one agent until it submits, answers, exhausts steps or is
     cancelled. ``messages`` is extended in place; pass ``result`` to keep
-    the partial trace when the run is interrupted."""
+    the partial trace when the run is interrupted. Results of untrusted
+    tools are fenced and screened for prompt injection."""
     tag = dict(base_event or {}, agent=agent)
     result = result if result is not None else LoopResult()
     specs = toolset.specs()
@@ -220,11 +223,26 @@ def run_loop(
                      "args": call.arguments, "ok": bool(out.get("ok")),
                      "summary": out.get("summary", ""), "ms": ms, "agent": agent,
                      **ui}
+            payload = {"ok": entry["ok"], "summary": entry["summary"],
+                       "data": out.get("data")}
+            if tool is not None and tool.untrusted:
+                # External text is data, never instructions (v1.4.1
+                # red-team: injected MCP results and document transcriptions
+                # reached the model unmarked).
+                payload["trust"] = injection.UNTRUSTED
+                payload["trust_note"] = injection.UNTRUSTED_NOTE.get(language,
+                                                                     injection.UNTRUSTED_NOTE["en"])
+                hits = injection.scan([out.get("summary"), out.get("data")])
+                if hits:
+                    entry["injection"] = injection.alert(call.name, hits)
+                    payload["injection_warning"] = injection.warning(
+                        ("工具 " if language == "zh" else "the result of ") + call.name,
+                        hits, language)
             entries[cid] = entry
             say({"type": "tool_result", **{k: v for k, v in entry.items()
                                            if k != "children"}})
-            payload = {"ok": entry["ok"], "summary": entry["summary"],
-                       "data": out.get("data")}
+            if entry.get("injection"):
+                say({"type": "alert", "injection": entry["injection"]})
             if post_tool is not None:
                 extra = post_tool(call.name, call.arguments, out)
                 if extra:

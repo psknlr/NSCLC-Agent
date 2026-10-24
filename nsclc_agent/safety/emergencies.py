@@ -152,6 +152,85 @@ PATTERNS: tuple[EmergencyPattern, ...] = (
 )
 
 
+#: Sentence boundaries: the co-occurrence checks below span clauses
+#: ("卡铂+培美曲塞化疗后第10天，今天发热39.2℃伴寒战").
+_SENTENCE_SPLIT = re.compile(r"[。！？!?；;\n]|\.(?=\s|$)")
+#: "afebrile" is a denial of fever, not a fever ("Afebrile during
+#: chemotherapy" raised febrile neutropenia through the substring "febrile").
+_AFEBRILE_RE = re.compile(r"\bafebrile\b|\bnon-?febrile\b", re.IGNORECASE)
+
+#: A volume of blood coughed up, in mL (v1.4.1 red-team: "coughed up about
+#: 300 mL of bright red blood" passed as routine). ≥100 mL is treated as
+#: massive — definitions run from 100 to 600 mL/24 h, and the screen
+#: escalates on doubt.
+_HEMOPTYSIS_VOLUME_ML = 100
+_VOLUME_RE = re.compile(r"(\d{2,4}(?:\.\d+)?)\s*(?:ml|毫升|cc)(?![a-z])", re.IGNORECASE)
+_COUGH_RE = re.compile(r"cough|expectorat|spit|hemoptysis|haemoptysis|咯|咳", re.IGNORECASE)
+_BLOOD_RE = re.compile(r"blood|hemoptysis|haemoptysis|血", re.IGNORECASE)
+
+#: Fever, by word or by temperature (≥38.0 °C / ≥100.4 °F).
+_FEVER_RE = re.compile(r"发热|发烧|高热|寒战|\bfever|\bfebrile\b|\brigou?rs\b|\bchills\b|pyrexi",
+                       re.IGNORECASE)
+_TEMPERATURE_RE = re.compile(
+    r"(\d{2,3}(?:\.\d)?)\s*(?:°\s*|度\s*)?(?:℃|c\b|摄氏度|度|°|f\b|℉|degrees?\b(?:\s*[cf]\b)?)",
+    re.IGNORECASE)
+#: A conditional instruction is not an event ("if he coughs up more than
+#: 100 mL of blood, call an ambulance"). Checked only on the clause that
+#: carries the symptom, so "fever 39 after carboplatin, not sure if it is
+#: serious" still escalates.
+_CONDITIONAL_RE = re.compile(r"\bif\b|\bunless\b|\bin case\b|如果|万一|要是|一旦|若", re.IGNORECASE)
+#: Chemotherapy, by word or by drug: fever after "carboplatin + pemetrexed"
+#: is fever on chemotherapy even when the word "chemotherapy" is absent.
+_CHEMO_RE = re.compile(
+    r"化疗|chemo|platin|铂|pemetrexed|培美曲塞|taxel|紫杉|多西他赛|etoposide|依托泊苷|"
+    r"gemcitabine|吉西他滨|vinorelbine|长春瑞滨|irinotecan|伊立替康|topotecan|拓扑替康|"
+    r"deruxtecan|德曲妥珠", re.IGNORECASE)
+
+
+def _fever_temperature(clause: str) -> bool:
+    """A temperature of ≥38.0 °C (or ≥100.4 °F) stated in the clause."""
+    for match in _TEMPERATURE_RE.finditer(clause):
+        value = float(match.group(1))
+        unit = match.group(0).lower().rstrip()
+        fahrenheit = unit.endswith(("f", "℉")) or (unit.endswith(("degree", "degrees"))
+                                                   and value > 50)
+        if (100.4 <= value <= 110) if fahrenheit else (38.0 <= value <= 43.0):
+            return True
+    return False
+
+
+def _sentence_hits(text: str) -> list[tuple[str, str, tuple[str, ...]]]:
+    """Signals raised by evidence spread across the clauses of a sentence:
+    (signal_id, the clause carrying the symptom, the terms to mask when
+    that clause is checked for negation)."""
+    hits: list[tuple[str, str, tuple[str, ...]]] = []
+    for sentence in _SENTENCE_SPLIT.split(text):
+        clauses = [c.strip() for c in _CLAUSE_SPLIT.split(sentence) if c.strip()]
+        if not clauses:
+            continue
+        # Quantified hemoptysis: the volume's clause, or the clause before
+        # it, says blood was coughed up.
+        for i, clause in enumerate(clauses):
+            volumes = [float(m.group(1)) for m in _VOLUME_RE.finditer(clause)]
+            if not volumes or max(volumes) < _HEMOPTYSIS_VOLUME_ML:
+                continue
+            context = clauses[max(0, i - 1):i + 1]
+            joined = " ".join(context)
+            if _COUGH_RE.search(joined) and _BLOOD_RE.search(joined):
+                terms = tuple(m.group(0) for m in _VOLUME_RE.finditer(clause))
+                hits.append(("massive_hemoptysis", clause, terms))
+                break
+        # Fever (word or temperature) in a sentence that names chemotherapy
+        # or a cytotoxic drug.
+        if _CHEMO_RE.search(sentence):
+            for clause in clauses:
+                fever = [m.group(0) for m in _FEVER_RE.finditer(clause)]
+                if fever or _fever_temperature(clause):
+                    hits.append(("febrile_neutropenia", clause, tuple(fever)))
+                    break
+    return hits
+
+
 @dataclass
 class ScreenResult:
     hard_hits: list[dict] = field(default_factory=list)
@@ -201,7 +280,7 @@ def _clause_suppressed(clause: str, matched_terms: tuple[str, ...] = ()) -> str 
 def screen(narrative: str) -> ScreenResult:
     """Screen a clinical narrative for oncologic emergencies."""
     result = ScreenResult()
-    text = str(narrative or "")
+    text = _AFEBRILE_RE.sub("no fever", str(narrative or ""))
     seen_hits: set[str] = set()
     seen_negated: set[str] = set()
     for clause in _CLAUSE_SPLIT.split(text):
@@ -240,6 +319,17 @@ def screen(narrative: str) -> ScreenResult:
                 "action": pattern.action,
             }
             (result.hard_hits if pattern.weight == "hard" else result.soft_hits).append(hit)
+    by_id = {p.signal_id: p for p in PATTERNS}
+    for signal_id, clause, terms in _sentence_hits(text):
+        if signal_id in seen_hits or _clause_suppressed(clause, terms) \
+                or _CONDITIONAL_RE.search(clause):
+            continue
+        seen_hits.add(signal_id)
+        pattern = by_id[signal_id]
+        (result.hard_hits if pattern.weight == "hard" else result.soft_hits).append({
+            "signal_id": signal_id, "label": pattern.label,
+            "clause": clause[:120], "action": pattern.action,
+        })
     # A signal both negated and later asserted stands: present-tense assertion
     # wins, so drop it from the negated list.
     result.negated = [s for s in result.negated if s not in seen_hits]
