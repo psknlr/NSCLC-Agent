@@ -216,6 +216,9 @@ _MORE_ALIASES = {
     "enhertu": "trastuzumab deruxtecan", "datroway": "datopotamab deruxtecan",
     "avastin": "bevacizumab", "cyramza": "ramucirumab", "alimta": "pemetrexed",
     "taxotere": "docetaxel", "abraxane": "nab-paclitaxel",
+    "ibtrozi": "taletrectinib", "rozlytrek": "entrectinib", "augtyro": "repotrectinib",
+    "vitrakvi": "larotrectinib", "braftovi": "encorafenib", "mektovi": "binimetinib",
+    "hernexeos": "zongertinib", "hyrnuo": "sevabertinib",
 }
 _RT_RE = re.compile(r"c?gy\b|戈瑞", re.IGNORECASE)
 

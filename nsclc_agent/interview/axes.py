@@ -103,8 +103,10 @@ def _driver_unknown(gene: str) -> Predicate:
 
 
 def _nonsquamous(facts: dict[str, Any], _c: str) -> bool:
-    hist = str(facts.get("histologic_category") or "").lower()
-    return not hist or "squamous" not in hist or "adeno" in hist
+    from ..knowledge.kg_eligibility import _classify_histology
+
+    hist = str(facts.get("histologic_category") or "")
+    return _classify_histology(hist) != "squamous"
 
 
 def _n2_possible(facts: dict[str, Any], complaint: str) -> bool:

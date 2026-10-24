@@ -868,6 +868,10 @@ def _neutralize_imported(messages: list[dict[str, Any]]
     alerts: list[dict[str, Any]] = []
     for message in messages:
         message = dict(message)
+        # A provider's own blocks would reach the model unscreened (and a
+        # file can forge them): an imported turn is replayed from its
+        # visible fields only.
+        message.pop("_provider_content", None)
         content = message.get("content")
         text = content if isinstance(content, str) else injection.strings(content)
         own = next((p for p in _HARNESS_PREFIXES if text.startswith(p)), "") \

@@ -19,8 +19,11 @@ stratified next-line context:
 * **The corpus is named, and small.** Post-osimertinib (MARIPOSA-2,
   chemo per the KEYNOTE-789 lesson), post-second-generation-ALK
   (lorlatinib), post-lorlatinib (chemo — no established next TKI),
-  post-chemo-IO (docetaxel ± ramucirumab per REVEL; sotorasib for
-  KRAS G12C on record; T-DXd for HER2). Everything else routes to the
+  post-crizotinib/entrectinib ROS1 (repotrectinib, taletrectinib),
+  post-repotrectinib/taletrectinib ROS1 (chemo), post-chemo-IO
+  (docetaxel ± ramucirumab per REVEL; sotorasib or adagrasib for KRAS
+  G12C on record; T-DXd for HER2, plus zongertinib or sevabertinib for
+  a non-squamous HER2 TKD mutation). Everything else routes to the
   molecular tumor board rather than to a guess.
 """
 
@@ -35,6 +38,8 @@ from .biomarkers import (
     egfr_classes,
     egfr_classical,
     first_line_actionable_drivers,
+    her2_is_mutation,
+    her2_variant_class,
 )
 
 _PROGRESSION = {"progression", "progressed", "pd", "进展", "耐药"}
@@ -70,6 +75,13 @@ _AGENT_ALIASES = {
     "纳武利尤": "nivolumab", "度伐利尤": "durvalumab",
     "索托拉西布": "sotorasib", "阿达格拉西布": "adagrasib",
     "格索雷塞": "garsorasib", "氟泽雷塞": "fulzerasib", "戈来雷塞": "glecirasib",
+    "恩曲替尼": "entrectinib", "他雷替尼": "taletrectinib",
+    "瑞波替尼": "repotrectinib", "塞普替尼": "selpercatinib",
+    "普拉替尼": "pralsetinib", "卡马替尼": "capmatinib", "特泊替尼": "tepotinib",
+    "达拉非尼": "dabrafenib", "曲美替尼": "trametinib",
+    "康奈非尼": "encorafenib", "比美替尼": "binimetinib",
+    "拉罗替尼": "larotrectinib", "西米普利": "cemiplimab",
+    "宗格替尼": "zongertinib",
 }
 #: Public name for the alias table (the agent's dose-provenance hook reads it).
 AGENT_ALIASES = _AGENT_ALIASES
@@ -91,6 +103,10 @@ _EARLY_GEN_EGFR = ("gefitinib", "erlotinib", "afatinib", "dacomitinib",
 _SECOND_GEN_ALK = ("alectinib", "brigatinib", "阿来替尼", "布格替尼",
                    "ceritinib", "ensartinib")
 _LORLATINIB = ("lorlatinib", "洛拉替尼")
+#: ROS1: progression on these is the repotrectinib/taletrectinib
+#: question; progression on the later agents leaves chemotherapy.
+_ROS1_EARLY_TKI = ("crizotinib", "entrectinib")
+_ROS1_LATER_TKI = ("repotrectinib", "taletrectinib", "lorlatinib")
 _IO_AGENTS = ("pembrolizumab", "atezolizumab", "nivolumab", "cemiplimab",
               "durvalumab", "帕博利珠", "阿替利珠", "纳武利尤",
               "immunotherapy", "chemo-io", "chemoimmunotherapy")
@@ -309,6 +325,7 @@ def sequencing_context(stage_group: str,
 
     egfr_positive = driver_status(drivers.get("egfr")) == "positive"
     alk_positive = driver_status(drivers.get("alk")) == "positive"
+    ros1_positive = driver_status(drivers.get("ros1")) == "positive"
     early_gen_only = progressed_on(facts, _EARLY_GEN_EGFR) \
         and not progressed_on(facts, _THIRD_GEN_EGFR)
 
@@ -442,6 +459,30 @@ def sequencing_context(stage_group: str,
             "Lorlatinib", ["lorlatinib_post_second_gen"],
             "Progression on a second-generation ALK TKI: lorlatinib "
             "(third-generation, CNS-penetrant)"))
+    elif ros1_positive and progressed_on(facts, _ROS1_LATER_TKI):
+        options.append(_option(
+            "Platinum-pemetrexed chemotherapy",
+            ["platinum_pemetrexed_post_tki"],
+            "Progression on repotrectinib, taletrectinib or lorlatinib: "
+            "no encoded next ROS1 TKI — chemotherapy is the "
+            "evidence-based next step"))
+        honest.append(
+            "Zidesamtinib (FDA 2026-07, after at least one prior ROS1 "
+            "TKI) and resistance-mutation-directed selection (e.g. "
+            "G2032R) are NOT encoded — molecular tumor board on the "
+            "progression NGS result.")
+    elif ros1_positive and progressed_on(facts, _ROS1_EARLY_TKI):
+        options.append(_option(
+            "Next-generation ROS1 TKI (repotrectinib or taletrectinib)",
+            ["repotrectinib_first_line", "taletrectinib_first_line"],
+            "Progression on crizotinib or entrectinib: TRIDENT-1 "
+            "(repotrectinib) and TRUST-I/TRUST-II (taletrectinib) enrolled "
+            "ROS1 TKI-pretreated patients; both are CNS-active"))
+        honest.append(
+            "Entrectinib after crizotinib is not offered: early data "
+            "showed no responses after prior crizotinib. Resistance "
+            "mutations (e.g. G2032R) on a progression biopsy belong to "
+            "the molecular tumor board.")
     elif progressed_on(facts, ("docetaxel", "多西他赛")):
         # Beyond the encoded lines: the honest boundary IS the answer.
         cautions.append(
@@ -501,14 +542,44 @@ def sequencing_context(stage_group: str,
                 and "g12c" in str(kras).lower().replace(" ", "") \
                 and not exposed_to(facts, _KRAS_G12C_AGENTS):
             options.append(_option(
-                "Sotorasib (KRAS G12C)", ["sotorasib_subsequent_line"],
+                "KRAS G12C inhibitor (sotorasib or adagrasib)",
+                ["sotorasib_subsequent_line", "adagrasib_subsequent_line"],
                 "KRAS G12C after first-line chemo-IO: CodeBreaK 100 "
-                "(adagrasib is the alternative)"))
+                "(sotorasib); KRYSTAL-1, then KRYSTAL-12 against docetaxel "
+                "(adagrasib)"))
         erbb2 = drivers.get("erbb2")
         if erbb2 is not None and driver_status(erbb2) == "positive":
-            options.append(_option(
-                "Trastuzumab deruxtecan (HER2)", ["tdxd_subsequent_line"],
-                "HER2(ERBB2)-mutant, previously treated: DESTINY-Lung02"))
+            from .kg_eligibility import _classify_histology
+
+            variant = her2_variant_class(erbb2)
+            histology = _classify_histology(
+                str(facts.get("histologic_category") or ""))
+            if variant == "tkd" and histology in ("adenocarcinoma",
+                                                  "non_squamous"):
+                options.append(_option(
+                    "HER2 TKI (zongertinib or sevabertinib)",
+                    ["zongertinib_her2_tkd", "sevabertinib_her2_tkd"],
+                    "HER2 TKD-mutant non-squamous NSCLC, previously "
+                    "treated: Beamion LUNG-1 (zongertinib) and SOHO-01 "
+                    "(sevabertinib), accelerated approvals"))
+            elif variant == "unclassified" and histology != "squamous":
+                cautions.append(
+                    "HER2 alteration on record without its variant class: "
+                    "zongertinib and sevabertinib need a TKD-activating "
+                    "mutation in non-squamous disease — confirm the "
+                    "variant with the laboratory.")
+            if her2_is_mutation(erbb2) is False:
+                cautions.append(
+                    "HER2 amplification/overexpression without a HER2 "
+                    "mutation: DESTINY-Lung02 (T-DXd) enrolled HER2-mutant "
+                    "disease and the HER2 TKIs need a TKD mutation, so "
+                    "neither is proposed. HER2 IHC 3+ falls under T-DXd's "
+                    "tumor-agnostic approval for previously treated solid "
+                    "tumors, which is not encoded — molecular tumor board.")
+            else:
+                options.append(_option(
+                    "Trastuzumab deruxtecan (HER2)", ["tdxd_subsequent_line"],
+                    "HER2(ERBB2)-mutant, previously treated: DESTINY-Lung02"))
         options.append(_option(
             "Docetaxel + ramucirumab", ["docetaxel_ramucirumab_second_line"],
             "Progression on first-line (chemo-)immunotherapy: REVEL"))

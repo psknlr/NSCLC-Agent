@@ -50,6 +50,14 @@ jobs:
           python -m pip install --upgrade pip pytest
           python -m pytest -q
 
+      # The core stays dependency-free (the suite above runs without the SDK);
+      # the native Anthropic provider is also checked against the real SDK
+      # through a mocked HTTP transport (no key, no network call to the API).
+      - name: Anthropic provider against the official SDK
+        run: |
+          python -m pip install "anthropic>=2.0,<3"
+          python -m pytest -q tests/test_anthropic_provider.py
+
       - name: Build static site
         run: python web/build.py --out _site
 

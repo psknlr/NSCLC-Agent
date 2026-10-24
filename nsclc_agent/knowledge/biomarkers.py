@@ -18,9 +18,13 @@ Two lessons shaped this module, both from review:
 
 The first-line actionable-driver set follows the current ASCO living
 guideline: EGFR, ALK, ROS1, RET, MET exon 14 skipping, BRAF V600E and NTRK
-have first-line driver-directed pathways; HER2 (ERBB2) mutation and KRAS
-G12C are actionable in later lines (chemo±IO remains first-line standard),
-so they inform but do not veto first-line chemo-immunotherapy.
+have first-line driver-directed pathways; KRAS G12C is actionable in later
+lines (chemo±IO remains first-line standard). HER2 (ERBB2) tyrosine-kinase-
+domain (TKD) mutations gained first-line HER2 TKI options in 2026
+(zongertinib, sevabertinib — accelerated approvals on single-arm response
+data), so the planner offers them beside chemo±IO; HER2 still informs but
+does not veto first-line chemo-immunotherapy, and only the TKD class
+qualifies (amplification and extracellular/transmembrane mutations do not).
 """
 
 from __future__ import annotations
@@ -287,15 +291,40 @@ _MET_EX14_RE = re.compile(
 _BRAF_V600_RE = re.compile(r"v\s*600|val\s*600|c\.1799t>a", re.I)
 _KRAS_G12C_RE = re.compile(r"g\s*12\s*c|gly\s*12\s*cys|c\.34g>t", re.I)
 
+#: HER2 (ERBB2) classes. The HER2 TKIs (zongertinib, sevabertinib) are
+#: approved for tyrosine-kinase-domain (TKD) activating mutations only.
+#: TKD: exon 20 insertions/duplications (A775_G776insYVMA, G776delinsVC,
+#: P780_Y781insGSP, G778_P780dup), an explicit "TKD"/kinase-domain report,
+#: or a protein change at codons 720–987 (the kinase domain, UniProt
+#: P04626: L755S, D769Y, V777L, V842I …). Not TKD: amplification,
+#: overexpression (IHC/FISH) and extracellular or transmembrane/
+#: juxtamembrane mutations (codons < 700: S310F/Y, V659E, G660D, R678Q).
+#: A positive report naming neither stays unclassified — never guessed.
+_HER2_TKD_RE = re.compile(
+    r"(?:ex(?:on)?\s*_?20|20\s*号?\s*外显子).{0,20}?(?:ins|dup|插入)"
+    r"|(?:ins|dup|插入).{0,12}(?:ex(?:on)?\s*_?20|20\s*号?\s*外显子)"
+    r"|ex20ins|yvma|\btkd\b|kinase[\s-]+domain|激酶区", re.I)
+_HER2_NON_TKD_RE = re.compile(
+    r"amplif|扩增|copy[\s-]+number|overexpress|过表达|ihc\s*[23]\s*\+|"
+    r"\bfish\b", re.I)
+#: A protein change's codon ("a775", "p.leu755ser", "s310f"); cDNA
+#: positions (c.2324_2325ins12) and exon numbers never match.
+_PROTEIN_CODON_RE = re.compile(r"(?<![a-z0-9.])(?:p\.)?\(?[a-z]{1,3}(\d{3,4})(?!\d)",
+                               re.I)
+
 
 def _normalized_drivers(facts: dict[str, Any]) -> dict[str, Any]:
     """Driver values keyed by canonical gene. Several keys for one gene
     ("egfr" + "EGFR_T790M") are MERGED as clauses, never overwritten —
-    a later negative key must not erase an earlier positive one."""
+    a later negative key must not erase an earlier positive one, and an
+    empty alias key ("her2": "exon 20 insertion", "erbb2": None) must not
+    erase a recorded result."""
     out: dict[str, Any] = {}
     for gene, value in (facts.get("driver_mutations") or {}).items():
         key = _canonical_gene(gene)
-        if key in out and out[key] is not None and value is not None:
+        if key in out and value is None:
+            continue
+        if key in out and out[key] is not None:
             out[key] = f"{_as_text(out[key])}; {_as_text(value)}"
         else:
             out[key] = value
@@ -372,9 +401,55 @@ def population_signature(facts: dict[str, Any]) -> dict[str, list[str]]:
         elif gene == "kras":
             signature[gene] = (["g12c"] if _KRAS_G12C_RE.search(
                 positive_evidence(value)) else [])
+        elif gene == "erbb2":
+            signature[gene] = [her2_variant_class(value) or "unclassified"]
         else:
             signature[gene] = []
     return signature
+
+
+def her2_variant_class(value: Any) -> str | None:
+    """``"tkd"`` | ``"non_tkd"`` | ``"unclassified"`` for a positive ERBB2
+    report value; None when the value is not positive. A TKD alteration
+    anywhere in the report wins (co-amplification does not remove a TKD
+    mutation from the HER2 TKI population)."""
+    text = positive_evidence(value)
+    if not text and driver_status(value) != "positive":
+        return None
+    codons = [int(m.group(1)) for m in _PROTEIN_CODON_RE.finditer(text)]
+    if _HER2_TKD_RE.search(text) or any(720 <= c <= 987 for c in codons):
+        return "tkd"
+    if _HER2_NON_TKD_RE.search(text) or any(c < 700 for c in codons):
+        return "non_tkd"
+    return "unclassified"
+
+
+def her2_class(facts: dict[str, Any]) -> str | None:
+    """The case's HER2 class (see :func:`her2_variant_class`)."""
+    return her2_variant_class(_normalized_drivers(facts).get("erbb2"))
+
+
+#: A mutation named as such ("HER2 mutation", "突变", "S310F", "ins"/"dup").
+_HER2_MUTATION_WORD_RE = re.compile(r"mutat|mutant|突变|\bins|\bdup|delins",
+                                    re.I)
+
+
+def her2_is_mutation(value: Any) -> bool | None:
+    """True for a positive ERBB2 report that names a mutation (TKD or not —
+    DESTINY-Lung02 enrolled activating mutations of either kind), False for
+    amplification or overexpression alone, None when a positive report
+    says neither (and for a value that is not positive)."""
+    variant = her2_variant_class(value)
+    if variant is None:
+        return None
+    if variant == "tkd":
+        return True
+    text = positive_evidence(value)
+    if _PROTEIN_CODON_RE.search(text) or _HER2_MUTATION_WORD_RE.search(text):
+        return True
+    if _HER2_NON_TKD_RE.search(text):
+        return False
+    return None
 
 
 def later_line_actionable_drivers(facts: dict[str, Any]) -> list[dict[str, Any]]:
@@ -383,9 +458,22 @@ def later_line_actionable_drivers(facts: dict[str, Any]) -> list[dict[str, Any]]
     found: list[dict[str, Any]] = []
     value = drivers.get("erbb2")
     if value is not None and driver_status(value) == "positive":
+        cls = her2_variant_class(value)
+        note = {
+            "tkd": "TKD mutation — first-line HER2 TKIs (zongertinib/"
+                   "sevabertinib, accelerated approvals, non-squamous) beside "
+                   "chemo±IO; T-DXd in later lines (DESTINY-Lung02)",
+            "non_tkd": "not a TKD mutation (amplification/overexpression or "
+                       "extracellular/transmembrane variant) — the HER2 TKI "
+                       "approvals do not apply; later-line T-DXd needs an "
+                       "activating HER2 mutation (DESTINY-Lung02), and HER2 "
+                       "IHC 3+ falls under its tumor-agnostic approval (not "
+                       "encoded)",
+        }.get(cls, "variant class not reported — the exact ERBB2 alteration "
+                   "(TKD vs non-TKD) decides HER2 TKI eligibility; first line "
+                   "stays chemo±IO until it is known; T-DXd in later lines")
         found.append({"gene": "HER2/ERBB2", "value": str(value),
-                      "note": "T-DXd in later lines (DESTINY-Lung02); "
-                              "first-line remains chemo±IO"})
+                      "class": cls, "note": note})
     value = drivers.get("kras")
     if value is not None and driver_status(value) == "positive" \
             and _KRAS_G12C_RE.search(positive_evidence(value)):

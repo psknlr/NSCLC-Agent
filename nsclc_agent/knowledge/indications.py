@@ -47,6 +47,8 @@ from .biomarkers import (
     egfr_classes,
     egfr_classical,
     first_line_actionable_drivers,
+    her2_is_mutation,
+    her2_variant_class,
 )
 
 ELIGIBLE = "eligible"
@@ -75,7 +77,9 @@ class Indication:
     driver: str | None = None
     driver_class: str | None = None  # egfr_classical | egfr_exon20ins |
     #                                  egfr_uncommon | met_ex14 |
-    #                                  braf_v600e | kras_g12c
+    #                                  braf_v600e | kras_g12c |
+    #                                  egfr_t790m | erbb2_tkd |
+    #                                  erbb2_mutant
     #: ICI-first regimens: no first-line actionable driver may be present.
     requires_no_actionable_driver: bool = False
     pd_l1_tps_ge: float | None = None
@@ -198,6 +202,33 @@ def _eval_driver(ind: Indication, facts: dict[str, Any]) -> dict[str, Any]:
         return _cond("driver", label,
                      _MET if _KRAS_G12C_RE.search(text) else _NOT_MET,
                      text[:60])
+    if ind.driver_class == "erbb2_tkd":
+        # The HER2 TKI approvals cover tyrosine-kinase-domain mutations
+        # only; "HER2 positive" without the variant is a workup question,
+        # never a guess either way.
+        variant = her2_variant_class(value)
+        if variant == "tkd":
+            return _cond("driver", label, _MET, "HER2 TKD mutation")
+        if variant == "non_tkd":
+            return _cond("driver", label, _NOT_MET,
+                         f"{text[:60]} is not a TKD-activating mutation")
+        return _cond("driver", label, _UNKNOWN,
+                     "HER2 positive, but the report does not say whether the "
+                     "alteration is a TKD mutation")
+    if ind.driver_class == "erbb2_mutant":
+        # DESTINY-Lung02 enrolled activating HER2 mutations; amplification
+        # or overexpression alone is another population (T-DXd's HER2
+        # IHC 3+ tumor-agnostic approval is not encoded).
+        mutant = her2_is_mutation(value)
+        if mutant is True:
+            return _cond("driver", label, _MET, "HER2 mutation")
+        if mutant is False:
+            return _cond("driver", label, _NOT_MET,
+                         f"{text[:60]}: amplification/overexpression without "
+                         f"a HER2 mutation")
+        return _cond("driver", label, _UNKNOWN,
+                     "HER2 positive, but the report does not say whether it "
+                     "is a mutation or amplification/overexpression")
     return _cond("driver", label, _UNKNOWN,
                  f"declaration error: unknown driver_class "
                  f"{ind.driver_class!r}")
@@ -490,30 +521,70 @@ INDICATIONS: dict[str, Indication] = {i.regimen_id: i for i in (
                driver_class="egfr_uncommon",
                note="LUX-Lung pooled: G719X/L861Q/S768I"),
     Indication("lorlatinib_first_line", _IV, driver="alk", note="CROWN"),
+    Indication("alectinib_first_line", _IV, driver="alk", note="ALEX"),
+    Indication("brigatinib_first_line", _IV, driver="alk", note="ALTA-1L"),
     Indication("repotrectinib_first_line", _IV, driver="ros1",
                note="TRIDENT-1: ROS1 fusion"),
+    Indication("taletrectinib_first_line", _IV, driver="ros1",
+               note="TRUST-I/TRUST-II: ROS1 fusion"),
+    Indication("entrectinib_ros1_first_line", _IV, driver="ros1",
+               note="STARTRK-2 pooled: ROS1 fusion"),
+    Indication("crizotinib_ros1_first_line", _IV, driver="ros1",
+               note="PROFILE 1001: ROS1 rearrangement"),
     Indication("selpercatinib_first_line", _IV, driver="ret",
                note="LIBRETTO-431: RET fusion"),
+    Indication("pralsetinib_first_line", _IV, driver="ret",
+               note="ARROW: RET fusion"),
     Indication("capmatinib_first_line", _IV, driver="met",
                driver_class="met_ex14",
                note="GEOMETRY: MET exon 14 skipping"),
+    Indication("tepotinib_first_line", _IV, driver="met",
+               driver_class="met_ex14",
+               note="VISION: MET exon 14 skipping"),
     Indication("dabrafenib_trametinib_first_line", _IV, driver="braf",
                driver_class="braf_v600e", note="BRF113928: BRAF V600E"),
+    Indication("encorafenib_binimetinib_first_line", _IV, driver="braf",
+               driver_class="braf_v600e", note="PHAROS: BRAF V600E"),
     Indication("larotrectinib_first_line", _IV, driver="ntrk",
                note="NAVIGATE: NTRK fusion"),
+    Indication("entrectinib_ntrk_first_line", _IV, driver="ntrk",
+               note="STARTRK-2 pooled: NTRK fusion"),
+    Indication("zongertinib_her2_tkd", _IV, histology="nonsquamous",
+               driver="erbb2", driver_class="erbb2_tkd",
+               note="Beamion LUNG-1: non-squamous, HER2 TKD mutation, "
+                    "first line or previously treated"),
+    Indication("sevabertinib_her2_tkd", _IV, histology="nonsquamous",
+               driver="erbb2", driver_class="erbb2_tkd",
+               note="SOHO-01: non-squamous, HER2 TKD mutation, first line "
+                    "or previously treated"),
     # ------------------------------------------------ stage IV, driver-negative
     Indication("pembro_monotherapy", _IV, pd_l1_tps_ge=50,
                requires_no_actionable_driver=True,
                note="KEYNOTE-024: TPS≥50%, driver-negative"),
+    Indication("cemiplimab_monotherapy", _IV, pd_l1_tps_ge=50,
+               requires_no_actionable_driver=True,
+               note="EMPOWER-Lung 1: TPS≥50%, EGFR/ALK/ROS1 excluded"),
+    Indication("atezolizumab_monotherapy", _IV, pd_l1_tps_ge=50,
+               requires_no_actionable_driver=True,
+               note="IMpower110: high PD-L1 (TC≥50% modeled), EGFR/ALK "
+                    "wild-type"),
     Indication("pembro_pemetrexed_platinum", _IV, histology="nonsquamous",
                requires_no_actionable_driver=True, note="KEYNOTE-189"),
     Indication("pembro_carbo_taxane", _IV, histology="squamous",
                requires_no_actionable_driver=True, note="KEYNOTE-407"),
     Indication("nivo_ipi_chemo", _IV, requires_no_actionable_driver=True,
                note="CheckMate 9LA"),
+    Indication("pemetrexed_platinum_first_line", _IV, histology="nonsquamous",
+               requires_no_actionable_driver=True,
+               note="JMDB/PARAMOUNT: chemotherapy without a checkpoint "
+                    "inhibitor"),
+    Indication("carbo_nab_paclitaxel_first_line", _IV,
+               requires_no_actionable_driver=True,
+               note="CA031: chemotherapy without a checkpoint inhibitor, "
+                    "any histology"),
     # ------------------------------------------------------------ later line
     Indication("tdxd_subsequent_line", _IV, driver="erbb2",
-               requires_prior_systemic=True,
+               driver_class="erbb2_mutant", requires_prior_systemic=True,
                note="DESTINY-Lung02: previously treated HER2-mutant"),
     Indication("amivantamab_chemo_subsequent", _IV, driver="egfr",
                driver_class="egfr_classical", requires_prior_systemic=True,
@@ -544,6 +615,10 @@ INDICATIONS: dict[str, Indication] = {i.regimen_id: i for i in (
     Indication("sotorasib_subsequent_line", _IV, driver="kras",
                driver_class="kras_g12c", requires_prior_systemic=True,
                note="CodeBreaK 100: KRAS G12C, previously treated — "
+                    "never first line"),
+    Indication("adagrasib_subsequent_line", _IV, driver="kras",
+               driver_class="kras_g12c", requires_prior_systemic=True,
+               note="KRYSTAL-1/KRYSTAL-12: KRAS G12C, previously treated — "
                     "never first line"),
     Indication("platinum_etoposide_transformation", _IV, driver="egfr",
                requires_prior_systemic=True,

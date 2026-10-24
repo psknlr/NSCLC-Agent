@@ -584,6 +584,9 @@ def extract_facts_deterministic(message: str) -> dict[str, Any]:
         facts["histologic_category"] = "adenosquamous"
     elif "腺癌" in text or "adenocarcinoma" in lowered:
         facts["histologic_category"] = "adenocarcinoma"
+    elif "非鳞" in text or re.search(r"non[-\s_]?squamous", lowered):
+        # Before the squamous test: "non-squamous" contains "squamous".
+        facts["histologic_category"] = "non_squamous"
     elif "鳞癌" in text or "鳞状细胞癌" in text or "squamous" in lowered:
         facts["histologic_category"] = "squamous"
     elif "大细胞癌" in text or re.search(r"large[- ]cell\s+(?:lung\s+)?carcinoma", lowered):

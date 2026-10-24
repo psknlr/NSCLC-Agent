@@ -10,7 +10,10 @@ cancelled. Mainstream-runtime properties:
 * tool calls in one model step run **concurrently** when they are
   read-only and threads exist (natively); state-mutating tools keep call
   order; the browser build runs everything serially;
-* reasoning is captured from ``reasoning_content`` / ``<think>`` blocks;
+* reasoning is captured from the provider's reasoning field,
+  ``reasoning_content`` or ``<think>`` blocks; a provider's own content
+  blocks (Anthropic's signed thinking) ride on the assistant message as
+  ``_provider_content`` and go back to that provider verbatim;
 * a plain-text answer is accepted, after one nudge toward the terminal tool;
 * truncated output is continued, not swallowed;
 * the history is always valid: every assistant tool call gets a tool
@@ -67,14 +70,14 @@ def compact(data: Any, limit: int = OBSERVATION_LIMIT) -> str:
 def split_reasoning(response: Any) -> tuple[str, str]:
     """(thinking, visible text) from a provider response."""
     text = response.text or ""
-    thinking = ""
+    thinking = str(getattr(response, "reasoning", "") or "").strip()
     raw = getattr(response, "raw", None) or {}
     try:
         message = (raw.get("choices") or [{}])[0].get("message") or {}
     except (AttributeError, IndexError, TypeError):
         message = {}
     for key in ("reasoning_content", "reasoning"):
-        if isinstance(message.get(key), str) and message[key].strip():
+        if not thinking and isinstance(message.get(key), str) and message[key].strip():
             thinking = message[key].strip()
             break
     found = _THINK_RE.findall(text)
@@ -85,7 +88,7 @@ def split_reasoning(response: Any) -> tuple[str, str]:
 
 
 def assistant_message(response: Any, step: int) -> dict[str, Any]:
-    return {
+    message = {
         "role": "assistant",
         "content": response.text or "",
         "tool_calls": [{
@@ -95,6 +98,14 @@ def assistant_message(response: Any, step: int) -> dict[str, Any]:
                          "arguments": json.dumps(call.arguments, ensure_ascii=False)},
         } for i, call in enumerate(response.tool_calls)],
     }
+    return _with_provider_content(message, response)
+
+
+def _with_provider_content(message: dict[str, Any], response: Any) -> dict[str, Any]:
+    native = getattr(response, "provider_content", None)
+    if native:
+        message["_provider_content"] = native
+    return message
 
 
 def repair_history(messages: list[dict[str, Any]], note: str = "interrupted") -> int:
@@ -164,15 +175,20 @@ def run_loop(
         result.prompt_tokens += response.prompt_tokens
         result.completion_tokens += response.completion_tokens
         result.model = response.model or result.model
-        say({"type": "usage", "prompt_tokens": response.prompt_tokens,
-             "completion_tokens": response.completion_tokens})
+        usage = {"type": "usage", "prompt_tokens": response.prompt_tokens,
+                 "completion_tokens": response.completion_tokens}
+        for key in ("cache_read_tokens", "cache_write_tokens"):
+            if getattr(response, key, 0):
+                usage[key] = getattr(response, key)
+        say(usage)
         thinking, visible = split_reasoning(response)
         if thinking:
             result.steps.append({"kind": "thinking", "text": thinking, "agent": agent})
             say({"type": "thinking", "text": thinking})
 
         if not response.tool_calls:
-            messages.append({"role": "assistant", "content": response.text or ""})
+            messages.append(_with_provider_content(
+                {"role": "assistant", "content": response.text or ""}, response))
             if visible:
                 result.text = visible
             if response.truncated:

@@ -85,19 +85,25 @@ def test_negated_secondary_variant_never_releases_immunotherapy():
 
 
 def test_gene_keys_and_notations_are_normalized():
+    # The lead agent first, then its listed same-target alternatives.
     for driver, expected in (({"braf": "p.Val600Glu"},
-                              "dabrafenib_trametinib_first_line"),
+                              ["dabrafenib_trametinib_first_line",
+                               "encorafenib_binimetinib_first_line"]),
                              ({"met": "c.3028+1G>T splice site"},
-                              "capmatinib_first_line"),
+                              ["capmatinib_first_line",
+                               "tepotinib_first_line"]),
                              ({"ROS1_fusion": "CD74-ROS1"},
-                              "repotrectinib_first_line")):
+                              ["repotrectinib_first_line",
+                               "taletrectinib_first_line",
+                               "entrectinib_ros1_first_line",
+                               "crizotinib_ros1_first_line"])):
         state = NSCLCRunner().run_case(Case(
             t="T2a", n="N2a", m="M1c1",
             presentation=f"Adenocarcinoma. Brain MRI negative. {SN}",
             facts={"driver_mutations": {**NEG, **driver},
                    "histologic_category": "adenocarcinoma",
                    "pd_l1": {"tps": 80}, "ecog_ps": 1, "ngs_done": True}))
-        assert state.outputs["treatment_plan"]["regimen_ids"] == [expected]
+        assert state.outputs["treatment_plan"]["regimen_ids"] == expected
 
 
 # ------------------------------------------------------------- rule engine

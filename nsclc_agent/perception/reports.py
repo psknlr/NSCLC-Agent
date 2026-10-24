@@ -215,9 +215,16 @@ class ReportReader:
 
 
 def _histology_matches(a: str, b: str) -> bool:
-    """Equivalent-phrasing tolerance: equality or containment either way."""
+    """Equivalent-phrasing tolerance: equality or containment either way —
+    except squamous against a non-squamous reading, which containment
+    would pass ("non-squamous" contains "squamous")."""
+    from ..knowledge.kg_eligibility import _classify_histology
+
     left = " ".join(str(a).lower().split())
     right = " ".join(str(b).lower().split())
+    classes = {_classify_histology(left), _classify_histology(right)}
+    if "squamous" in classes and classes & {"adenocarcinoma", "non_squamous"}:
+        return False
     return left == right or left in right or right in left
 
 

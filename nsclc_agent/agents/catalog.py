@@ -21,6 +21,7 @@ from ..knowledge.biomarkers import (
     egfr_classes,
     egfr_classical,
     first_line_actionable_drivers,
+    her2_class,
     later_line_actionable_drivers,
 )
 from ..perception import ImagingError, ImagingReader, fold_into_case
@@ -428,8 +429,12 @@ def _driver_unknown(facts: dict[str, Any], gene: str) -> bool:
 
 
 def _nonsquamous(facts: dict[str, Any]) -> bool:
-    hist = str(facts.get("histologic_category") or "").lower()
-    return not hist or "squamous" not in hist or "adeno" in hist
+    """Anything but squamous, unrecorded included ("non-squamous" is the
+    population name, not a squamous histology)."""
+    from ..knowledge.kg_eligibility import _classify_histology
+
+    hist = str(facts.get("histologic_category") or "")
+    return _classify_histology(hist) != "squamous"
 
 
 def _resectability(facts: dict[str, Any]) -> str:
@@ -482,7 +487,7 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         plan["uncertainties"].append(cns_conflict)
         plan["mdt_referral"] = True
 
-    def opt(name: str, regimen_ids: list[str], rationale: str, *,
+    def opt(name: str, regimen_ids: list[str], rationale: str | dict[str, str], *,
             allow_progressed: bool = False) -> None:
         """Add an option — through the indication-predicate gate.
 
@@ -492,6 +497,14 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
         silent recommendation), ``unknown`` stays provisional with the
         missing facts routed to workup, and a stage mismatch that the plan
         has explicitly declared as an extrapolation is honored as such.
+
+        Several regimen ids in one option are alternatives for one
+        decision (which ALK TKI): every organ-gate drop is recorded (an
+        uncertainty and the MDT-referral flag), but it becomes an MDT
+        workup item, which holds the release, only when no alternative
+        survives. A dict rationale gives each alternative its own clause
+        (key ``""`` is the shared lead), so a dropped alternative leaves
+        no trace in the text.
         """
         from ..knowledge.indications import (
             INELIGIBLE, UNKNOWN as IND_UNKNOWN, evaluate_indication,
@@ -575,6 +588,10 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
             # block "Docetaxel ± ramucirumab" bound only to docetaxel).
             name = " / ".join(regimen_lib.get(rid).name for rid in kept
                               if regimen_lib.get(rid)) or name
+        if isinstance(rationale, dict):
+            clauses = "; ".join(rationale[rid] for rid in kept if rid in rationale)
+            lead_text = rationale.get("", "")
+            rationale = f"{lead_text}: {clauses}" if lead_text else clauses
         plan["options"].append({"name": name, "regimen_ids": kept,
                                 "rationale": rationale})
         for rid in kept:
@@ -816,40 +833,124 @@ def deterministic_plan(stage_group: str, facts: dict[str, Any]) -> dict[str, Any
                     f"map to a first-line indication — no systemic regimen "
                     f"is proposed until the variant is classified.")
         elif lead and lead["gene"] == "ALK":
-            opt("First-line lorlatinib", ["lorlatinib_first_line"],
-                "ALK+: CROWN")
+            opt("First-line ALK TKI (lorlatinib, alectinib or brigatinib)",
+                ["lorlatinib_first_line", "alectinib_first_line",
+                 "brigatinib_first_line"],
+                {"": "ALK+ (each beat crizotinib in a phase 3 trial; none "
+                     "has been compared head-to-head with another — CNS "
+                     "disease, toxicity and drug interactions guide the "
+                     "choice)",
+                 "lorlatinib_first_line": "lorlatinib (CROWN)",
+                 "alectinib_first_line": "alectinib (ALEX)",
+                 "brigatinib_first_line": "brigatinib (ALTA-1L)"})
         elif lead and lead["gene"] == "ROS1":
-            opt("First-line ROS1 TKI (repotrectinib)",
-                ["repotrectinib_first_line"],
-                "ROS1 fusion: TRIDENT-1; entrectinib/crizotinib/"
-                "taletrectinib are alternatives — ICI monotherapy is not a "
-                "substitute regardless of PD-L1")
+            opt("First-line ROS1 TKI (repotrectinib, taletrectinib, "
+                "entrectinib or crizotinib)",
+                ["repotrectinib_first_line", "taletrectinib_first_line",
+                 "entrectinib_ros1_first_line", "crizotinib_ros1_first_line"],
+                {"": "ROS1 fusion — ICI monotherapy is not a substitute "
+                     "regardless of PD-L1",
+                 "repotrectinib_first_line": "repotrectinib (TRIDENT-1)",
+                 "taletrectinib_first_line": "taletrectinib "
+                                             "(TRUST-I/TRUST-II)",
+                 "entrectinib_ros1_first_line": "entrectinib (STARTRK-2 "
+                                                "pooled)",
+                 "crizotinib_ros1_first_line": "crizotinib (PROFILE 1001; "
+                                               "limited CNS activity)"})
         elif lead and lead["gene"] == "RET":
-            opt("First-line selpercatinib", ["selpercatinib_first_line"],
-                "RET fusion: LIBRETTO-431 beat chemo±pembrolizumab "
-                "head-to-head — PD-L1 level does not redirect to ICI")
+            opt("First-line RET inhibitor (selpercatinib or pralsetinib)",
+                ["selpercatinib_first_line", "pralsetinib_first_line"],
+                {"": "RET fusion — PD-L1 level does not redirect to ICI",
+                 "selpercatinib_first_line": "selpercatinib (LIBRETTO-431 "
+                                             "beat chemo±pembrolizumab "
+                                             "head-to-head)",
+                 "pralsetinib_first_line": "pralsetinib (ARROW, "
+                                           "single-arm)"})
         elif lead and lead["gene"] == "MET":
-            opt("First-line capmatinib", ["capmatinib_first_line"],
-                "MET exon 14 skipping: GEOMETRY (tepotinib per VISION is "
-                "the alternative)")
+            opt("First-line MET inhibitor (capmatinib or tepotinib)",
+                ["capmatinib_first_line", "tepotinib_first_line"],
+                {"": "MET exon 14 skipping",
+                 "capmatinib_first_line": "capmatinib (GEOMETRY mono-1)",
+                 "tepotinib_first_line": "tepotinib (VISION)"})
         elif lead and lead["gene"] == "BRAF":
-            opt("First-line dabrafenib + trametinib",
-                ["dabrafenib_trametinib_first_line"],
-                "BRAF V600E: BRF113928")
+            opt("First-line BRAF + MEK inhibitor (dabrafenib + trametinib "
+                "or encorafenib + binimetinib)",
+                ["dabrafenib_trametinib_first_line",
+                 "encorafenib_binimetinib_first_line"],
+                {"": "BRAF V600E",
+                 "dabrafenib_trametinib_first_line": "dabrafenib + "
+                                                     "trametinib "
+                                                     "(BRF113928)",
+                 "encorafenib_binimetinib_first_line": "encorafenib + "
+                                                       "binimetinib "
+                                                       "(PHAROS)"})
         elif lead and lead["gene"] == "NTRK":
-            opt("First-line larotrectinib", ["larotrectinib_first_line"],
-                "NTRK fusion: tumor-agnostic evidence (entrectinib is the "
-                "CNS-active alternative)")
-        elif isinstance(tps, (int, float)) and tps >= 50:
-            opt("Pembrolizumab monotherapy", ["pembro_monotherapy"],
-                "PD-L1 TPS≥50% driver-negative: KEYNOTE-024")
-        elif _nonsquamous(facts):
-            opt("Pembrolizumab + pemetrexed-platinum",
-                ["pembro_pemetrexed_platinum"],
-                "Driver-negative nonsquamous: KEYNOTE-189")
+            opt("First-line TRK inhibitor (larotrectinib or entrectinib)",
+                ["larotrectinib_first_line", "entrectinib_ntrk_first_line"],
+                {"": "NTRK fusion, tumor-agnostic evidence",
+                 "larotrectinib_first_line": "larotrectinib (NAVIGATE)",
+                 "entrectinib_ntrk_first_line": "entrectinib (STARTRK-2 "
+                                                "pooled, CNS-active)"})
         else:
-            opt("Pembrolizumab + carboplatin-taxane", ["pembro_carbo_taxane"],
-                "Driver-negative squamous: KEYNOTE-407")
+            # Driver-negative first line. A record that rules checkpoint
+            # blockade out (solid-organ transplant, active autoimmune
+            # disease) puts chemotherapy without an ICI FIRST; the ICI
+            # options stay for the transplant team / rheumatology to weigh,
+            # and the critic's ICI_COMORBIDITY_CAUTION is their record.
+            comorbid = facts.get("comorbidities") or {}
+            ici_barrier = ("solid-organ transplant recipient"
+                           if comorbid.get("organ_transplant") is True
+                           else "active autoimmune disease"
+                           if comorbid.get("active_autoimmune") is True
+                           else None)
+            if ici_barrier and _nonsquamous(facts):
+                opt("Platinum-pemetrexed without a checkpoint inhibitor",
+                    ["pemetrexed_platinum_first_line"],
+                    f"{ici_barrier.capitalize()}: chemotherapy without a "
+                    f"checkpoint inhibitor (JMDB, PARAMOUNT maintenance) — "
+                    f"immunotherapy only after transplant-team / "
+                    f"rheumatology review")
+            elif ici_barrier:
+                opt("Carboplatin + nab-paclitaxel without a checkpoint "
+                    "inhibitor", ["carbo_nab_paclitaxel_first_line"],
+                    f"{ici_barrier.capitalize()}: chemotherapy without a "
+                    f"checkpoint inhibitor (CA031) — immunotherapy only "
+                    f"after transplant-team / rheumatology review")
+            if ici_barrier:
+                plan["mdt_referral"] = True
+                plan["uncertainties"].append(
+                    f"{ici_barrier.capitalize()} on record: checkpoint "
+                    f"blockade risks graft rejection or an autoimmune flare, "
+                    f"and these patients were excluded from the ICI trials "
+                    f"— the chemotherapy-only option is listed first; any "
+                    f"ICI option needs the specialist's documented review.")
+            if isinstance(tps, (int, float)) and tps >= 50:
+                # Cemiplimab (EMPOWER-Lung 1) and atezolizumab (IMpower110)
+                # are in the library for audits and model-authored plans;
+                # the deterministic plan names one agent, since the record
+                # holds nothing that would pick between them.
+                opt("Pembrolizumab monotherapy", ["pembro_monotherapy"],
+                    "PD-L1 TPS≥50% driver-negative: KEYNOTE-024")
+            elif _nonsquamous(facts):
+                opt("Pembrolizumab + pemetrexed-platinum",
+                    ["pembro_pemetrexed_platinum"],
+                    "Driver-negative nonsquamous: KEYNOTE-189")
+            else:
+                opt("Pembrolizumab + carboplatin-taxane", ["pembro_carbo_taxane"],
+                    "Driver-negative squamous: KEYNOTE-407")
+            from ..knowledge.kg_eligibility import _classify_histology
+
+            histology = _classify_histology(
+                str(facts.get("histologic_category") or ""))
+            if her2_class(facts) == "tkd" and histology in ("adenocarcinoma",
+                                                           "non_squamous"):
+                opt("HER2 TKI (zongertinib or sevabertinib)",
+                    ["zongertinib_her2_tkd", "sevabertinib_her2_tkd"],
+                    {"": "HER2 TKD mutation, non-squamous — accelerated "
+                         "approvals on single-arm response rates, beside "
+                         "the chemo-IO standard",
+                     "zongertinib_her2_tkd": "zongertinib (Beamion LUNG-1)",
+                     "sevabertinib_her2_tkd": "sevabertinib (SOHO-01)"})
         if seq is None:
             # First-line only: in a sequencing plan the later-line drivers
             # are live options, not footnotes.

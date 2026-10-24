@@ -94,8 +94,10 @@ def test_alk_positive_tki_naive_after_chemo_gets_the_tki():
                                                 "alk": "EML4-ALK"},
                   "treatment_history": _CHEMO_PD},
                  "ALK fusion found after chemotherapy.")
+    # Lorlatinib leads; alectinib and brigatinib are its listed alternatives.
     assert state.outputs["treatment_plan"]["regimen_ids"] == [
-        "lorlatinib_first_line"]
+        "lorlatinib_first_line", "alectinib_first_line",
+        "brigatinib_first_line"]
 
 
 def test_driver_first_line_stays_a_block_after_chemo_only_progression():

@@ -68,9 +68,12 @@ substitution as a warning.
 - **No real-model evaluation yet.** Every agent-mode experiment uses scripted or
   mock model decisions; no API key is available to the build. The figures show
   what the runtime and the audit do with a given consult. They do not show how
-  often a real language model decides correctly. The audit is the instrument for
-  that evaluation: run the 42 gold-standard pipeline cases through a connected
-  model in full autonomy and score each consult with `agentic.audit.audit`.
+  often a real language model decides correctly. Since v1.7.0 `nsclc-agent bench`
+  is that evaluation: it runs the gold-standard pipeline cases through a
+  connected model in full autonomy, grades each consult against the gold
+  expectations and reports the independent audit beside the grade
+  (`docs/AGENT_BENCH.md`). Its reference agent checks the harness offline; it
+  has not been run on a real model yet.
 - **Gold-standard set.** The cases were written by the developers. Dual
   clinician adjudication has not been done yet (70/70 cases are unadjudicated).
 - **Defect injection (Fig. 3).** The defects were constructed by the authors.

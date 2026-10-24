@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-REGISTRY_VERSION = "2026-08"
+REGISTRY_VERSION = "2026-10"
 
 
 @dataclass(frozen=True)
@@ -40,18 +40,23 @@ class Trial:
     #: "any" | "nonsquamous" | "squamous"
     histology: str = "any"
     #: Driver alteration the population must carry ("EGFR", "ALK"), or None.
+    #: A pooled entry that enrolled either of two drivers names both
+    #: ("ROS1|NTRK", STARTRK): either one covers the population.
     driver_required: Optional[str] = None
     #: Variant-class refinement of driver_required, where the enrollment was
     #: variant-defined: "egfr_ex19del_l858r" (FLAURA/ADAURA/LAURA/MARIPOSA),
     #: "egfr_exon20ins" (PAPILLON), "egfr_uncommon", "met_ex14",
-    #: "braf_v600e". None = any positive result of the gene qualifies.
+    #: "braf_v600e", "kras_g12c", "erbb2_tkd" (HER2 tyrosine-kinase-domain
+    #: mutations: Beamion LUNG-1, SOHO-01). None = any positive result of
+    #: the gene qualifies.
     driver_class_required: Optional[str] = None
     #: TNM edition the trial enrolled under. Every registry entry to date
     #: predates AJCC/UICC 9 — stage-boundary checks back-map the current
     #: case to this edition before calling an application an extrapolation.
     tnm_edition: int = 8
     #: True when known EGFR/ALK alterations were excluded — the perioperative
-    #: immunotherapy trials. The rule engine reads this.
+    #: immunotherapy trials, EMPOWER-Lung 1 and IMpower110. The claim-level
+    #: population check reads this.
     egfr_alk_excluded: bool = False
     regimen_ids: tuple[str, ...] = ()
     #: Key results as short strings; every numeric is tied to `source`.
@@ -130,10 +135,11 @@ TRIALS: tuple[Trial, ...] = (
         regimen_ids=("nivo_chemo_neoadjuvant",),
         results=(
             "EFS HR 0.63 (97.38% CI 0.43–0.91); pCR 24.0% vs 2.2%",
-            "OS HR 0.72 (95% CI 0.523–0.998) at 5-year analysis; pCR patients 5-yr OS ~95%",
+            "Final OS analysis: OS HR 0.72 (95% CI 0.523–0.998); 5-year OS 65% vs 55%",
+            "Exploratory: 5-year OS 95% with pCR vs 56% without",
             "No decrease in surgical feasibility (83% vs 75% resected)",
         ),
-        source="NEJM 2022;386:1973 (EFS/pCR); NEJM 2025 5-year OS analysis",
+        source="NEJM 2022;386:1973 (EFS/pCR); NEJM 2025 final OS analysis",
         approval="FDA 2022-03 neoadjuvant nivolumab + platinum-doublet, ≥4 cm or node-positive resectable NSCLC",
         enrollment_note="Enrolled IB(≥4 cm)–IIIA by AJCC 7th edition; 3 cycles, no adjuvant IO",
         caveats=("Known EGFR/ALK alterations excluded",
@@ -270,8 +276,8 @@ TRIALS: tuple[Trial, ...] = (
         _s(*_STAGE_IV), driver_required="EGFR", driver_class_required="egfr_ex19del_l858r",
         regimen_ids=("osimertinib_first_line",),
         results=("PFS HR 0.46 (95% CI 0.37–0.57); OS HR 0.80 (95.05% CI 0.64–1.00)",
-                 "CNS subset: CNS PFS HR 0.48; CNS ORR 91% vs 68% "
-                 "(CNS full-analysis set)"),
+                 "CNS subset: CNS PFS HR 0.48 (95% CI 0.26–0.86); CNS ORR "
+                 "66% vs 43% (measurable and/or non-measurable CNS lesions)"),
         source="NEJM 2018;378:113 (PFS); NEJM 2020;382:41 (OS); "
                "JCO 2018;36:3290 (CNS subset)",
         approval="FDA 2018-04 first-line osimertinib, metastatic EGFR ex19del/L858R "
@@ -304,13 +310,58 @@ TRIALS: tuple[Trial, ...] = (
         "CROWN", "CROWN (first-line lorlatinib)", "NCT03052608", "first_line",
         _s(*_STAGE_IV), driver_required="ALK",
         regimen_ids=("lorlatinib_first_line",),
-        results=("PFS HR 0.27 (95% CI 0.18–0.39); 5-year PFS ~60% (HR 0.19 at long-term follow-up)",
+        results=("PFS HR 0.28 (95% CI 0.19–0.41) at the interim analysis; "
+                 "HR 0.27 (95% CI 0.18–0.39) at 3 years",
+                 "5-year PFS 60% vs 8% (HR 0.19, 95% CI 0.13–0.27)",
                  "Intracranial response 82% vs 23% with baseline measurable "
                  "CNS disease"),
-        source="NEJM 2020;383:2018; JCO 2024 long-term update",
+        source="NEJM 2020;383:2018 (interim); Lancet Respir Med 2023 "
+               "(3-year); JCO 2024;42:3400 (5-year)",
         approval="FDA 2021-03 first-line lorlatinib, metastatic ALK+",
         enrollment_note="High CNS activity; CNS-penetrant; watch lipids and neurocognitive effects",
         keywords=("lorlatinib", "ALK", "first line"),
+    ),
+    Trial(
+        "ALEX", "ALEX (first-line alectinib vs crizotinib)", "NCT02075840",
+        "first_line",
+        _s(*_STAGE_IV), driver_required="ALK",
+        regimen_ids=("alectinib_first_line",),
+        results=("Investigator-assessed PFS HR 0.47 (95% CI 0.34–0.65); "
+                 "independent review 25.7 vs 10.4 months (HR 0.50, 95% CI "
+                 "0.36–0.70)",
+                 "CNS progression 12% vs 45% (cause-specific HR 0.16, 95% CI "
+                 "0.10–0.28)",
+                 "5-year OS 62.5% vs 45.5% (HR 0.67, 95% CI 0.46–0.98; "
+                 "immature, 37% of events)"),
+        source="NEJM 2017;377:829 (Peters et al.); Ann Oncol 2020 (Mok et "
+               "al., 5-year update)",
+        approval="FDA 2017-11 first-line alectinib, metastatic ALK+ NSCLC",
+        enrollment_note="Untreated advanced ALK+; comparator crizotinib",
+        caveats=("No head-to-head comparison with lorlatinib — CROWN and "
+                 "ALEX each beat crizotinib; the choice between them is an "
+                 "MDT question (CNS disease, toxicity profile)",),
+        keywords=("alectinib", "ALK", "first line", "ALEX"),
+    ),
+    Trial(
+        "ALTA1L", "ALTA-1L (first-line brigatinib vs crizotinib)",
+        "NCT02737501", "first_line",
+        _s(*_STAGE_IV), driver_required="ALK",
+        regimen_ids=("brigatinib_first_line",),
+        results=("Final analysis: independent-review PFS 24.0 vs 11.1 months "
+                 "(HR 0.48, 95% CI 0.35–0.66)",
+                 "OS HR 0.81 (95% CI 0.53–1.22), not significant",
+                 "Baseline brain metastases: intracranial PFS 24.0 vs 5.5 "
+                 "months (HR 0.29)"),
+        source="ESMO 2021 final analysis; J Thorac Oncol 2021;16:2091 "
+               "(Camidge et al., final results)",
+        approval="FDA 2020-05 first-line brigatinib, metastatic ALK+ NSCLC",
+        enrollment_note="ALK-inhibitor-naive advanced ALK+; up to one prior "
+                        "chemotherapy allowed",
+        caveats=("Avoid strong or moderate CYP3A inducers (label: rifampin "
+                 "cuts brigatinib exposure by about 80%)",
+                 "Early pulmonary events in the first week — the 7-day "
+                 "lead-in dose exists for this"),
+        keywords=("brigatinib", "ALK", "first line", "ALTA-1L"),
     ),
     # ------------------------------------------------ stage IV, driver-negative
     Trial(
@@ -351,10 +402,101 @@ TRIALS: tuple[Trial, ...] = (
         "NCT03215706", "first_line",
         _s(*_STAGE_IV),
         regimen_ids=("nivo_ipi_chemo",),
-        results=("OS HR 0.66 (96.71% CI 0.55–0.80)",),
+        results=("OS HR 0.69 (96.71% CI 0.55–0.87) at the interim analysis; "
+                 "HR 0.66 (95% CI 0.55–0.80) with longer follow-up",),
         source="Lancet Oncol 2021;22:198",
         approval="FDA 2020-05 first-line, metastatic NSCLC without EGFR/ALK",
         keywords=("nivolumab", "ipilimumab", "dual immunotherapy"),
+    ),
+    Trial(
+        "EMPOWER_LUNG1", "EMPOWER-Lung 1 (cemiplimab mono, PD-L1≥50%)",
+        "NCT03088540", "first_line",
+        _s(*_STAGE_IV), egfr_alk_excluded=True,
+        regimen_ids=("cemiplimab_monotherapy",),
+        results=("PD-L1 ≥50%: OS HR 0.57 (95% CI 0.42–0.77); PFS 8.2 vs "
+                 "5.7 months (HR 0.54, 95% CI 0.43–0.68) vs platinum "
+                 "doublet",),
+        source="Lancet 2021;397:592 (Sezer et al.)",
+        approval="FDA 2021-02 first-line cemiplimab, advanced NSCLC with "
+                 "PD-L1 TPS ≥50% and no EGFR/ALK/ROS1 alteration",
+        enrollment_note="PD-L1 ≥50%; EGFR/ALK/ROS1 excluded; crossover "
+                        "allowed",
+        caveats=("An alternative to pembrolizumab monotherapy in the same "
+                 "population, not an addition to it",),
+        keywords=("cemiplimab", "monotherapy", "PD-L1 high"),
+    ),
+    Trial(
+        "IMPOWER110", "IMpower110 (atezolizumab mono, high PD-L1)",
+        "NCT02409342", "first_line",
+        _s(*_STAGE_IV), egfr_alk_excluded=True,
+        regimen_ids=("atezolizumab_monotherapy",),
+        results=("High PD-L1, EGFR/ALK wild-type: OS 20.2 vs 13.1 months "
+                 "(HR 0.59, 95% CI 0.40–0.89) vs platinum-based "
+                 "chemotherapy",),
+        source="NEJM 2020;383:1328 (Herbst et al.)",
+        approval="FDA 2020-05 first-line atezolizumab, metastatic NSCLC "
+                 "with high PD-L1 (TC ≥50% or IC ≥10%, SP142 assay) and no "
+                 "EGFR/ALK alteration",
+        enrollment_note="PD-L1 ≥1% enrolled; the benefit and the approval "
+                        "are the high-PD-L1 wild-type group",
+        caveats=("High PD-L1 by immune-cell staining (IC ≥10%) also "
+                 "qualifies under the label; this library models the "
+                 "tumor-cell route only (TPS ≥50%)",),
+        keywords=("atezolizumab", "monotherapy", "PD-L1 high"),
+    ),
+    Trial(
+        "JMDB", "JMDB (cisplatin-pemetrexed vs cisplatin-gemcitabine)",
+        "NCT00087711", "first_line",
+        _s(*_STAGE_IV), histology="nonsquamous",
+        regimen_ids=("pemetrexed_platinum_first_line",),
+        results=("Overall non-inferior: OS 10.3 vs 10.3 months (HR 0.94, "
+                 "95% CI 0.84–1.05)",
+                 "Adenocarcinoma: OS 12.6 vs 10.9 months, favoring "
+                 "pemetrexed; squamous: 10.8 vs 9.4 months, favoring "
+                 "gemcitabine — the basis of histology-directed pemetrexed"),
+        source="J Clin Oncol 2008;26:3543 (Scagliotti et al.)",
+        approval="FDA 2008 pemetrexed + cisplatin, first-line locally "
+                 "advanced or metastatic nonsquamous NSCLC",
+        enrollment_note="Chemotherapy-naive stage IIIB–IV; pre-dates "
+                        "immunotherapy — today the chemotherapy-only "
+                        "backbone for patients who cannot receive a "
+                        "checkpoint inhibitor",
+        caveats=("Cisplatin was the partner; carboplatin substitution is "
+                 "an MDT/pharmacist decision",),
+        keywords=("pemetrexed", "cisplatin", "nonsquamous", "chemotherapy"),
+    ),
+    Trial(
+        "PARAMOUNT", "PARAMOUNT (pemetrexed continuation maintenance)",
+        "NCT00789373", "first_line",
+        _s(*_STAGE_IV), histology="nonsquamous",
+        regimen_ids=("pemetrexed_platinum_first_line",),
+        results=("Maintenance pemetrexed after 4 cycles of "
+                 "cisplatin-pemetrexed: PFS HR 0.62 (95% CI 0.49–0.79); OS "
+                 "13.9 vs 11.0 months (HR 0.78, 95% CI 0.64–0.96)",),
+        source="J Clin Oncol 2013;31:2895 (Paz-Ares et al., final OS)",
+        approval="FDA 2012-10 label update: continuation maintenance "
+                 "pemetrexed after four cycles of platinum-based first-line "
+                 "chemotherapy, nonsquamous NSCLC",
+        enrollment_note="No progression and ECOG 0–1 after 4 induction "
+                        "cycles",
+        keywords=("pemetrexed", "maintenance", "nonsquamous"),
+    ),
+    Trial(
+        "CA031", "CA031 (carboplatin + nab-paclitaxel vs paclitaxel)",
+        "NCT00540514", "first_line",
+        _s(*_STAGE_IV),
+        regimen_ids=("carbo_nab_paclitaxel_first_line",),
+        results=("ORR 33% vs 25% (squamous 41% vs 24%); PFS 6.3 vs 5.8 and "
+                 "OS 12.1 vs 11.2 months, neither significant",),
+        source="J Clin Oncol 2012;30:2055 (Socinski et al.)",
+        approval="FDA 2012-10 nab-paclitaxel + carboplatin, first-line "
+                 "locally advanced or metastatic NSCLC",
+        enrollment_note="Untreated stage IIIB–IV, all histologies; "
+                        "pre-dates immunotherapy — today the "
+                        "chemotherapy-only option for squamous disease when "
+                        "a checkpoint inhibitor cannot be given",
+        keywords=("nab-paclitaxel", "carboplatin", "squamous",
+                  "chemotherapy"),
     ),
     # -------------------------- stage IV, driver-directed beyond EGFR/ALK
     Trial(
@@ -405,18 +547,98 @@ TRIALS: tuple[Trial, ...] = (
         keywords=("repotrectinib", "ROS1", "fusion", "taletrectinib"),
     ),
     Trial(
+        "TRUST", "TRUST-I/TRUST-II (taletrectinib, ROS1 fusion)",
+        "NCT04919811", "first_line",
+        _s(*_STAGE_IV), driver_required="ROS1",
+        regimen_ids=("taletrectinib_first_line",),
+        results=("TKI-naive ORR 90% (95% CI 83–95; TRUST-I) and 85% (73–93; "
+                 "TRUST-II)",
+                 "After one prior ROS1 TKI: ORR 52% (39–64; TRUST-I) and 62% "
+                 "(46–75; TRUST-II)"),
+        source="J Clin Oncol 2025;43:1920 (pooled TRUST-I/II); FDA approval "
+               "summary 2025-06",
+        approval="FDA 2025-06 taletrectinib, locally advanced or metastatic "
+                 "ROS1+ NSCLC (TKI-naive or after a ROS1 TKI)",
+        enrollment_note="TRUST-I (NCT04395677, China) and TRUST-II "
+                        "(NCT04919811, global); single-arm phase 2",
+        caveats=("Single-arm response-rate evidence — no randomized "
+                 "comparison with other ROS1 TKIs",),
+        keywords=("taletrectinib", "ROS1", "fusion", "TRUST"),
+    ),
+    Trial(
+        "PROFILE1001", "PROFILE 1001 (crizotinib, ROS1 cohort)",
+        "NCT00585195", "first_line",
+        _s(*_STAGE_IV), driver_required="ROS1",
+        regimen_ids=("crizotinib_ros1_first_line",),
+        results=("ORR 66% (95% CI 51–79) by independent review, n=50 (the "
+                 "label analysis)",
+                 "Updated: ORR 72% (95% CI 58–83), median PFS 19.3 months, "
+                 "n=53"),
+        source="NEJM 2014;371:1963 (Shaw et al.); Ann Oncol 2019;30:1121 "
+               "(updated survival)",
+        approval="FDA 2016-03 crizotinib, metastatic ROS1+ NSCLC",
+        enrollment_note="Expansion cohort of a phase 1 study; ROS1 by FISH "
+                        "mostly",
+        caveats=("Limited CNS activity compared with the newer ROS1 TKIs",),
+        keywords=("crizotinib", "ROS1", "fusion", "PROFILE 1001"),
+    ),
+    Trial(
+        "STARTRK2", "STARTRK-2 with ALKA-372-001/STARTRK-1 (entrectinib, "
+        "ROS1 or NTRK fusion)", "NCT02568267", "first_line",
+        _s(*_STAGE_IV), driver_required="ROS1|NTRK",
+        regimen_ids=("entrectinib_ros1_first_line",
+                     "entrectinib_ntrk_first_line"),
+        results=("ROS1 NSCLC (integrated analysis, n=53): ORR 77% (95% CI "
+                 "64–88), median duration of response 24.6 months; "
+                 "intracranial response 55% (11/20)",
+                 "NTRK fusion solid tumors (n=54): ORR 57%, median duration "
+                 "of response 10.4 months"),
+        source="Lancet Oncol 2020;21:261 (Drilon et al., ROS1); FDA approval "
+               "summary 2019-08 (NTRK)",
+        approval="FDA 2019-08 entrectinib: metastatic ROS1+ NSCLC; NTRK "
+                 "fusion+ solid tumors (accelerated)",
+        enrollment_note="Pooled ALKA-372-001, STARTRK-1 (NCT02097810) and "
+                        "STARTRK-2; TKI-naive for the ROS1 efficacy "
+                        "population",
+        caveats=("Label: assess QT interval and electrolytes before "
+                 "starting",
+                 "No responses after prior crizotinib in an early phase 1 "
+                 "series (0/6) — a small sample, but entrectinib is not the "
+                 "post-crizotinib answer"),
+        keywords=("entrectinib", "ROS1", "NTRK", "fusion", "STARTRK"),
+    ),
+    Trial(
         "LIBRETTO431", "LIBRETTO-431 (selpercatinib, RET fusion)",
         "NCT04194944", "first_line",
         _s(*_STAGE_IV), driver_required="RET",
         regimen_ids=("selpercatinib_first_line",),
-        results=("PFS HR 0.46 (95% CI 0.31–0.70) vs chemo±pembrolizumab; "
-                 "CNS-active",),
-        source="NEJM 2024;390:1265 (LIBRETTO-431)",
+        results=("PFS 24.8 vs 11.2 months, HR 0.46 (95% CI 0.31–0.70) vs "
+                 "chemo±pembrolizumab (pembrolizumab-ITT population, interim "
+                 "analysis); CNS-active",),
+        source="NEJM 2023;389:1839 (LIBRETTO-431)",
         approval="FDA regular approval 2022-09 selpercatinib, RET fusion+ "
-                 "NSCLC (accelerated 2020)",
+                 "NSCLC (accelerated 2020); pralsetinib per ARROW is the "
+                 "alternative",
         enrollment_note="Randomized against chemo±IO — directly answers the "
                         "'high PD-L1, RET+' question in favor of the TKI",
         keywords=("selpercatinib", "RET", "fusion"),
+    ),
+    Trial(
+        "ARROW", "ARROW (pralsetinib, RET fusion)", "NCT03037385",
+        "first_line",
+        _s(*_STAGE_IV), driver_required="RET",
+        regimen_ids=("pralsetinib_first_line",),
+        results=("Treatment-naive ORR 78% (95% CI 68–85; n=107), median "
+                 "duration of response 13.4 months",
+                 "Platinum-pretreated ORR 63% (95% CI 54–71; n=130), median "
+                 "duration of response 38.8 months"),
+        source="Lancet Oncol 2021;22:959 (Gainor et al., interim); FDA "
+               "regular-approval summary 2023-08",
+        approval="FDA 2023-08 regular approval (accelerated 2020-09) "
+                 "pralsetinib, metastatic RET fusion+ NSCLC",
+        enrollment_note="Single-arm phase 1/2; no randomized comparison "
+                        "with chemotherapy (contrast LIBRETTO-431)",
+        keywords=("pralsetinib", "RET", "fusion", "ARROW"),
     ),
     Trial(
         "GEOMETRY", "GEOMETRY mono-1 (capmatinib, MET exon 14 skipping)",
@@ -433,17 +655,55 @@ TRIALS: tuple[Trial, ...] = (
         keywords=("capmatinib", "MET", "exon 14", "tepotinib"),
     ),
     Trial(
+        "VISION", "VISION (tepotinib, MET exon 14 skipping)", "NCT02864992",
+        "first_line",
+        _s(*_STAGE_IV), driver_required="MET",
+        driver_class_required="met_ex14",
+        regimen_ids=("tepotinib_first_line",),
+        results=("Treatment-naive ORR 57% (95% CI 49–65; n=164)",
+                 "Previously treated ORR 45% (95% CI 37–53; n=149)"),
+        source="NEJM 2020;383:931 (Paik et al.); FDA traditional-approval "
+               "summary 2024-02",
+        approval="FDA 2024-02 traditional approval (accelerated 2021-02) "
+                 "tepotinib, metastatic MET exon 14 skipping NSCLC",
+        enrollment_note="MET exon 14 skipping only (tissue or plasma)",
+        keywords=("tepotinib", "MET", "exon 14", "VISION"),
+    ),
+    Trial(
         "BRF113928", "BRF113928 (dabrafenib + trametinib, BRAF V600E)",
         "NCT01336634", "first_line",
         _s(*_STAGE_IV), driver_required="BRAF",
         driver_class_required="braf_v600e",
         regimen_ids=("dabrafenib_trametinib_first_line",),
-        results=("ORR 64% treatment-naïve; median PFS ~10.8 mo",),
-        source="Lancet Oncol 2017;18:1307",
+        results=("ORR 64% (23/36) treatment-naïve; median duration of "
+                 "response 10.4 mo; median PFS ~10.8 mo",
+                 "Median OS 17.3 mo in the treatment-naïve cohort (updated "
+                 "analysis)"),
+        source="Lancet Oncol 2017;18:1307; J Thorac Oncol 2022;17:103 "
+               "(updated survival)",
         approval="FDA 2017-06 dabrafenib + trametinib, metastatic BRAF "
-                 "V600E NSCLC (encorafenib + binimetinib is an alternative)",
+                 "V600E NSCLC (encorafenib + binimetinib per PHAROS is the "
+                 "alternative)",
         enrollment_note="V600E only — non-V600 BRAF is not an indication",
         keywords=("dabrafenib", "trametinib", "BRAF", "V600E"),
+    ),
+    Trial(
+        "PHAROS", "PHAROS (encorafenib + binimetinib, BRAF V600E)",
+        "NCT03915951", "first_line",
+        _s(*_STAGE_IV), driver_required="BRAF",
+        driver_class_required="braf_v600e",
+        regimen_ids=("encorafenib_binimetinib_first_line",),
+        results=("Treatment-naive ORR 75% (95% CI 62–85; n=59)",
+                 "Previously treated ORR 46% (95% CI 30–63; n=39), median "
+                 "duration of response 16.7 months"),
+        source="J Clin Oncol 2023;41:3700 (Riely et al.)",
+        approval="FDA 2023-10 encorafenib + binimetinib, metastatic BRAF "
+                 "V600E NSCLC",
+        enrollment_note="Single-arm phase 2; prior BRAF or MEK inhibitor "
+                        "not allowed",
+        caveats=("Binimetinib: LVEF before starting (safety not established "
+                 "below 50%); encorafenib: dose-dependent QTc prolongation",),
+        keywords=("encorafenib", "binimetinib", "BRAF", "V600E", "PHAROS"),
     ),
     Trial(
         "NAVIGATE", "NAVIGATE/pooled (larotrectinib, NTRK fusion)",
@@ -458,6 +718,58 @@ TRIALS: tuple[Trial, ...] = (
         keywords=("larotrectinib", "NTRK", "fusion", "entrectinib"),
     ),
     Trial(
+        "BEAMION_LUNG1", "Beamion LUNG-1 (zongertinib, HER2 TKD mutation)",
+        "NCT04886804", "first_line",
+        _s(*_STAGE_IV), histology="nonsquamous", driver_required="ERBB2",
+        driver_class_required="erbb2_tkd",
+        regimen_ids=("zongertinib_her2_tkd",),
+        results=("Treatment-naive TKD-mutant (n=72): ORR 76% (95% CI "
+                 "65–85); 64% of responders ≥6 months, 44% ≥12 months",
+                 "Previously treated with chemotherapy, no HER2-directed "
+                 "therapy (n=71): ORR 75%",
+                 "Non-TKD HER2 mutations (n=20): ORR 30% — outside the "
+                 "label"),
+        source="NEJM 2025;392:2321 (Heymach et al., previously treated); "
+               "NEJM 2026 (doi:10.1056/NEJMoa2516969, first line); FDA "
+               "approval summaries 2025-08 and 2026-02",
+        approval="FDA 2025-08 (previously treated) and 2026-02 (first "
+                 "line) accelerated: zongertinib, unresectable or "
+                 "metastatic non-squamous NSCLC with HER2 TKD-activating "
+                 "mutations",
+        enrollment_note="HER2 tyrosine-kinase-domain mutations "
+                        "(e.g. exon 20 insertions); HER2 amplification or "
+                        "overexpression is a different population",
+        caveats=("Accelerated approval on response rate — confirmatory "
+                 "trial pending",
+                 "Label warnings: hepatotoxicity, left-ventricular "
+                 "dysfunction (LVEF before starting), ILD/pneumonitis"),
+        keywords=("zongertinib", "HER2", "ERBB2", "TKD", "Beamion"),
+    ),
+    Trial(
+        "SOHO01", "SOHO-01 (sevabertinib, HER2 TKD mutation)",
+        "NCT05099172", "first_line",
+        _s(*_STAGE_IV), histology="nonsquamous", driver_required="ERBB2",
+        driver_class_required="erbb2_tkd",
+        regimen_ids=("sevabertinib_her2_tkd",),
+        results=("Treatment-naive (n=69): ORR 75% (95% CI 64–85); 73% of "
+                 "responders ≥6 months, 38% ≥12 months",
+                 "Previously treated, no prior HER2-directed therapy (cohort "
+                 "D, n=81): ORR 64% (95% CI 53–75), median PFS 8.3 months"),
+        source="NEJM 2025 (Le et al.; doi:10.1056/NEJMoa2511065); FDA "
+               "approval summaries 2025-11 and 2026-09",
+        approval="FDA 2025-11 (previously treated) and 2026-09 (first "
+                 "line) accelerated: sevabertinib, locally advanced or "
+                 "metastatic non-squamous NSCLC with HER2 TKD-activating "
+                 "mutations",
+        enrollment_note="HER2 tyrosine-kinase-domain mutations; phase 1/2, "
+                        "single-arm cohorts",
+        caveats=("Accelerated approval on response rate — confirmatory "
+                 "trial pending",
+                 "Label warnings: diarrhea, hepatotoxicity, ILD/pneumonitis, "
+                 "left-ventricular dysfunction"),
+        keywords=("sevabertinib", "HER2", "ERBB2", "TKD", "SOHO"),
+    ),
+    Trial(
         "DESTINY_LUNG02", "DESTINY-Lung02 (T-DXd, HER2-mutant, later line)",
         "NCT04644237", "subsequent",
         _s(*_STAGE_IV), driver_required="ERBB2",
@@ -467,8 +779,11 @@ TRIALS: tuple[Trial, ...] = (
         source="JCO 2023;41:4852",
         approval="FDA 2022-08 accelerated: trastuzumab deruxtecan, "
                  "previously treated HER2-mutant NSCLC",
-        enrollment_note="LATER LINE — first-line for HER2-mutant disease "
-                        "remains chemo±IO; do not front-load T-DXd",
+        enrollment_note="LATER LINE — do not front-load T-DXd; first line "
+                        "for HER2-mutant disease is chemo±IO, with a HER2 "
+                        "TKI (zongertinib/sevabertinib, accelerated "
+                        "approvals) for non-squamous TKD-activating "
+                        "mutations",
         keywords=("trastuzumab deruxtecan", "T-DXd", "HER2", "ERBB2"),
     ),
     Trial(
@@ -490,10 +805,11 @@ TRIALS: tuple[Trial, ...] = (
         _s(*_STAGE_IV), driver_required="EGFR",
         driver_class_required="egfr_ex19del_l858r",
         regimen_ids=("amivantamab_chemo_subsequent",),
-        results=("PFS HR 0.48 (95% CI 0.36–0.64) vs chemotherapy alone "
-                 "after osimertinib progression",),
+        results=("PFS 6.3 vs 4.2 months, HR 0.48 (95% CI 0.36–0.64) vs "
+                 "chemotherapy alone after osimertinib progression; OS not "
+                 "significant at the second interim analysis",),
         source="Ann Oncol 2024;35:77",
-        approval="FDA 2024-03 amivantamab + carboplatin-pemetrexed, EGFR "
+        approval="FDA 2024-09 amivantamab + carboplatin-pemetrexed, EGFR "
                  "ex19del/L858R after progression on an EGFR TKI",
         enrollment_note="AFTER osimertinib progression — not first line; "
                         "watch infusion reactions and VTE",
@@ -506,9 +822,10 @@ TRIALS: tuple[Trial, ...] = (
         _s(*_STAGE_IV), histology="nonsquamous", driver_required="EGFR",
         regimen_ids=("platinum_pemetrexed_post_tki",),
         results=("NEGATIVE for the IO question: adding pembrolizumab to "
-                 "chemotherapy post-TKI did not significantly improve OS "
-                 "(HR 0.84, not significant)",),
-        source="JCO 2024;42:1222",
+                 "chemotherapy post-TKI did not significantly improve PFS "
+                 "or OS (final OS 15.9 vs 14.7 months, HR 0.84, 95% CI "
+                 "0.69–1.02; prespecified boundary not met)",),
+        source="J Clin Oncol 2024 (Yang et al.; doi:10.1200/JCO.23.02747)",
         approval="Cited as the evidence that chemo-IO is NOT the default "
                  "after EGFR-TKI progression; the chemo backbone itself "
                  "is the standard arm",
@@ -592,7 +909,8 @@ TRIALS: tuple[Trial, ...] = (
         regimen_ids=("tepotinib_osimertinib_met_amp",),
         results=("Phase 2: ORR ~50% (FISH MET-amplified cohort) after "
                  "first-line osimertinib progression",),
-        source="Lancet Oncol 2024;25:989",
+        source="Lancet Oncol 2024;25:989 (Wu et al.; "
+               "doi:10.1016/S1470-2045(24)00270-5)",
         approval="NOT approved — phase 2 evidence; guideline-listed "
                  "option with MDT/trial framing",
         enrollment_note="MET amplification on the progression biopsy "
@@ -636,9 +954,42 @@ TRIALS: tuple[Trial, ...] = (
         approval="FDA 2021-05 accelerated: sotorasib, KRAS G12C NSCLC "
                  "after at least one prior systemic therapy",
         enrollment_note="LATER LINE — first-line for KRAS G12C remains "
-                        "chemo±IO; adagrasib (KRYSTAL-1) is the "
+                        "chemo±IO; adagrasib (KRYSTAL-1/KRYSTAL-12) is the "
                         "alternative",
         keywords=("sotorasib", "KRAS", "G12C", "CodeBreaK"),
+    ),
+    Trial(
+        "KRYSTAL1", "KRYSTAL-1 (adagrasib, KRAS G12C, later line)",
+        "NCT03785249", "subsequent",
+        _s(*_STAGE_IV), driver_required="KRAS",
+        driver_class_required="kras_g12c",
+        regimen_ids=("adagrasib_subsequent_line",),
+        results=("ORR 42.9% (48/112), median duration of response 8.5 "
+                 "months, median PFS 6.5 months, median OS 12.6 months "
+                 "after platinum chemotherapy and a PD-(L)1 inhibitor",),
+        source="NEJM 2022;387:120 (Jänne et al.)",
+        approval="FDA 2022-12 accelerated: adagrasib, KRAS G12C NSCLC after "
+                 "at least one prior systemic therapy",
+        enrollment_note="LATER LINE — first line for KRAS G12C remains "
+                        "chemo±IO",
+        caveats=("Label: QTc prolongation; avoid strong CYP3A4 inhibitors "
+                 "until steady state",),
+        keywords=("adagrasib", "KRAS", "G12C", "KRYSTAL"),
+    ),
+    Trial(
+        "KRYSTAL12", "KRYSTAL-12 (adagrasib vs docetaxel, KRAS G12C)",
+        "NCT04685135", "subsequent",
+        _s(*_STAGE_IV), driver_required="KRAS",
+        driver_class_required="kras_g12c",
+        regimen_ids=("adagrasib_subsequent_line",),
+        results=("PFS 5.5 vs 3.8 months (HR 0.58, 95% CI 0.45–0.76) and ORR "
+                 "32% vs 9% over docetaxel after platinum chemotherapy and "
+                 "a PD-(L)1 inhibitor",),
+        source="Lancet 2025;406:615 (Barlesi et al.)",
+        approval="Phase 3 confirmatory trial for the 2022 accelerated "
+                 "approval",
+        enrollment_note="Previously treated KRAS G12C; randomized 2:1",
+        keywords=("adagrasib", "KRAS", "G12C", "KRYSTAL-12", "docetaxel"),
     ),
 )
 
@@ -666,6 +1017,11 @@ _ALIASES = {
     "PACIFIC-2": "PACIFIC2", "PACIFIC 2": "PACIFIC2",
     "RTOG 0617": "RTOG0617", "RTOG-0617": "RTOG0617",
     "FLAURA 2": "FLAURA2", "FLAURA-2": "FLAURA2",
+    "TRUST I": "TRUST", "TRUST II": "TRUST", "TRUST 1": "TRUST",
+    "TRUST 2": "TRUST", "NCT04395677": "TRUST",
+    "STARTRK": "STARTRK2", "STARTRK 1": "STARTRK2", "ALKA 372 001": "STARTRK2",
+    "NCT02097810": "STARTRK2",
+    "SOHO 1": "SOHO01",
 }
 
 
@@ -694,7 +1050,7 @@ def resolve_trial_id(reference: str) -> Optional[str]:
     if not compact:
         return None
     for tid in TRIALS_BY_ID:
-        if compact == tid:
+        if compact == _compact(tid):  # "DESTINY-Lung02" → DESTINY_LUNG02
             return tid
     for alias, tid in _ALIASES.items():
         if compact == _compact(alias):
@@ -743,6 +1099,7 @@ _CLASS_CHECKS: dict = {
     "kras_g12c": ("kras", frozenset({"g12c"}), frozenset()),
     "egfr_t790m": ("egfr", frozenset({"t790m"}),
                    frozenset({"exon20ins", "c797s"})),
+    "erbb2_tkd": ("erbb2", frozenset({"tkd"}), frozenset()),
 }
 
 #: trial histology restriction → subject histologies that contradict it.
@@ -799,10 +1156,11 @@ def population_mismatches(trial: dict, subject: dict, *,
                     f"is not the {trial['driver_class_required']} "
                     f"enrollment class")
         elif trial.get("driver_required"):
-            gene = str(trial["driver_required"]).lower()
-            if gene not in signature:
-                reasons.append(
-                    f"population is not {trial['driver_required']}-positive")
+            genes = [g.strip().lower()
+                     for g in str(trial["driver_required"]).split("|")]
+            if not any(gene in signature for gene in genes):
+                shown = str(trial["driver_required"]).replace("|", "/")
+                reasons.append(f"population is not {shown}-positive")
         if trial.get("egfr_alk_excluded") \
                 and ({"egfr", "alk"} & set(signature)):
             reasons.append("the trial excluded EGFR/ALK-altered disease")

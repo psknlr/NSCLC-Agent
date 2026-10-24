@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nsclc-agent"
-version = "1.5.0"
+version = "1.7.0"
 description = "Evidence-governed, stage-verified NSCLC agent harness: deterministic AJCC-9 staging + a control plane the model cannot bypass (educational use only)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,6 +14,7 @@ dependencies = []
 
 [project.optional-dependencies]
 litellm = ["litellm>=1.40"]
+anthropic = ["anthropic>=2.0,<3"]
 dev = ["pytest>=7.0"]
 
 [project.scripts]
